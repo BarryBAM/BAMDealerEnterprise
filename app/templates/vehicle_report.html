@@ -1,0 +1,44 @@
+
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>{{ vehicle.stock_no }} Vehicle Report</title>
+<style>
+body{font-family:Arial,sans-serif;color:#1f2937;margin:30px}h1,h2{color:#0b1f3a}
+header{display:flex;justify-content:space-between;border-bottom:3px solid #0b1f3a;padding-bottom:12px}
+.brand strong{font-size:24px}.brand span{display:block;color:#64748b}
+table{width:100%;border-collapse:collapse;margin:15px 0}th,td{border:1px solid #cbd5e1;padding:8px;text-align:left}
+th{background:#e2e8f0}.summary{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+.box{border:1px solid #cbd5e1;padding:12px}.print{float:right}
+@media print{.print{display:none}body{margin:10mm}}
+</style>
+</head>
+<body>
+<button class="print" onclick="window.print()">Print</button>
+<header><div class="brand"><strong>BAM Motor Group</strong><span>Buy • Sell • Trade</span></div><div>{{ vehicle.stock_no }}</div></header>
+<h1>{{ vehicle.year or '' }} {{ vehicle.make }} {{ vehicle.model }} {{ vehicle.variant or '' }}</h1>
+<table>
+<tr><th>Status</th><td>{{ vehicle.status }}</td><th>VIN</th><td>{{ vehicle.vin or '' }}</td></tr>
+<tr><th>Registration</th><td>{{ vehicle.registration or '' }}</td><th>Rego Expiry</th><td>{{ vehicle.rego_expiry or '' }}</td></tr>
+<tr><th>PPSR</th><td>{{ vehicle.ppsr_number or '' }}</td><th>Roadworthy</th><td>{{ vehicle.roadworthy_status or '' }}</td></tr>
+<tr><th>Odometer</th><td>{{ vehicle.odometer_km or '' }}</td><th>Service Due</th><td>{{ vehicle.service_due_date or '' }}</td></tr>
+</table>
+<div class="summary">
+<div class="box"><b>Purchase</b><br>{{ vehicle.purchase_price_inc_gst|money }}</div>
+<div class="box"><b>Expenses</b><br>{{ expense_total|money }}</div>
+<div class="box"><b>Job Cards</b><br>{{ job_total|money }}</div>
+<div class="box"><b>Profit/Loss</b><br>{{ profit|money }}</div>
+</div>
+<h2>Expenses</h2>
+<table><tr><th>Date</th><th>Category</th><th>Description</th><th>Paid By</th><th>Cost</th></tr>
+{% for e in expenses %}<tr><td>{{ e.expense_date or '' }}</td><td>{{ e.category or '' }}</td><td>{{ e.description }}</td><td>{{ e.paid_by or '' }}</td><td>{{ e.cost_inc_gst|money }}</td></tr>
+{% else %}<tr><td colspan="5">No expenses.</td></tr>{% endfor %}</table>
+<h2>Job Cards</h2>
+<table><tr><th>Date</th><th>Description</th><th>Status</th><th>Paid By</th><th>Cost</th></tr>
+{% for j in jobs %}<tr><td>{{ j.job_date or '' }}</td><td>{{ j.description }}</td><td>{{ j.status }}</td><td>{{ j.paid_by or '' }}</td><td>{% if j.actual_cost_inc_gst>0 %}{{ j.actual_cost_inc_gst|money }}{% else %}{{ j.estimated_cost|money }}{% endif %}</td></tr>
+{% else %}<tr><td colspan="5">No job cards.</td></tr>{% endfor %}</table>
+{% if vehicle.service_history %}<h2>Service History</h2><p>{{ vehicle.service_history }}</p>{% endif %}
+{% if vehicle.notes %}<h2>Notes</h2><p>{{ vehicle.notes }}</p>{% endif %}
+</body>
+</html>

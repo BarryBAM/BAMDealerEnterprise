@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}Vehicle Inventory | BAM Motor Group{% endblock %}
+{% block content %}
+<div class="page-head inventory-head">
+  <div><span class="eyebrow">Stock Management</span><h1>Stock Inventory</h1><p>Cars, caravans, boats, motorcycles and trailers in one place.</p></div>
+  <a class="button" href="{{ url_for('vehicle_new') }}">＋ Add Stock</a>
+</div>
+<form class="search search-panel" method="get">
+  <input name="q" value="{{ q }}" placeholder="Search stock, VIN/HIN, registration, make or model"><select name="asset_type"><option value="">All asset types</option>{% for t in ["Car","Caravan","Boat","Motorcycle","Trailer","Other"] %}<option value="{{ t }}" {% if asset_type==t %}selected{% endif %}>{{ t }}</option>{% endfor %}</select>
+  <button>Search Inventory</button>
+  {% if q or asset_type %}<a class="button secondary" href="{{ url_for('vehicle_list') }}">Clear</a>{% endif %}
+</form>
+<div class="inventory-count">{{ vehicles|length }} stock item{% if vehicles|length != 1 %}s{% endif %} shown</div>
+<div class="vehicle-card-grid">
+{% for v in vehicles %}
+<article class="vehicle-stock-card">
+  <a class="vehicle-card-photo" href="{{ url_for('vehicle_detail', vehicle_id=v.id) }}">
+    {% if v.thumbnail %}<img src="{{ url_for('uploaded_file', filename=v.thumbnail) }}" alt="{{ v.make }} {{ v.model }}">
+    {% else %}<div class="photo-placeholder"><span>{% if (v.asset_type or "Car")=="Boat" %}🚤{% elif (v.asset_type or "Car")=="Caravan" %}🏕️{% elif (v.asset_type or "Car")=="Motorcycle" %}🏍️{% else %}🚗{% endif %}</span><small>No photo</small></div>{% endif %}
+    <span class="status-ribbon status-{{ (v.status or '')|lower|replace(' ','-') }}">{{ v.status }}</span>
+  </a>
+  <div class="vehicle-card-body">
+    <div class="stock-row"><strong>{{ v.stock_no }}</strong><span>{{ v.asset_type or "Car" }} · {{ v.year or "" }}</span></div>
+    <h2>{{ v.make }} {{ v.model }}</h2>
+    <p>{{ v.variant or 'Standard specification' }}</p>
+    <dl class="vehicle-facts">
+      <div><dt>Registration</dt><dd>{{ v.registration or '—' }}</dd></div>
+      <div><dt>{% if (v.asset_type or "Car")=="Boat" %}Engine Hours{% elif (v.asset_type or "Car")=="Caravan" %}Length{% else %}Odometer{% endif %}</dt><dd>{% if (v.asset_type or "Car")=="Boat" %}{{ v.engine_hours or "—" }}{% elif (v.asset_type or "Car")=="Caravan" %}{{ v.length_m or "—" }}{% if v.length_m %} m{% endif %}{% elif v.odometer_km %}{{ '{:,}'.format(v.odometer_km) }} km{% else %}—{% endif %}</dd></div>
+      <div><dt>Purchase</dt><dd>{{ v.purchase_price_inc_gst|money }}</dd></div>
+      <div><dt>Asking</dt><dd>{{ (v.asking_price or 0)|money }}</dd></div>
+    </dl>
+    <a class="button vehicle-open" href="{{ url_for('vehicle_detail', vehicle_id=v.id) }}">Open Stock Item</a>
+  </div>
+</article>
+{% else %}<div class="empty-state"><strong>No matching vehicles</strong><p>Try a different search or add a new vehicle.</p></div>{% endfor %}
+</div>
+{% endblock %}

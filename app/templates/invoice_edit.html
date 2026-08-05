@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}Edit {{ sale.invoice_number }} | BAM{% endblock %}
+{% block content %}
+<div class="page-heading"><div><p class="eyebrow">Invoice Centre</p><h1>Edit Invoice {{ sale.invoice_number }}</h1><p>{{ vehicle.stock_no }} — {{ vehicle.year or '' }} {{ vehicle.make }} {{ vehicle.model }}</p></div><div class="page-actions"><a class="button secondary" href="{{ url_for('sale_invoice', vehicle_id=vehicle.id) }}" target="_blank">View / Print</a><a class="button" href="{{ url_for('deal_file', vehicle_id=vehicle.id) }}">Deal File</a><a class="button secondary" href="{{ url_for('invoice_centre') }}">All Invoices</a></div></div>
+<section class="panel">
+<form method="post" class="sale-grid">
+<label>Invoice Status<select name="invoice_status">{% for item in ['Draft','Sent','Paid','Cancelled'] %}<option {% if (sale.invoice_status or 'Draft')==item %}selected{% endif %}>{{ item }}</option>{% endfor %}</select></label>
+<label>Invoice Date<input type="date" name="sale_date" value="{{ sale.sale_date or '' }}"></label>
+<label>Buyer Name<input name="buyer_name" value="{{ sale.buyer_name or '' }}"></label>
+<label>Buyer Phone<input name="buyer_phone" value="{{ sale.buyer_phone or '' }}"></label>
+<label>Buyer Email<input type="email" name="buyer_email" value="{{ sale.buyer_email or '' }}"></label>
+<label class="wide">Buyer Address<textarea name="buyer_address">{{ sale.buyer_address or '' }}</textarea></label>
+<label>Sale Price Inc GST<input type="number" step="0.01" name="sale_price_inc_gst" value="{{ sale.sale_price_inc_gst or 0 }}"></label>
+<label>Deposit Amount<input type="number" step="0.01" name="deposit_amount" value="{{ sale.deposit_amount or 0 }}"></label>
+<label>Deposit Date<input type="date" name="deposit_date" value="{{ sale.deposit_date or '' }}"></label>
+<label>Payment Method<select name="payment_method"><option value="">Choose</option>{% for item in ['Cash','EFT','Bank Transfer','Finance','Other'] %}<option {% if sale.payment_method==item %}selected{% endif %}>{{ item }}</option>{% endfor %}</select></label>
+<label>Advertising Cost<input type="number" step="0.01" name="advertising_cost" value="{{ sale.advertising_cost or 0 }}"></label>
+<label>Transfer Cost<input type="number" step="0.01" name="transfer_cost" value="{{ sale.transfer_cost or 0 }}"></label>
+<label>Trade-in Description<input name="trade_in_description" value="{{ sale.trade_in_description or '' }}"></label>
+<label>Trade-in Value<input type="number" step="0.01" name="trade_in_value" value="{{ sale.trade_in_value or 0 }}"></label>
+<label>Warranty Type<input name="warranty_type" value="{{ sale.warranty_type or '' }}"></label>
+<label>Warranty Expiry<input type="date" name="warranty_expiry" value="{{ sale.warranty_expiry or '' }}"></label>
+<label class="wide">Invoice Notes<textarea name="notes" rows="4">{{ sale.notes or '' }}</textarea></label>
+<label class="wide">Reason for Change<input name="change_note" placeholder="Example: Corrected buyer address or sale price" required></label>
+<div class="wide form-actions"><button name="save" value="1">Save Changes</button><button name="save_continue" value="1" class="secondary">Save & Continue Editing</button><a class="button secondary" href="{{ url_for('vehicle_detail', vehicle_id=vehicle.id) }}">Cancel</a></div>
+</form>
+</section>
+<section class="panel"><h2>Invoice Edit History</h2><table><tr><th>Date</th><th>Changed By</th><th>Reason</th></tr>{% for h in history %}<tr><td>{{ h.changed_at }}</td><td>{{ h.changed_by or 'User' }}</td><td>{{ h.change_note or 'Invoice updated' }}</td></tr>{% else %}<tr><td colspan="3">No invoice edits recorded yet.</td></tr>{% endfor %}</table></section>
+{% endblock %}

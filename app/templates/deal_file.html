@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}Deal File {{ sale.invoice_number }} | BAM{% endblock %}
+{% block content %}
+<div class="page-heading">
+  <div><p class="eyebrow">Sales & Delivery</p><h1>Deal File {{ sale.invoice_number }}</h1><p>{{ vehicle.stock_no }} — {{ vehicle.year or '' }} {{ vehicle.make }} {{ vehicle.model }}</p></div>
+  <div class="page-actions"><a class="button" href="{{ url_for('sale_invoice_edit', vehicle_id=vehicle.id) }}">Edit Invoice</a><a class="button secondary" href="{{ url_for('sale_invoice', vehicle_id=vehicle.id) }}" target="_blank">Print Invoice</a><a class="button secondary" href="{{ url_for('vehicle_detail', vehicle_id=vehicle.id) }}">Asset Workspace</a></div>
+</div>
+
+<div class="kpi-grid">
+  <div class="kpi-card"><span>Sale Total</span><strong>{{ sale.sale_price_inc_gst|money }}</strong><small>Including GST</small></div>
+  <div class="kpi-card"><span>Deposit</span><strong>{{ sale.deposit_amount|money }}</strong><small>{{ sale.deposit_date or 'No date recorded' }}</small></div>
+  <div class="kpi-card"><span>Balance Due</span><strong>{{ balance_due|money }}</strong><small>{{ sale.payment_method or 'Payment method not set' }}</small></div>
+  <div class="kpi-card"><span>Invoice Status</span><strong>{{ sale.invoice_status or 'Draft' }}</strong><small>{{ sale.sale_date or '' }}</small></div>
+</div>
+
+<div class="workspace-two-column">
+<section class="panel"><h2>Buyer & Deal Details</h2>
+<table><tr><th>Buyer</th><td>{{ sale.buyer_name or '—' }}</td></tr><tr><th>Phone</th><td>{{ sale.buyer_phone or '—' }}</td></tr><tr><th>Email</th><td>{{ sale.buyer_email or '—' }}</td></tr><tr><th>Address</th><td>{{ sale.buyer_address or '—' }}</td></tr><tr><th>Trade-in</th><td>{{ sale.trade_in_description or 'None' }}{% if sale.trade_in_value %} — {{ sale.trade_in_value|money }}{% endif %}</td></tr><tr><th>Warranty</th><td>{{ sale.warranty_type or 'Not recorded' }}{% if sale.warranty_expiry %} to {{ sale.warranty_expiry }}{% endif %}</td></tr></table>
+</section>
+<section class="panel"><h2>Delivery Checklist</h2>
+<form method="post" class="stack">
+<label>Delivery Status<select name="delivery_status">{% for item in ['Preparing','Ready for Delivery','Delivered','On Hold','Cancelled'] %}<option {% if (sale.delivery_status or 'Preparing')==item %}selected{% endif %}>{{ item }}</option>{% endfor %}</select></label>
+<label>Delivery Date<input type="date" name="delivery_date" value="{{ sale.delivery_date or '' }}"></label>
+<div class="check-grid"><label><input type="checkbox" name="keys_handed_over" {% if sale.keys_handed_over %}checked{% endif %}> Keys handed over</label><label><input type="checkbox" name="registration_transferred" {% if sale.registration_transferred %}checked{% endif %}> Registration transferred</label><label><input type="checkbox" name="customer_signature_received" {% if sale.customer_signature_received %}checked{% endif %}> Customer signature received</label><label><input type="checkbox" name="finance_documents_complete" {% if sale.finance_documents_complete %}checked{% endif %}> Finance documents complete</label><label><input type="checkbox" name="warranty_documents_complete" {% if sale.warranty_documents_complete %}checked{% endif %}> Warranty documents complete</label></div>
+<label>Deal Notes<textarea name="deal_notes" rows="5">{{ sale.deal_notes or '' }}</textarea></label><button>Save Deal File</button>
+</form></section>
+</div>
+
+<div class="workspace-two-column">
+<section class="panel"><h2>Documents</h2><table><tr><th>Type</th><th>Description</th><th>File</th></tr>{% for d in documents %}<tr><td>{{ d.document_type }}</td><td>{{ d.description or '' }}</td><td><a href="{{ url_for('uploaded_file', filename=d.filename) }}" target="_blank">Open</a></td></tr>{% else %}<tr><td colspan="3">No deal documents uploaded yet. Upload documents from the Asset Workspace.</td></tr>{% endfor %}</table></section>
+<section class="panel"><h2>Invoice Edit History</h2><table><tr><th>Date</th><th>User</th><th>Reason</th></tr>{% for h in history %}<tr><td>{{ h.changed_at }}</td><td>{{ h.changed_by or 'User' }}</td><td>{{ h.change_note or 'Invoice updated' }}</td></tr>{% else %}<tr><td colspan="3">No invoice edits recorded.</td></tr>{% endfor %}</table></section>
+</div>
+
+<div class="workspace-two-column">
+<section class="panel"><h2>Deal Costs</h2><p><strong>Advertising:</strong> {{ sale.advertising_cost|money }} &nbsp; <strong>Transfer:</strong> {{ sale.transfer_cost|money }}</p><table><tr><th>Date</th><th>Expense</th><th>Cost</th></tr>{% for e in expenses %}<tr><td>{{ e.expense_date or '' }}</td><td>{{ e.description }}</td><td>{{ e.cost_inc_gst|money }}</td></tr>{% else %}<tr><td colspan="3">No expenses recorded.</td></tr>{% endfor %}</table></section>
+<section class="panel"><h2>Workshop Summary</h2><table><tr><th>Job</th><th>Status</th><th>Cost</th></tr>{% for j in jobs %}<tr><td>{{ j.description }}</td><td>{{ j.status }}</td><td>{{ (j.actual_cost_inc_gst if j.actual_cost_inc_gst else j.estimated_cost)|money }}</td></tr>{% else %}<tr><td colspan="3">No workshop jobs recorded.</td></tr>{% endfor %}</table></section>
+</div>
+{% endblock %}

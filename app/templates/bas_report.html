@@ -1,0 +1,22 @@
+
+{% extends "base.html" %}
+{% block title %}BAS Summary | BAM Motor Group{% endblock %}
+{% block content %}
+<div class="page-head"><div><h1>GST / BAS Summary</h1><p>Management report only — confirm BAS treatment with your accountant.</p></div></div>
+<form method="get" class="grid-form compact-form">
+<label>Start Date<input type="date" name="start" value="{{ start }}"></label>
+<label>End Date<input type="date" name="end" value="{{ end }}"></label>
+<button type="submit">Run Report</button>
+</form>
+<div class="cards">
+<div class="card"><span>Sales Inc GST</span><strong>{{ sales_total|money }}</strong></div>
+<div class="card"><span>GST Collected</span><strong>{{ gst_collected|money }}</strong></div>
+<div class="card"><span>Vehicle Purchases</span><strong>{{ purchase_total|money }}</strong></div>
+<div class="card"><span>Expenses</span><strong>{{ expense_total|money }}</strong></div>
+<div class="card"><span>Job Cards</span><strong>{{ job_total|money }}</strong></div>
+<div class="card"><span>Services</span><strong>{{ service_total|money }}</strong></div>
+<div class="card"><span>Parts Used</span><strong>{{ parts_total|money }}</strong></div>
+<div class="card"><span>Total GST Paid</span><strong>{{ gst_paid|money }}</strong></div>
+<div class="card"><span>Net GST Position</span><strong>{{ net_gst|money }}</strong></div>
+</div>
+{% endblock %}

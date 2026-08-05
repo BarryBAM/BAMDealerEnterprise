@@ -1,0 +1,22 @@
+
+{% extends "base.html" %}
+{% block title %}Import Excel | BAM Motor Group{% endblock %}
+{% block content %}
+<h1>Import Vehicles from Excel</h1>
+<div class="login-card" style="max-width:700px;margin:20px 0">
+<p>Choose your BAM Motor Group Excel workbook. The importer reads the <strong>Vehicles</strong> or <strong>Vehicle Inventory</strong> sheet.</p>
+<form method="post" enctype="multipart/form-data">
+<label>Excel Workbook (.xlsx)<input type="file" name="excel_file" accept=".xlsx" required></label>
+<button type="submit">Import Vehicles</button>
+</form>
+<p class="muted">Existing stock numbers and duplicate VINs are skipped. Blank stock numbers receive the next permanent BAM number automatically.</p>
+{% if result %}
+<h2>Import Result</h2>
+<p><strong>Imported:</strong> {{ result.imported }}<br>
+<strong>Skipped:</strong> {{ result.skipped }}</p>
+{% if result.warnings %}
+<ul>{% for warning in result.warnings %}<li>{{ warning }}</li>{% endfor %}</ul>
+{% endif %}
+{% endif %}
+</div>
+{% endblock %}

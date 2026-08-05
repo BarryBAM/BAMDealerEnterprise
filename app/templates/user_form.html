@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Edit User' if user else 'Add User' }} | BAM{% endblock %}
+{% block content %}
+<div class="page-head"><div><p class="eyebrow">Security</p><h1>{{ 'Edit User' if user else 'Add User' }}</h1></div><a class="button" href="{{ url_for('users_page') }}">Cancel</a></div>
+<form method="post" class="panel grid-form">
+<label>Display Name<input name="display_name" value="{{ user.display_name if user else '' }}" required></label>
+<label>Username<input name="username" value="{{ user.username if user else '' }}" autocomplete="off" required></label>
+<label>Role<select name="role">{% for role in ['owner','manager','sales','workshop','staff'] %}<option value="{{ role }}" {% if user and user.role==role %}selected{% endif %}>{{ role|title }}</option>{% endfor %}</select></label>
+<label>{{ 'New Password (leave blank to keep current)' if user else 'Password' }}<input type="password" name="password" minlength="8" {% if not user %}required{% endif %}><small>At least 8 characters.</small></label>
+{% if user %}<label><span>Account Active</span><input type="checkbox" name="is_active" value="1" {% if user.is_active %}checked{% endif %}></label>{% endif %}
+<div class="wide"><button>Save User</button></div></form>
+{% endblock %}

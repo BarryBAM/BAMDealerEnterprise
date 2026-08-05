@@ -1,0 +1,38 @@
+
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>{{ sale.invoice_number }} | BAM Motor Group</title>
+<style>
+body{font-family:Arial,sans-serif;margin:35px;color:#1f2937}.top{display:flex;justify-content:space-between;border-bottom:4px solid #0b1f3a;padding-bottom:15px}
+h1,h2{color:#0b1f3a}.brand strong{font-size:28px}.brand span{display:block;color:#64748b}
+table{width:100%;border-collapse:collapse;margin-top:20px}th,td{border:1px solid #cbd5e1;padding:10px;text-align:left}
+th{background:#e2e8f0}.totals{margin-left:auto;width:360px}.print{float:right}
+@media print{.print{display:none}body{margin:10mm}}
+</style>
+</head>
+<body>
+<div class="print"><a href="{{ url_for('sale_invoice_edit', vehicle_id=vehicle.id) }}" style="margin-right:10px">Edit Invoice</a><button onclick="window.print()">Print Invoice</button></div>
+<div class="top">
+<div class="brand"><strong>BAM Motor Group</strong><span>Buy • Sell • Trade</span></div>
+<div><h2>TAX INVOICE</h2><b>{{ sale.invoice_number }}</b><br>{{ sale.sale_date or '' }}<br><small>Status: {{ sale.invoice_status or 'Draft' }}</small></div>
+</div>
+<h2>Buyer</h2>
+<p><strong>{{ sale.buyer_name or '' }}</strong><br>
+{{ sale.buyer_address or '' }}<br>
+{{ sale.buyer_phone or '' }}{% if sale.buyer_email %}<br>{{ sale.buyer_email }}{% endif %}</p>
+<h2>Vehicle</h2>
+<table>
+<tr><th>Stock</th><th>Vehicle</th><th>VIN</th><th>Registration</th><th>Odometer</th></tr>
+<tr><td>{{ vehicle.stock_no }}</td><td>{{ vehicle.year or '' }} {{ vehicle.make }} {{ vehicle.model }} {{ vehicle.variant or '' }}</td><td>{{ vehicle.vin or '' }}</td><td>{{ vehicle.registration or '' }}</td><td>{{ vehicle.odometer_km or '' }}</td></tr>
+</table>
+<table class="totals">
+<tr><th>Sale Price Ex GST</th><td>{{ sale_ex_gst|money }}</td></tr>
+<tr><th>GST</th><td>{{ sale.sale_gst|money }}</td></tr>
+<tr><th>Total Inc GST</th><td><strong>{{ sale.sale_price_inc_gst|money }}</strong></td></tr>
+</table>
+{% if sale.notes %}<h2>Notes</h2><p>{{ sale.notes }}</p>{% endif %}
+<p style="margin-top:60px">Thank you for choosing BAM Motor Group.</p>
+</body>
+</html>

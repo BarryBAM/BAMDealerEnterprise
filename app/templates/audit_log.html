@@ -1,0 +1,12 @@
+
+{% extends "base.html" %}
+{% block title %}Audit Log | BAM Motor Group{% endblock %}
+{% block content %}
+<h1>Audit Log</h1>
+<table>
+<tr><th>Date</th><th>User</th><th>Action</th><th>Type</th><th>ID</th><th>Details</th></tr>
+{% for r in rows %}
+<tr><td>{{ r.created_at }}</td><td>{{ r.user_name or '' }}</td><td>{{ r.action }}</td><td>{{ r.entity_type or '' }}</td><td>{{ r.entity_id or '' }}</td><td>{{ r.details or '' }}</td></tr>
+{% else %}<tr><td colspan="6">No audit entries yet.</td></tr>{% endfor %}
+</table>
+{% endblock %}

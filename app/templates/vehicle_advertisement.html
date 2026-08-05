@@ -1,0 +1,21 @@
+
+{% extends "base.html" %}
+{% block title %}Vehicle Advertisement | BAM Motor Group{% endblock %}
+{% block content %}
+<div class="page-head">
+<div><h1>Marketplace Advertisement</h1><p>{{ vehicle.stock_no }} — {{ vehicle.year or '' }} {{ vehicle.make }} {{ vehicle.model }}</p></div>
+<a class="button" href="{{ url_for('vehicle_detail', vehicle_id=vehicle.id) }}">Back to Vehicle</a>
+</div>
+<form method="post" class="grid-form">
+<label>Asking Price<input type="number" step="0.01" name="asking_price" value="{{ vehicle.asking_price or 0 }}"></label>
+<label class="wide">Advertisement Title<input name="advertisement_title" value="{{ default_title }}"></label>
+<label class="wide">Advertisement Description<textarea name="advertisement_description" rows="14">{{ default_description }}</textarea></label>
+<button class="wide">Save Advertisement</button>
+</form>
+<h2>Copy-and-Paste Preview</h2>
+<div class="ad-preview">
+<h3>{{ vehicle.advertisement_title or default_title }}</h3>
+<p><strong>Price:</strong> {{ vehicle.asking_price|money }}</p>
+<p style="white-space:pre-wrap">{{ vehicle.advertisement_description or default_description }}</p>
+</div>
+{% endblock %}

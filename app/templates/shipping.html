@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}Shipping Centre | BAM Motor Group{% endblock %}
+{% block content %}
+<div class="page-head inventory-head">
+  <div><span class="eyebrow">Parts Dispatch</span><h1>Shipping Centre</h1><p>Pack, label and track parts sent to customers.</p></div>
+  <div><a class="button" href="{{ url_for('shipping_new') }}">＋ New Shipment</a></div>
+</div>
+<div class="parts-kpis">
+  <article><span>Total Shipments</span><strong>{{ metrics.total or 0 }}</strong><small>All dispatch records</small></article>
+  <article><span>Ready to Pack</span><strong>{{ metrics.ready or 0 }}</strong><small>Waiting for dispatch</small></article>
+  <article><span>Sent</span><strong>{{ metrics.sent or 0 }}</strong><small>With courier</small></article>
+  <article><span>Delivered</span><strong>{{ metrics.delivered or 0 }}</strong><small>Completed deliveries</small></article>
+  <article><span>Freight Margin</span><strong>{{ metrics.freight_margin|money }}</strong><small>Charged less courier cost</small></article>
+</div>
+<section class="panel">
+  <div class="panel-title"><h2>Shipment Register</h2><span>{{ shipments|length }} shown</span></div>
+  <form method="get" class="search search-panel">
+    <input name="q" value="{{ q }}" placeholder="Shipment, customer, tracking or part">
+    <select name="status"><option value="">All statuses</option>{% for item in ['Ready to Pack','Packed','Sent','Delivered','Cancelled'] %}<option {% if status==item %}selected{% endif %}>{{ item }}</option>{% endfor %}</select>
+    <button>Search</button>{% if q or status %}<a class="button secondary" href="{{ url_for('shipping_centre') }}">Clear</a>{% endif %}
+  </form>
+  <div class="table-wrap"><table>
+    <tr><th>Shipment</th><th>Customer</th><th>Part</th><th>Courier</th><th>Tracking</th><th>Status</th><th>Created</th><th></th></tr>
+    {% for sh in shipments %}<tr>
+      <td><strong>{{ sh.shipment_number }}</strong></td>
+      <td>{{ sh.customer_name }}<br><small>{{ sh.suburb or '' }} {{ sh.state or '' }}</small></td>
+      <td>{{ sh.part_number or '—' }}<br><small>{{ sh.part_name or 'General shipment' }} × {{ sh.quantity }}</small></td>
+      <td>{{ sh.courier or 'Not selected' }}</td><td>{{ sh.tracking_number or '—' }}</td>
+      <td><span class="status-pill">{{ sh.status }}</span></td><td>{{ sh.date_created[:10] if sh.date_created else '' }}</td>
+      <td><a class="button secondary" href="{{ url_for('shipping_detail', shipment_id=sh.id) }}">Open</a></td>
+    </tr>{% else %}<tr><td colspan="8">No shipments yet.</td></tr>{% endfor %}
+  </table></div>
+</section>
+{% endblock %}

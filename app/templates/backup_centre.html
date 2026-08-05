@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Backup & Restore | BAM{% endblock %}
+{% block content %}
+<div class="page-head"><div><p class="eyebrow">Data Safety</p><h1>Backup & Restore</h1><p>Create a complete ZIP containing your database, photos, documents and reports.</p></div></div>
+<div class="kpi-grid">
+  <div class="kpi-card"><span>Saved Backups</span><strong>{{ backups|length }}</strong><small>Stored in the BAM backups folder</small></div>
+  <div class="kpi-card"><span>Current Version</span><strong>v{{ app_version }}</strong><small>{{ app_name }}</small></div>
+</div>
+<div class="workspace-two-column">
+<section class="panel"><h2>Create a Full Backup</h2><p>Use this before installing an update or making major changes.</p><form method="post" action="{{ url_for('backup_create') }}"><button>Create & Download Backup</button></form></section>
+{% if session.get('role') == 'owner' %}<section class="panel"><h2>Import a Backup</h2><p>Upload a full BAM ZIP backup so it can be restored.</p><form method="post" enctype="multipart/form-data" action="{{ url_for('backup_upload') }}" class="stack"><input type="file" name="backup_file" accept=".zip" required><button>Upload Backup</button></form></section>{% endif %}
+</div>
+<section class="panel"><h2>Available Backups</h2><div class="table-wrap"><table><tr><th>Backup</th><th>Created</th><th>Size</th><th>Actions</th></tr>
+{% for b in backups %}<tr><td><strong>{{ b.name }}</strong></td><td>{{ b.modified.strftime('%d %b %Y %I:%M %p') }}</td><td>{{ (b.size / 1048576)|round(2) }} MB</td><td><a class="button small-button" href="{{ url_for('backup_download', filename=b.name) }}">Download</a>{% if session.get('role') == 'owner' %}<form method="post" action="{{ url_for('backup_restore') }}" class="inline-form restore-form" onsubmit="return confirm('Restore this backup? A safety backup will be made first.')"><input type="hidden" name="filename" value="{{ b.name }}"><input name="confirmation" placeholder="Type RESTORE" required><button class="danger">Restore</button></form>{% endif %}</td></tr>{% else %}<tr><td colspan="4">No full backups have been created yet.</td></tr>{% endfor %}
+</table></div></section>
+<div class="flash warning"><strong>Important:</strong> restoring replaces the live database. BAM automatically creates a pre-restore safety backup first.</div>
+{% endblock %}

@@ -1,0 +1,60 @@
+
+{% extends "base.html" %}
+{% block title %}Edit Job Card | BAM Motor Group{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>Edit Job Card #{{ job.id }}</h1>
+    <p>Update, complete, or reopen this job card.</p>
+  </div>
+  <a class="button" href="{{ url_for('vehicle_detail', vehicle_id=job.vehicle_id) }}">Back to Vehicle</a>
+</div>
+
+<form method="post" class="grid-form">
+<label>Job Date<input type="date" name="job_date" value="{{ job.job_date or '' }}"></label>
+<label>Category
+<select name="category">
+{% for item in ["Mechanical","Electrical","Bodywork","Detailing","Roadworthy","Other"] %}
+<option {% if job.category==item %}selected{% endif %}>{{ item }}</option>
+{% endfor %}
+</select>
+</label>
+<label class="wide">Description<input name="description" value="{{ job.description }}" required></label>
+<label>Supplier / Repairer<input name="supplier" value="{{ job.supplier or '' }}"></label>
+<label>Paid By
+<select name="paid_by">
+{% for item in ["Barry","Matt","Shared","Business"] %}
+<option {% if job.paid_by==item %}selected{% endif %}>{{ item }}</option>
+{% endfor %}
+</select>
+</label>
+<label>Estimated Cost<input type="number" step="0.01" name="estimated_cost" value="{{ job.estimated_cost }}"></label>
+<label>Actual Cost Inc GST<input type="number" step="0.01" name="actual_cost_inc_gst" value="{{ job.actual_cost_inc_gst }}"></label>
+<label>Status
+<select name="status">
+{% for item in ["Open","In Progress","Waiting for Parts","Completed","Cancelled"] %}
+<option {% if job.status==item %}selected{% endif %}>{{ item }}</option>
+{% endfor %}
+</select>
+</label>
+<label class="wide">Notes<textarea name="notes">{{ job.notes or '' }}</textarea></label>
+<label class="wide">Update Note<input name="change_note" placeholder="Example: Reopened to replace front brake pads"></label>
+<button class="wide" type="submit">Save Job Card</button>
+</form>
+
+<h2>Job Card History</h2>
+<table>
+<tr><th>Date</th><th>Changed By</th><th>Old Status</th><th>New Status</th><th>Note</th></tr>
+{% for h in history %}
+<tr>
+<td>{{ h.changed_at }}</td>
+<td>{{ h.changed_by or '' }}</td>
+<td>{{ h.old_status or '' }}</td>
+<td>{{ h.new_status }}</td>
+<td>{{ h.note or '' }}</td>
+</tr>
+{% else %}
+<tr><td colspan="5">No status history yet.</td></tr>
+{% endfor %}
+</table>
+{% endblock %}

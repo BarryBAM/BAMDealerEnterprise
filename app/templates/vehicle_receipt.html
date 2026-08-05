@@ -1,0 +1,31 @@
+
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Receipt {{ sale.invoice_number }}</title>
+<style>
+body{font-family:Arial,sans-serif;margin:35px;color:#1f2937}.receipt{max-width:760px;margin:auto;border:2px solid #0b1f3a;padding:28px}
+header{display:flex;justify-content:space-between;border-bottom:3px solid #0b1f3a;padding-bottom:12px}h1,h2{color:#0b1f3a}
+table{width:100%;border-collapse:collapse;margin-top:20px}th,td{border:1px solid #cbd5e1;padding:10px;text-align:left}th{background:#e2e8f0}.print{float:right}
+@media print{.print{display:none}.receipt{border:0;padding:0}}
+</style>
+</head>
+<body>
+<button class="print" onclick="window.print()">Print Receipt</button>
+<div class="receipt">
+<header><div><h1>BAM Motor Group</h1><p>Buy • Sell • Trade</p></div><div><b>RECEIPT</b><br>{{ sale.invoice_number }}<br>{{ sale.sale_date or '' }}</div></header>
+<p>Received from <strong>{{ sale.buyer_name or '' }}</strong></p>
+<table>
+<tr><th>Vehicle</th><td>{{ vehicle.year or '' }} {{ vehicle.make }} {{ vehicle.model }} {{ vehicle.variant or '' }}</td></tr>
+<tr><th>Stock Number</th><td>{{ vehicle.stock_no }}</td></tr>
+<tr><th>Total Sale Price</th><td>{{ sale.sale_price_inc_gst|money }}</td></tr>
+<tr><th>Deposit</th><td>{{ sale.deposit_amount|money }}</td></tr>
+<tr><th>Trade-in Credit</th><td>{{ sale.trade_in_value|money }}</td></tr>
+<tr><th>Balance Paid</th><td><strong>{{ balance_paid|money }}</strong></td></tr>
+<tr><th>Payment Method</th><td>{{ sale.payment_method or '' }}</td></tr>
+</table>
+<p style="margin-top:40px">Thank you for your purchase.</p>
+</div>
+</body>
+</html>

@@ -1,0 +1,20 @@
+
+{% extends "base.html" %}
+{% block title %}Performance | BAM Motor Group{% endblock %}
+{% block content %}
+<h1>Dealer Performance</h1>
+<h2>Monthly Sales</h2>
+<div class="bar-chart">
+{% for r in monthly %}
+<div class="bar-row">
+<span class="bar-label">{{ r.month }}</span>
+<div class="bar-track"><div class="bar-fill" style="width:{{ ((r.sales_total or 0)/max_sales*100) if max_sales else 0 }}%"></div></div>
+<span class="bar-value">{{ r.sales_total|money }} ({{ r.vehicles_sold }})</span>
+</div>
+{% else %}<p>No completed sales yet.</p>{% endfor %}
+</div>
+<h2>Vehicles by Make</h2>
+<table><tr><th>Make</th><th>Vehicles</th></tr>
+{% for r in makes %}<tr><td>{{ r.make }}</td><td>{{ r.total }}</td></tr>
+{% else %}<tr><td colspan="2">No vehicle data.</td></tr>{% endfor %}</table>
+{% endblock %}

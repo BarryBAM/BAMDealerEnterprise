@@ -1,0 +1,32 @@
+
+{% extends "base.html" %}
+{% block title %}Finance Calculator | BAM Motor Group{% endblock %}
+{% block content %}
+<div class="page-head"><div><h1>Vehicle Finance Calculator</h1><p>Indicative repayments only. Not a credit quote.</p></div></div>
+<div class="dashboard-grid">
+<section class="panel">
+<form method="post" class="stack">
+<input type="number" step="0.01" name="vehicle_price" value="{{ values.vehicle_price }}" placeholder="Vehicle price" required>
+<input type="number" step="0.01" name="deposit" value="{{ values.deposit }}" placeholder="Deposit">
+<input type="number" step="0.01" name="trade_in" value="{{ values.trade_in }}" placeholder="Trade-in credit">
+<input type="number" step="0.01" name="annual_rate" value="{{ values.annual_rate }}" placeholder="Annual interest rate %">
+<select name="term_years">{% for y in [1,2,3,4,5,6,7] %}<option value="{{ y }}" {% if values.term_years|string==y|string %}selected{% endif %}>{{ y }} years</option>{% endfor %}</select>
+<input type="number" step="0.01" name="balloon" value="{{ values.balloon }}" placeholder="Balloon payment">
+<button>Calculate</button>
+</form>
+</section>
+<section class="panel">
+<h2>Repayment Estimate</h2>
+{% if result %}
+<div class="cards finance-results">
+<div class="card"><span>Amount Financed</span><strong>{{ result.principal|money }}</strong></div>
+<div class="card"><span>Weekly</span><strong>{{ result.weekly|money }}</strong></div>
+<div class="card"><span>Fortnightly</span><strong>{{ result.fortnightly|money }}</strong></div>
+<div class="card"><span>Monthly</span><strong>{{ result.monthly|money }}</strong></div>
+<div class="card"><span>Total Interest</span><strong>{{ result.total_interest|money }}</strong></div>
+<div class="card"><span>Total Repaid</span><strong>{{ result.total_repaid|money }}</strong></div>
+</div>
+{% else %}<p>Enter the finance details to calculate repayments.</p>{% endif %}
+</section>
+</div>
+{% endblock %}

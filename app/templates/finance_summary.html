@@ -1,0 +1,20 @@
+
+{% extends "base.html" %}
+{% block title %}Finance Summary | BAM Motor Group{% endblock %}
+{% block content %}
+<h1>Finance Summary</h1>
+<div class="cards">
+<div class="card"><span>Barry Investment</span><strong>{{ total_barry|money }}</strong></div>
+<div class="card"><span>Matt Investment</span><strong>{{ total_matt|money }}</strong></div>
+<div class="card"><span>Money in Stock</span><strong>{{ money_in_stock|money }}</strong></div>
+<div class="card"><span>Total Profit/Loss</span><strong>{{ total_profit|money }}</strong></div>
+<div class="card"><span>Barry 50% Share</span><strong>{{ barry_profit_share|money }}</strong></div>
+<div class="card"><span>Matt 50% Share</span><strong>{{ matt_profit_share|money }}</strong></div>
+</div>
+<table>
+<tr><th>Stock</th><th>Vehicle</th><th>Status</th><th>Barry</th><th>Matt</th><th>Total Cost</th><th>Sale</th><th>Profit/Loss</th></tr>
+{% for r in rows %}
+<tr><td><a href="{{ url_for('vehicle_detail', vehicle_id=r.id) }}">{{ r.stock_no }}</a></td><td>{{ r.year or '' }} {{ r.make }} {{ r.model }}</td><td>{{ r.status }}</td><td>{{ r.barry_contribution|money }}</td><td>{{ r.matt_contribution|money }}</td><td>{{ r.total_cost|money }}</td><td>{{ r.sale_price|money }}</td><td class="{% if r.profit < 0 %}loss{% else %}profit{% endif %}">{{ r.profit|money }}</td></tr>
+{% else %}<tr><td colspan="8">No vehicles yet.</td></tr>{% endfor %}
+</table>
+{% endblock %}

@@ -1,0 +1,29 @@
+
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Purchase Agreement {{ vehicle.stock_no }}</title>
+<style>
+body{font-family:Arial,sans-serif;margin:30px;color:#1f2937}h1,h2{color:#0b1f3a}
+header{display:flex;justify-content:space-between;border-bottom:4px solid #0b1f3a;padding-bottom:15px}
+table{width:100%;border-collapse:collapse;margin:18px 0}th,td{border:1px solid #cbd5e1;padding:9px;text-align:left}th{background:#e2e8f0}
+.signatures{display:grid;grid-template-columns:1fr 1fr;gap:50px;margin-top:70px}.line{border-top:1px solid #111;padding-top:8px}.print{float:right}
+@media print{.print{display:none}body{margin:10mm}}
+</style>
+</head>
+<body>
+<button class="print" onclick="window.print()">Print Agreement</button>
+<header><div><h1>BAM Motor Group</h1><p>Buy • Sell • Trade</p></div><div><b>VEHICLE PURCHASE AGREEMENT</b><br>{{ vehicle.stock_no }}</div></header>
+<h2>Vehicle Details</h2>
+<table>
+<tr><th>Vehicle</th><td>{{ vehicle.year or '' }} {{ vehicle.make }} {{ vehicle.model }} {{ vehicle.variant or '' }}</td><th>VIN</th><td>{{ vehicle.vin or '' }}</td></tr>
+<tr><th>Registration</th><td>{{ vehicle.registration or '' }}</td><th>Odometer</th><td>{{ vehicle.odometer_km or '' }}</td></tr>
+<tr><th>Purchase Date</th><td>{{ vehicle.purchase_date or '' }}</td><th>Purchase Price Inc GST</th><td>{{ vehicle.purchase_price_inc_gst|money }}</td></tr>
+<tr><th>Purchased From</th><td colspan="3">____________________________________________</td></tr>
+</table>
+<h2>Seller Declaration</h2>
+<p>The seller declares they are legally entitled to sell the vehicle and that all known finance, encumbrances, major damage and title issues have been disclosed.</p>
+<div class="signatures"><div class="line">Seller Signature / Date</div><div class="line">BAM Motor Group / Date</div></div>
+</body>
+</html>

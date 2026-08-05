@@ -1,0 +1,23 @@
+
+{% extends "base.html" %}
+{% block title %}Global Search | BAM Motor Group{% endblock %}
+{% block content %}
+<h1>Global Search</h1>
+<form method="get" class="search"><input name="q" value="{{ q }}" placeholder="Stock number, VIN, registration, make, model, customer or phone"><button>Search</button></form>
+{% if q %}
+<h2>Vehicles</h2>
+<table>
+<tr><th>Stock</th><th>Vehicle</th><th>VIN</th><th>Registration</th><th>Status</th></tr>
+{% for v in vehicles %}
+<tr><td><a href="{{ url_for('vehicle_detail', vehicle_id=v.id) }}">{{ v.stock_no }}</a></td><td>{{ v.year or '' }} {{ v.make }} {{ v.model }}</td><td>{{ v.vin or '' }}</td><td>{{ v.registration or '' }}</td><td>{{ v.status }}</td></tr>
+{% else %}<tr><td colspan="5">No vehicles found.</td></tr>{% endfor %}
+</table>
+<h2>Contacts</h2>
+<table>
+<tr><th>Type</th><th>Name</th><th>Phone</th><th>Email</th></tr>
+{% for c in contacts %}
+<tr><td>{{ c.contact_type or '' }}</td><td>{{ c.name }}</td><td>{{ c.phone or '' }}</td><td>{{ c.email or '' }}</td></tr>
+{% else %}<tr><td colspan="4">No contacts found.</td></tr>{% endfor %}
+</table>
+{% endif %}
+{% endblock %}

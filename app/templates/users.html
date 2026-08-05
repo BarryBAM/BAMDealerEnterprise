@@ -1,0 +1,6 @@
+{% extends "base.html" %}
+{% block title %}User Management | BAM{% endblock %}
+{% block content %}
+<div class="page-head"><div><p class="eyebrow">Security</p><h1>User Management</h1><p>Create logins, change roles and disable access.</p></div><a class="button" href="{{ url_for('user_new') }}">Add User</a></div>
+<section class="panel"><table><tr><th>Name</th><th>Username</th><th>Role</th><th>Status</th><th>Last Login</th><th></th></tr>{% for u in users %}<tr><td><strong>{{ u.display_name }}</strong></td><td>{{ u.username }}</td><td>{{ u.role|title }}</td><td><span class="badge">{{ 'Active' if u.is_active else 'Disabled' }}</span></td><td>{{ u.last_login or 'Never' }}</td><td><a class="button small-button" href="{{ url_for('user_edit', user_id=u.id) }}">Edit</a></td></tr>{% endfor %}</table></section>
+{% endblock %}

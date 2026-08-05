@@ -1,0 +1,8 @@
+name: bam-dealer-enterprise
+metadata:
+  template: bam-dealer-enterprise@0.1.0
+services:
+  web:
+    project: .
+    language: py
+    host: appservice

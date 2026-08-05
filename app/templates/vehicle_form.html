@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-head"><div><span class="eyebrow">Stock Management</span><h1>Add Stock</h1><p>Add a car, caravan, boat, motorcycle or trailer.</p></div></div>
+<form method="post" enctype="multipart/form-data" class="grid-form asset-form">
+<label>Asset Type<select name="asset_type" id="asset-type" onchange="toggleAssetFields()">{% for t in ["Car","Caravan","Boat","Motorcycle","Trailer","Other"] %}<option>{{ t }}</option>{% endfor %}</select></label>
+<label>Stock Number<input name="stock_no" value="{{ suggested_stock }}" readonly></label>
+<label>Status<select name="status">{% for s in ["In Stock","Being Repaired","Ready for Sale","Advertised","Sold","BER"] %}<option>{{ s }}</option>{% endfor %}</select></label>
+<label>Purchase Date<input type="date" name="purchase_date"></label>
+<label>Make / Manufacturer<input name="make" required></label>
+<label>Model<input name="model" required></label>
+<label>Variant / Series<input name="variant"></label>
+<label>Year<input type="number" name="year"></label>
+<label class="car-fields">VIN<input name="vin"></label>
+<label>Registration<input name="registration"></label>
+<label class="car-fields">Odometer km<input type="number" name="odometer_km"></label>
+<label>Colour<input name="colour"></label>
+<label>Purchase Price Inc GST<input type="number" step="0.01" name="purchase_price_inc_gst"></label>
+<label>Barry Contribution<input type="number" step="0.01" name="barry_contribution"></label>
+<label>Matt Contribution<input type="number" step="0.01" name="matt_contribution"></label>
+<label>Registration Expiry<input type="date" name="rego_expiry"></label>
+<label class="car-fields">PPSR Number<input name="ppsr_number"></label>
+<label>Condition / Roadworthy<select name="roadworthy_status"><option>Not Checked</option><option>Required</option><option>Booked</option><option>Passed</option><option>Failed</option></select></label>
+<label>Service Due Date<input type="date" name="service_due_date"></label>
+
+<div class="wide asset-section caravan-fields">
+<h2>Caravan Details</h2><div class="grid-form nested-grid">
+<label>Length (m)<input type="number" step="0.01" name="length_m"></label><label>Tare Weight (kg)<input type="number" step="0.1" name="tare_weight_kg"></label>
+<label>ATM (kg)<input type="number" step="0.1" name="atm_kg"></label><label>GTM (kg)<input type="number" step="0.1" name="gtm_kg"></label>
+<label>Berths<input type="number" name="berths"></label><label>Axles<input type="number" name="axles"></label>
+<label class="wide">Caravan Features<textarea name="caravan_features" placeholder="Shower, toilet, solar, battery, awning, water tanks, air conditioning"></textarea></label>
+</div></div>
+<div class="wide asset-section boat-fields">
+<h2>Boat Details</h2><div class="grid-form nested-grid">
+<label>Boat Type<input name="boat_type" placeholder="Fishing, bowrider, cruiser"></label><label>Hull Material<input name="hull_material" placeholder="Aluminium, fibreglass"></label>
+<label>Hull Length (m)<input type="number" step="0.01" name="length_m"></label><label>HIN<input name="hin"></label>
+<label>Engine Make<input name="engine_make"></label><label>Engine Model<input name="engine_model"></label>
+<label>Engine Hours<input type="number" step="0.1" name="engine_hours"></label><label>Horsepower<input type="number" step="0.1" name="horsepower"></label>
+<label>Fuel Type<input name="fuel_type"></label><label>Capacity (people)<input type="number" name="capacity_people"></label>
+<label><span>Trailer Included</span><input type="checkbox" name="trailer_included" value="1"></label><label>Trailer Registration<input name="trailer_registration"></label>
+<label class="wide">Boat Features<textarea name="boat_features" placeholder="Electronics, safety equipment, canopy, sounder, GPS"></textarea></label>
+</div></div>
+<label class="wide">Service History<textarea name="service_history"></textarea></label>
+<label>Primary Photo<input type="file" name="photo" accept=".png,.jpg,.jpeg,.webp"></label>
+<label class="wide">Notes<textarea name="notes"></textarea></label>
+<button class="wide" type="submit">Save Stock Item</button>
+</form>
+<script>function toggleAssetFields(){const t=document.getElementById('asset-type').value;document.querySelectorAll('.caravan-fields').forEach(e=>e.style.display=t==='Caravan'?'block':'none');document.querySelectorAll('.boat-fields').forEach(e=>e.style.display=t==='Boat'?'block':'none');document.querySelectorAll('.car-fields').forEach(e=>e.style.display=['Car','Motorcycle'].includes(t)?'flex':'none');}document.addEventListener('DOMContentLoaded',toggleAssetFields);</script>
+{% endblock %}

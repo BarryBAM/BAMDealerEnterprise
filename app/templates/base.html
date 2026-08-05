@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}BAM Motor Group{% endblock %}</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+(function(){
+  const saved = localStorage.getItem('bam-theme');
+  if(saved === 'dark') document.documentElement.classList.add('dark-mode');
+})();
+</script>
+</head>
+<body class="{% if session.get('user_id') %}app-shell{% endif %}">
+
+{% if session.get('user_id') %}
+<aside class="sidebar" id="sidebar">
+  <div class="sidebar-brand">
+    <div class="brand-emblem" aria-label="BAM Motor Group">
+      <svg viewBox="0 0 160 62" role="img" aria-hidden="true">
+        <path d="M12 24 C32 5, 83 3, 119 17 C132 22, 143 28, 150 34 L135 34 C126 27,113 23,99 21 C71 17,41 20,22 33 L8 33 Z" fill="currentColor" opacity=".85"/>
+        <circle cx="42" cy="35" r="7" fill="#0e1b2d" stroke="currentColor" stroke-width="3"/>
+        <circle cx="119" cy="35" r="7" fill="#0e1b2d" stroke="currentColor" stroke-width="3"/>
+      </svg>
+      <div class="metal-word">BAM</div>
+      <span>MOTOR GROUP</span>
+    </div>
+  </div>
+
+  <nav class="sidebar-nav">
+    <span class="nav-section">Operations</span>
+    <a href="{{ url_for('dashboard') }}" class="{% if request.endpoint=='dashboard' %}active{% endif %}">⌂ Dashboard</a>
+    <a href="{{ url_for('equipment_list') }}" class="tooling-nav {% if request.endpoint in ['equipment_list','equipment_new','equipment_detail','equipment_edit'] %}active{% endif %}">🔧 Tooling & Equipment</a>
+    <a href="{{ url_for('vehicle_list') }}" class="{% if request.endpoint in ['vehicle_list','vehicle_detail'] %}active{% endif %}">🚗 Vehicle Inventory</a>
+    <a href="{{ url_for('vehicle_new') }}" class="{% if request.endpoint=='vehicle_new' %}active{% endif %}">＋ Add New Vehicle</a>
+    <a href="{{ url_for('parts_page') }}" class="{% if request.endpoint=='parts_page' %}active{% endif %}">⚙ Parts Centre</a>
+    <a href="{{ url_for('shipping_centre') }}" class="{% if request.endpoint in ['shipping_centre','shipping_new','shipping_detail','shipping_label'] %}active{% endif %}">📦 Shipping Centre</a>
+    <a href="{{ url_for('global_search') }}">⌕ Global Search</a>
+    <span class="nav-section">Customers & Work</span>
+    <a href="{{ url_for('contacts_page') }}">👥 Buyers / Sellers</a>
+    <a href="{{ url_for('tasks_page') }}">✓ Tasks</a>
+    <a href="{{ url_for('reminders_page') }}">🔔 Reminders</a>
+    <span class="nav-section">Finance & Reports</span>
+    <a href="{{ url_for('invoice_centre') }}" class="{% if request.endpoint in ['invoice_centre','sale_invoice_edit','sale_invoice','deal_file'] %}active{% endif %}">🧾 Invoice Centre</a>
+    <a href="{{ url_for('profit_report') }}">▥ Profit Report</a>
+    <a href="{{ url_for('finance_summary') }}">$ Finance</a>
+    <a href="{{ url_for('performance_report') }}">▤ Performance</a>
+    <a href="{{ url_for('bas_report') }}">GST BAS</a>
+    <a href="{{ url_for('stock_age_report') }}">Stock Age</a>
+    <a href="{{ url_for('audit_page') }}">Audit Log</a>
+    <a href="{{ url_for('backup_centre') }}" class="{% if request.endpoint and request.endpoint.startswith('backup_') %}active{% endif %}">💾 Backup & Restore</a>
+    {% if session.get('role') == 'owner' %}<a href="{{ url_for('users_page') }}" class="{% if request.endpoint in ['users_page','user_new','user_edit'] %}active{% endif %}">👤 User Management</a>{% endif %}
+    <a href="{{ url_for('iphone_access') }}">📱 iPhone Access</a>
+  </nav>
+
+  <div class="sidebar-footer">
+    <small>{{ app_name }}</small>
+    <strong>v{{ app_version }}</strong>
+  </div>
+</aside>
+
+<div class="main-shell">
+  <header class="topbar">
+    <button class="menu-button" type="button" onclick="document.getElementById('sidebar').classList.toggle('open')">☰</button>
+    <div class="topbar-title">
+      <strong>BUY • SELL • TRADE</strong>
+      <span>Quality Vehicles. Honest Deals.</span>
+    </div>
+    <div class="topbar-actions">
+      <a class="top-search" href="{{ url_for('global_search') }}">⌕ Search</a>
+      <button class="theme-button" type="button" onclick="toggleBamTheme()" aria-label="Toggle dark mode">◐</button>
+      <div class="user-chip">{{ session.get('display_name','User') }}<br><small>{{ session.get('role','user')|title }}</small></div>
+      <a class="logout-link" href="{{ url_for('logout') }}">Log out</a>
+    </div>
+  </header>
+{% endif %}
+
+<main class="{% if session.get('user_id') %}content-area{% endif %}">
+  {% for category, message in get_flashed_messages(with_categories=true) %}
+  <div class="flash {{ category }}">{{ message }}</div>
+  {% endfor %}
+  {% block content %}{% endblock %}
+</main>
+
+{% if session.get('user_id') %}</div>{% endif %}
+<script>
+function toggleBamTheme(){
+  document.documentElement.classList.toggle('dark-mode');
+  localStorage.setItem('bam-theme', document.documentElement.classList.contains('dark-mode') ? 'dark' : 'light');
+}
+document.addEventListener('click', function(event){
+  const sidebar=document.getElementById('sidebar');
+  if(sidebar && sidebar.classList.contains('open') && !sidebar.contains(event.target) && !event.target.closest('.menu-button')) sidebar.classList.remove('open');
+});
+</script>
+</body>
+</html>

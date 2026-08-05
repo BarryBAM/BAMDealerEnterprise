@@ -1,0 +1,37 @@
+
+{% extends "base.html" %}
+{% block title %}Vehicle Valuation | BAM Motor Group{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div><h1>Vehicle Valuation</h1><p>{{ vehicle.stock_no }} — {{ vehicle.year or '' }} {{ vehicle.make }} {{ vehicle.model }}</p></div>
+  <a class="button" href="{{ url_for('vehicle_detail', vehicle_id=vehicle.id) }}">Back to Vehicle</a>
+</div>
+<div class="cards">
+  <div class="card"><span>Purchase</span><strong>{{ vehicle.purchase_price_inc_gst|money }}</strong></div>
+  <div class="card"><span>Expenses</span><strong>{{ expenses|money }}</strong></div>
+  <div class="card"><span>Jobs</span><strong>{{ jobs|money }}</strong></div>
+  <div class="card"><span>Services</span><strong>{{ services|money }}</strong></div>
+  <div class="card"><span>Parts</span><strong>{{ parts|money }}</strong></div>
+  <div class="card"><span>Total Cost</span><strong>{{ total_cost|money }}</strong></div>
+</div>
+<form method="post" class="grid-form valuation-form">
+  <label>Estimated Sale Price<input id="estimatedSale" type="number" step="0.01" name="estimated_sale_price" value="{{ vehicle.estimated_sale_price or 0 }}"></label>
+  <label>Minimum Sale Price<input id="minimumSale" type="number" step="0.01" name="minimum_sale_price" value="{{ vehicle.minimum_sale_price or 0 }}"></label>
+  <label class="wide">Valuation Notes<textarea name="valuation_notes">{{ vehicle.valuation_notes or '' }}</textarea></label>
+  <div class="wide valuation-preview">
+    <div><span>Estimated Profit</span><strong id="estimatedProfit">{{ estimated_profit|money }}</strong></div>
+    <div><span>Minimum Profit</span><strong id="minimumProfit">{{ minimum_profit|money }}</strong></div>
+  </div>
+  <button class="wide">Save Valuation</button>
+</form>
+<script>
+const totalCost = {{ total_cost }};
+function money(value){return new Intl.NumberFormat('en-AU',{style:'currency',currency:'AUD'}).format(value||0)}
+function updateProfit(){
+  document.getElementById('estimatedProfit').textContent = money(parseFloat(document.getElementById('estimatedSale').value||0)-totalCost);
+  document.getElementById('minimumProfit').textContent = money(parseFloat(document.getElementById('minimumSale').value||0)-totalCost);
+}
+document.getElementById('estimatedSale').addEventListener('input',updateProfit);
+document.getElementById('minimumSale').addEventListener('input',updateProfit);
+</script>
+{% endblock %}

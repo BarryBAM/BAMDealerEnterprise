@@ -1,0 +1,23 @@
+
+{% extends "base.html" %}
+{% block title %}Customer History | BAM Motor Group{% endblock %}
+{% block content %}
+<h1>Customer Purchase History</h1>
+<form method="get" class="search"><input name="q" value="{{ q }}" placeholder="Search customer, phone or email"><button>Search</button></form>
+<table>
+<tr><th>Date</th><th>Customer</th><th>Contact</th><th>Vehicle</th><th>Registration</th><th>Sale</th><th>Deposit</th><th>Warranty</th><th>Documents</th></tr>
+{% for r in rows %}
+<tr>
+<td>{{ r.sale_date or '' }}</td>
+<td>{{ r.buyer_name or '' }}</td>
+<td>{{ r.buyer_phone or '' }}<br>{{ r.buyer_email or '' }}</td>
+<td><a href="{{ url_for('vehicle_detail', vehicle_id=r.vehicle_id) }}">{{ r.stock_no }} — {{ r.year or '' }} {{ r.make }} {{ r.model }}</a></td>
+<td>{{ r.registration or '' }}</td>
+<td>{{ r.sale_price_inc_gst|money }}</td>
+<td>{{ r.deposit_amount|money }}</td>
+<td>{{ r.warranty_type or '' }}{% if r.warranty_expiry %}<br>{{ r.warranty_expiry }}{% endif %}</td>
+<td><a href="{{ url_for('sale_invoice', vehicle_id=r.vehicle_id) }}" target="_blank">Invoice</a> | <a href="{{ url_for('sale_contract', vehicle_id=r.vehicle_id) }}" target="_blank">Contract</a></td>
+</tr>
+{% else %}<tr><td colspan="9">No completed sales yet.</td></tr>{% endfor %}
+</table>
+{% endblock %}

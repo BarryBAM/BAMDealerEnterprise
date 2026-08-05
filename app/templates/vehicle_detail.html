@@ -1,0 +1,151 @@
+{% extends "base.html" %}
+{% block title %}{{ vehicle.stock_no }} | BAM Dealer Enterprise{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <p class="eyebrow">{{ vehicle.asset_type or 'Car' }} Workspace</p>
+    <h1>{{ vehicle.stock_no }}</h1>
+    <p>{{ vehicle.year or '' }} {{ vehicle.make }} {{ vehicle.model }} {{ vehicle.variant or '' }}</p>
+  </div>
+  <div class="page-actions">
+    <span class="status">{{ vehicle.status }}</span>
+    <a class="button" href="{{ url_for('vehicle_edit', vehicle_id=vehicle.id) }}">Edit Asset</a>
+    <a class="button" href="{{ url_for('advertisement_pro', vehicle_id=vehicle.id) }}">Advertisement Studio</a>
+    <a class="button" href="{{ url_for('window_card', vehicle_id=vehicle.id) }}" target="_blank">Window Card</a>
+    <a class="button" href="{{ url_for('vehicle_report', vehicle_id=vehicle.id) }}" target="_blank">Print Report</a>
+  </div>
+</div>
+
+<nav class="asset-workspace-nav" aria-label="Asset workspace">
+  <a href="#overview">Overview</a><a href="#photos">Photos</a><a href="#documents">Documents</a>
+  <a href="#expenses">Expenses</a><a href="#workshop">Workshop</a><a href="#parts">Parts</a>
+  <a href="#reminders">Reminders</a><a href="#sale">Sale & Profit</a>
+</nav>
+
+<section id="overview" class="workspace-grid">
+  <div class="panel hero-panel">
+    {% if photos %}
+      <img class="workspace-hero" src="{{ url_for('uploaded_file', filename=photos[0].filename) }}" alt="{{ vehicle.make }} {{ vehicle.model }}">
+    {% elif vehicle.photo_filename %}
+      <img class="workspace-hero" src="{{ url_for('uploaded_file', filename=vehicle.photo_filename) }}" alt="{{ vehicle.make }} {{ vehicle.model }}">
+    {% else %}
+      <div class="photo-placeholder">No featured photo</div>
+    {% endif %}
+  </div>
+  <div class="panel">
+    <h2>Asset Summary</h2>
+    <table class="summary-table">
+      <tr><th>Type</th><td>{{ vehicle.asset_type or 'Car' }}</td></tr>
+      <tr><th>VIN / HIN</th><td>{{ vehicle.vin or vehicle.hin or '—' }}</td></tr>
+      <tr><th>Registration</th><td>{{ vehicle.registration or '—' }}</td></tr>
+      <tr><th>Odometer</th><td>{% if vehicle.odometer_km %}{{ '{:,}'.format(vehicle.odometer_km) }} km{% else %}—{% endif %}</td></tr>
+      <tr><th>Colour</th><td>{{ vehicle.colour or '—' }}</td></tr>
+      <tr><th>Roadworthy</th><td>{{ vehicle.roadworthy_status or 'Not Checked' }}</td></tr>
+      <tr><th>Registration Expiry</th><td>{{ vehicle.rego_expiry or '—' }}</td></tr>
+    </table>
+  </div>
+  <div class="panel finance-snapshot">
+    <h2>Financial Snapshot</h2>
+    <div class="metric-row"><span>Purchase</span><strong>{{ vehicle.purchase_price_inc_gst|money }}</strong></div>
+    <div class="metric-row"><span>Minimum Sale</span><strong>{{ vehicle.minimum_sale_price|money }}</strong></div>
+    <div class="metric-row"><span>Asking Price</span><strong>{{ vehicle.asking_price|money }}</strong></div>
+    {% if vehicle.negotiated_price %}<div class="metric-row"><span>Negotiated Price</span><strong>{{ vehicle.negotiated_price|money }}</strong></div>{% endif %}
+    <div class="metric-row"><span>Expenses</span><strong>{{ expense_total|money }}</strong></div>
+    <div class="metric-row"><span>Workshop</span><strong>{{ job_total|money }}</strong></div>
+    <div class="metric-row"><span>Service</span><strong>{{ service_total|money }}</strong></div>
+    <div class="metric-row"><span>Parts Used</span><strong>{{ parts_total|money }}</strong></div>
+    <div class="metric-row total"><span>Total Invested</span><strong>{{ total_invested|money }}</strong></div>
+    <div class="metric-row total"><span>Profit / Loss</span><strong>{{ profit|money }}</strong></div>
+  </div>
+</section>
+
+{% if (vehicle.asset_type or 'Car') == 'Caravan' %}
+<section class="panel"><h2>Caravan Details</h2><div class="detail-cards">
+  <div><small>Length</small><strong>{{ vehicle.length_m or '—' }}{% if vehicle.length_m %} m{% endif %}</strong></div>
+  <div><small>Tare / ATM / GTM</small><strong>{{ vehicle.tare_weight_kg or '—' }} / {{ vehicle.atm_kg or '—' }} / {{ vehicle.gtm_kg or '—' }} kg</strong></div>
+  <div><small>Berths / Axles</small><strong>{{ vehicle.berths or '—' }} / {{ vehicle.axles or '—' }}</strong></div>
+</div><p>{{ vehicle.caravan_features or '' }}</p></section>
+{% elif (vehicle.asset_type or 'Car') == 'Boat' %}
+<section class="panel"><h2>Boat Details</h2><div class="detail-cards">
+  <div><small>Boat / Hull</small><strong>{{ vehicle.boat_type or '—' }} / {{ vehicle.hull_material or '—' }}</strong></div>
+  <div><small>Engine</small><strong>{{ vehicle.engine_make or '' }} {{ vehicle.engine_model or '' }} — {{ vehicle.horsepower or '—' }} hp</strong></div>
+  <div><small>Hours / Capacity</small><strong>{{ vehicle.engine_hours or '—' }} / {{ vehicle.passenger_capacity or '—' }}</strong></div>
+</div><p>{{ vehicle.boat_features or '' }}</p></section>
+{% endif %}
+
+<section id="photos" class="panel">
+  <div class="section-head"><div><h2>Photo Manager</h2><p>Upload, feature or remove asset photos.</p></div></div>
+  <div class="photo-grid">
+    {% for p in photos %}
+    <div class="photo-card {% if vehicle.featured_photo_id == p.id %}featured{% endif %}">
+      <img src="{{ url_for('uploaded_file', filename=p.filename) }}" alt="{{ p.caption or 'Asset photo' }}">
+      <small>{{ p.caption or 'Asset photo' }}</small>
+      <div class="photo-actions">
+        {% if vehicle.featured_photo_id != p.id %}<form method="post" action="{{ url_for('set_featured_photo', vehicle_id=vehicle.id, photo_id=p.id) }}"><button class="small-button">Set Featured</button></form>{% else %}<span class="featured-badge">Featured</span>{% endif %}
+        <form method="post" action="{{ url_for('delete_vehicle_photo', vehicle_id=vehicle.id, photo_id=p.id) }}" onsubmit="return confirm('Delete this photo?')"><button class="small-button danger">Delete</button></form>
+      </div>
+    </div>
+    {% else %}<p>No photos uploaded yet.</p>{% endfor %}
+  </div>
+  <form method="post" enctype="multipart/form-data" action="{{ url_for('photo_add', vehicle_id=vehicle.id) }}" class="stack compact-form">
+    <input type="file" name="photos" multiple accept="image/*">
+    <input name="caption" placeholder="Photo caption">
+    <button>Add Photos</button>
+  </form>
+</section>
+
+<section id="documents" class="panel">
+  <div class="section-head"><div><h2>Document Centre</h2><p>Keep purchase, registration, PPSR, service and warranty files with this asset.</p></div></div>
+  <form method="post" enctype="multipart/form-data" action="{{ url_for('vehicle_document_add', vehicle_id=vehicle.id) }}" class="document-upload-grid">
+    <select name="document_type"><option>Purchase Invoice</option><option>Registration</option><option>PPSR</option><option>Roadworthy</option><option>Service History</option><option>Warranty</option><option>Insurance</option><option>Manual</option><option>Other</option></select>
+    <input name="description" placeholder="Description">
+    <input type="file" name="document" accept=".pdf,.png,.jpg,.jpeg,.webp" required>
+    <button>Upload Document</button>
+  </form>
+  <div class="document-list">
+    {% for d in documents %}
+    <article class="document-card">
+      <div><strong>{{ d.document_type }}</strong><small>{{ d.description or d.filename }}</small><small>Uploaded {{ d.uploaded_at }}</small></div>
+      <div class="document-actions"><a class="button small-button" href="{{ url_for('uploaded_file', filename=d.filename) }}" target="_blank">Open</a><form method="post" action="{{ url_for('vehicle_document_delete', vehicle_id=vehicle.id, document_id=d.id) }}" onsubmit="return confirm('Delete this document?')"><button class="small-button danger">Delete</button></form></div>
+    </article>
+    {% else %}<p>No documents uploaded yet.</p>{% endfor %}
+  </div>
+</section>
+
+<div class="workspace-two-column">
+<section id="expenses" class="panel"><h2>Expenses</h2>
+  <form method="post" enctype="multipart/form-data" action="{{ url_for('expense_add', vehicle_id=vehicle.id) }}" class="stack">
+    <input type="date" name="expense_date"><select name="category">{% for c in ['Parts','Labour','Consumables','Registration','Fuel','Transport','Cleaning','Advertising','Insurance','Other'] %}<option>{{ c }}</option>{% endfor %}</select>
+    <input name="description" placeholder="Description" required><input name="supplier" placeholder="Supplier"><select name="paid_by"><option>Barry</option><option>Matt</option><option>Shared</option><option>Business</option></select>
+    <input type="number" step="0.01" name="cost_inc_gst" placeholder="Cost inc GST"><input type="file" name="receipt"><textarea name="notes" placeholder="Notes"></textarea><button>Add Expense</button>
+  </form>
+  <table><tr><th>Date</th><th>Description</th><th>Cost</th></tr>{% for e in expenses %}<tr><td>{{ e.expense_date or '' }}</td><td>{{ e.description }}</td><td>{{ e.cost_inc_gst|money }}</td></tr>{% else %}<tr><td colspan="3">No expenses yet.</td></tr>{% endfor %}</table>
+</section>
+<section id="workshop" class="panel"><h2>Workshop</h2>
+  <form method="post" action="{{ url_for('job_card_add', vehicle_id=vehicle.id) }}" class="stack">
+    <input type="date" name="job_date"><select name="category"><option>Mechanical</option><option>Electrical</option><option>Bodywork</option><option>Detailing</option><option>Roadworthy</option><option>Other</option></select>
+    <input name="description" placeholder="Work required" required><input name="supplier" placeholder="Supplier / repairer"><select name="paid_by"><option>Barry</option><option>Matt</option><option>Shared</option><option>Business</option></select>
+    <input type="number" step="0.01" name="estimated_cost" placeholder="Estimated cost"><input type="number" step="0.01" name="actual_cost_inc_gst" placeholder="Actual cost inc GST"><select name="status"><option>Open</option><option>In Progress</option><option>Waiting Parts</option><option>Completed</option><option>Cancelled</option></select><textarea name="notes" placeholder="Job notes"></textarea><button>Add Job Card</button>
+  </form>
+  <table><tr><th>Job</th><th>Status</th><th>Cost</th></tr>{% for j in job_cards %}<tr><td><a href="{{ url_for('job_card_edit', job_id=j.id) }}">{{ j.description }}</a></td><td>{{ j.status }}</td><td>{{ (j.actual_cost_inc_gst if j.actual_cost_inc_gst else j.estimated_cost)|money }}</td></tr>{% else %}<tr><td colspan="3">No job cards yet.</td></tr>{% endfor %}</table>
+</section>
+</div>
+
+<div class="workspace-two-column">
+<section id="parts" class="panel"><h2>Parts Used</h2>
+  <form method="post" action="{{ url_for('use_part', vehicle_id=vehicle.id) }}" class="stack"><select name="part_id" required><option value="">Choose part</option>{% for p in available_parts %}<option value="{{ p.id }}">{{ p.part_number or '' }} — {{ p.part_name }} ({{ p.quantity_on_hand }} available)</option>{% endfor %}</select><input type="date" name="usage_date"><input type="number" step="0.01" name="quantity_used" placeholder="Quantity used" required><select name="job_card_id"><option value="">No linked job card</option>{% for j in job_cards %}<option value="{{ j.id }}">Job #{{ j.id }} — {{ j.description }}</option>{% endfor %}</select><select name="paid_by"><option>Barry</option><option>Matt</option><option>Shared</option><option>Business</option></select><textarea name="notes" placeholder="Notes"></textarea><button>Record Part Used</button></form>
+  <table><tr><th>Part</th><th>Qty</th><th>Cost</th></tr>{% for p in parts_used %}<tr><td>{{ p.part_number or '' }} {{ p.part_name }}</td><td>{{ p.quantity_used }}</td><td>{{ (p.quantity_used * p.unit_cost_inc_gst)|money }}</td></tr>{% else %}<tr><td colspan="3">No parts used yet.</td></tr>{% endfor %}</table>
+</section>
+<section id="reminders" class="panel"><h2>Reminders</h2>
+  <form method="post" action="{{ url_for('add_reminder', vehicle_id=vehicle.id) }}" class="stack"><input type="date" name="reminder_date" required><select name="reminder_type"><option>Registration</option><option>Service</option><option>Roadworthy</option><option>Parts</option><option>Customer Follow-up</option><option>Other</option></select><input name="title" placeholder="Reminder title" required><textarea name="notes" placeholder="Notes"></textarea><button>Add Reminder</button></form>
+  <table><tr><th>Date</th><th>Title</th><th>Status</th></tr>{% for r in reminders %}<tr><td>{{ r.reminder_date }}</td><td>{{ r.title }}</td><td>{% if r.completed %}Completed{% else %}<form method="post" action="{{ url_for('complete_reminder', reminder_id=r.id) }}"><button class="small-button">Complete</button></form>{% endif %}</td></tr>{% else %}<tr><td colspan="3">No reminders yet.</td></tr>{% endfor %}</table>
+</section>
+</div>
+
+<section id="sale" class="panel"><h2>Sale & Profit</h2>
+  <form method="post" action="{{ url_for('sale_add', vehicle_id=vehicle.id) }}" class="sale-grid">
+    <input type="date" name="sale_date"><input name="buyer_name" placeholder="Buyer name"><input name="buyer_phone" placeholder="Buyer phone"><input type="email" name="buyer_email" placeholder="Buyer email"><textarea name="buyer_address" placeholder="Buyer address"></textarea><input type="number" step="0.01" name="sale_price_inc_gst" placeholder="Sale price inc GST"><input type="number" step="0.01" name="deposit_amount" placeholder="Deposit"><input type="date" name="deposit_date"><select name="payment_method"><option value="">Payment method</option><option>Cash</option><option>EFT</option><option>Bank Transfer</option><option>Finance</option><option>Other</option></select><input type="number" step="0.01" name="advertising_cost" placeholder="Advertising cost"><input type="number" step="0.01" name="transfer_cost" placeholder="Transfer cost"><textarea name="notes" placeholder="Sale notes"></textarea><button>Save Sale</button>
+  </form>
+  {% if sale %}<div class="sale-summary"><strong>Sale recorded: {{ sale.sale_price_inc_gst|money }}</strong><span class="badge">{{ sale.invoice_status or 'Draft' }}</span><a class="button" href="{{ url_for('sale_invoice', vehicle_id=vehicle.id) }}" target="_blank">Tax Invoice</a><a class="button" href="{{ url_for('sale_invoice_edit', vehicle_id=vehicle.id) }}">Edit Invoice</a><a class="button" href="{{ url_for('deal_file', vehicle_id=vehicle.id) }}">Deal File</a></div>{% endif %}
+</section>
+{% endblock %}

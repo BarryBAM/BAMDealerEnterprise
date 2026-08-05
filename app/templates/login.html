@@ -1,0 +1,15 @@
+
+{% extends "base.html" %}
+{% block title %}Login | BAM Motor Group{% endblock %}
+{% block content %}
+<div class="login-card">
+<h1>Owner Login</h1>
+<p>Use the starter accounts, then change the passwords before real use.</p>
+<form method="post">
+<label>Username<input name="username" required></label>
+<label>Password<input name="password" type="password" required></label>
+<button type="submit">Sign in</button>
+</form>
+<p class="muted">Starter logins: barry / matt<br>Password: ChangeMe123!</p>
+</div>
+{% endblock %}

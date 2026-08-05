@@ -1,0 +1,16 @@
+
+{% extends "base.html" %}
+{% block title %}Reminders | BAM Motor Group{% endblock %}
+{% block content %}
+<h1>Reminders</h1>
+<table>
+<tr><th>Date</th><th>Type</th><th>Vehicle</th><th>Title</th><th>Status</th></tr>
+{% for r in rows %}
+<tr class="{% if not r.completed and r.reminder_date %}reminder-open{% endif %}">
+<td>{{ r.reminder_date }}</td><td>{{ r.reminder_type }}</td>
+<td>{% if r.vehicle_id %}<a href="{{ url_for('vehicle_detail', vehicle_id=r.vehicle_id) }}">{{ r.stock_no }} — {{ r.make }} {{ r.model }}</a>{% endif %}</td>
+<td>{{ r.title }}</td><td>{% if r.completed %}Completed{% else %}Open{% endif %}</td>
+</tr>
+{% else %}<tr><td colspan="5">No reminders yet.</td></tr>{% endfor %}
+</table>
+{% endblock %}

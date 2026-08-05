@@ -1,0 +1,121 @@
+{% extends "base.html" %}
+{% block title %}Dealer Command Centre | BAM Motor Group{% endblock %}
+{% block content %}
+<div class="dashboard-heading command-heading">
+  <div>
+    <span class="eyebrow">{{ app_name }} v{{ app_version }}</span>
+    <h1>Dealer Command Centre</h1>
+    <p>Your daily view of stock, workshop, parts, sales and urgent actions.</p>
+  </div>
+  <div class="heading-actions">
+    <a class="button secondary" href="{{ url_for('global_search') }}">Search Everything</a>
+    <a class="button secondary" href="{{ url_for('export_vehicles_csv') }}">Export Vehicles</a>
+    <a class="button" href="{{ url_for('backup_database') }}">Backup Now</a>
+  </div>
+</div>
+
+<section class="command-hero">
+  <div class="command-summary">
+    <div class="kpi-grid command-primary-kpis">
+      <article class="kpi-card navy"><span>Vehicles In Stock</span><strong>{{ metrics.active_stock or 0 }}</strong><small>{{ metrics.stock_value|money }} invested</small></article>
+      <article class="kpi-card teal"><span>Sales This Month</span><strong>{{ sold_this_month }}</strong><small>{{ sales_total|money }} total vehicle sales</small></article>
+      <article class="kpi-card orange"><span>Net Profit</span><strong>{{ net_profit|money }}</strong><small>All recorded activity</small></article>
+      <article class="kpi-card purple"><span>Parts On Hand</span><strong>{{ parts_metrics.parts_on_hand or 0 }}</strong><small>{{ parts_retail_value|money }} retail value</small></article>
+    </div>
+
+    <div class="command-alert-grid">
+      <a class="command-alert {% if rego_alerts %}needs-action{% endif %}" href="#rego-alerts"><span>Registration Alerts</span><strong>{{ rego_alerts|length }}</strong><small>Within 90 days</small></a>
+      <a class="command-alert {% if service_alerts %}needs-action{% endif %}" href="#service-alerts"><span>Service Due</span><strong>{{ service_alerts|length }}</strong><small>Vehicles requiring attention</small></a>
+      <a class="command-alert {% if workshop_metrics.open_jobs or workshop_metrics.in_progress %}needs-action{% endif %}" href="#workshop-board"><span>Workshop Active</span><strong>{{ (workshop_metrics.open_jobs or 0) + (workshop_metrics.in_progress or 0) + (workshop_metrics.waiting_parts or 0) }}</strong><small>Open, in progress or waiting</small></a>
+      <a class="command-alert {% if parts_metrics.low_stock %}needs-action{% endif %}" href="{{ url_for('parts_page') }}"><span>Low Stock Parts</span><strong>{{ parts_metrics.low_stock or 0 }}</strong><small>Reorder required</small></a>
+      <a class="command-alert {% if missing_photo_count %}needs-action{% endif %}" href="{{ url_for('vehicle_list') }}"><span>Missing Photos</span><strong>{{ missing_photo_count }}</strong><small>Active vehicles</small></a>
+      <a class="command-alert {% if ready_to_advertise %}ready-action{% endif %}" href="#ready-stock"><span>Ready To Advertise</span><strong>{{ ready_to_advertise|length }}</strong><small>Prepared stock</small></a>
+    </div>
+
+    <div class="analytics-grid command-charts">
+      <section class="panel"><div class="panel-title"><h2>Vehicle Status</h2><span>{{ metrics.total_vehicles or 0 }} total vehicles</span></div><canvas id="statusChart" height="225"></canvas></section>
+      <section class="panel"><div class="panel-title"><h2>Monthly Vehicle Sales</h2><span>Last 12 recorded months</span></div><canvas id="salesChart" height="225"></canvas></section>
+    </div>
+  </div>
+
+  <aside class="daily-action-panel">
+    <div class="panel-title"><div><span class="eyebrow">Today</span><h2>Priority Actions</h2></div><a href="{{ url_for('tasks_page') }}">All tasks</a></div>
+    <div class="priority-list">
+      {% for t in priority_tasks %}
+      <article class="priority-item priority-{{ (t.priority or 'normal')|lower }}">
+        <div><strong>{{ t.title }}</strong><small>{% if t.stock_no %}{{ t.stock_no }} — {{ t.make }} {{ t.model }} · {% endif %}Due {{ t.due_date or 'not set' }}</small></div>
+        <form method="post" action="{{ url_for('complete_task', task_id=t.id) }}"><button class="small-button" type="submit">Done</button></form>
+      </article>
+      {% else %}<div class="command-empty">No urgent or overdue tasks. You're up to date.</div>{% endfor %}
+    </div>
+    <div class="quick-launch-grid">
+      <a href="{{ url_for('vehicle_new') }}"><b>＋</b><span>Add Vehicle</span></a>
+      <a href="{{ url_for('parts_page') }}"><b>⚙</b><span>Add Part</span></a>
+      <a href="{{ url_for('equipment_new') }}"><b>🔧</b><span>Add Tool</span></a>
+      <a href="{{ url_for('contacts_page') }}"><b>👥</b><span>Add Contact</span></a>
+      <a href="{{ url_for('tasks_page') }}"><b>✓</b><span>Add Task</span></a>
+      <a href="{{ url_for('profit_report') }}"><b>$</b><span>Profit Report</span></a>
+      <a href="{{ url_for('finance_summary') }}"><b>▤</b><span>Finance</span></a>
+    </div>
+    <div class="daily-money">
+      <div><span>GST Position</span><strong>{{ (gst_collected-gst_paid)|money }}</strong></div>
+      <div><span>Parts Sales This Month</span><strong>{{ parts_sales_month.revenue|money }}</strong><small>{{ parts_sales_month.sales_count }} sale(s)</small></div>
+    </div>
+  </aside>
+</section>
+
+<section class="panel tooling-command-panel">
+  <div class="panel-title"><div><span class="eyebrow">Workshop Assets</span><h2>🔧 Tooling & Equipment</h2><p>Manage tools, diagnostic gear, hoists, jacks and other BAM-owned equipment.</p></div><div><a class="button" href="{{ url_for('equipment_new') }}">＋ Add Tool</a> <a class="button secondary" href="{{ url_for('equipment_list') }}">Open Tooling</a></div></div>
+  <div class="tooling-dashboard-grid">
+    <a href="{{ url_for('equipment_list') }}"><span>Total Equipment</span><strong>{{ equipment_metrics.total_equipment or 0 }}</strong><small>{{ equipment_metrics.current_value|money }} current value</small></a>
+    <a href="{{ url_for('equipment_list',status='Checked Out') }}"><span>Checked Out</span><strong>{{ equipment_metrics.checked_out or 0 }}</strong><small>Assigned or away from storage</small></a>
+    <a href="{{ url_for('equipment_list') }}"><span>Needs Attention</span><strong>{{ equipment_metrics.needs_attention or 0 }}</strong><small>Service, repair or unserviceable</small></a>
+    <a href="{{ url_for('equipment_list') }}"><span>Missing Photos</span><strong>{{ equipment_metrics.missing_photos or 0 }}</strong><small>Add identification photos</small></a>
+  </div>
+  {% if equipment_due %}<div class="tooling-due-list"><strong>Upcoming equipment dates</strong>{% for x in equipment_due %}<a href="{{ url_for('equipment_detail',equipment_id=x.id) }}">{{ x.equipment_no }} — {{ x.name }} <small>{{ x.next_service_date or x.calibration_due or x.test_tag_due }}</small></a>{% endfor %}</div>{% endif %}
+</section>
+
+<section class="panel asset-command-panel">
+  <div class="panel-title"><div><span class="eyebrow">All Stock Types</span><h2>Asset Portfolio</h2></div><a href="{{ url_for('vehicle_list') }}">Open inventory</a></div>
+  <div class="asset-portfolio-grid">
+    {% for type_name in ['Car','Caravan','Boat','Motorcycle','Trailer','Other'] %}
+      {% set item = asset_totals.get(type_name) %}
+      <a class="asset-portfolio-card" href="{{ url_for('vehicle_list', asset_type=type_name) }}">
+        <span class="asset-icon">{% if type_name=='Car' %}🚗{% elif type_name=='Caravan' %}🏕️{% elif type_name=='Boat' %}🚤{% elif type_name=='Motorcycle' %}🏍️{% elif type_name=='Trailer' %}🛻{% else %}📦{% endif %}</span>
+        <div><strong>{{ type_name }}</strong><small>{{ item.active if item else 0 }} active · {{ (item.stock_value if item else 0)|money }}</small></div>
+        <b>{{ item.total if item else 0 }}</b>
+      </a>
+    {% endfor %}
+  </div>
+</section>
+
+<section id="workshop-board" class="panel workshop-command-panel">
+  <div class="panel-title"><h2>Workshop Board</h2><span>{{ workshop_metrics.total_jobs or 0 }} total job cards</span></div>
+  <div class="workshop-lanes">
+    <article><span>Open</span><strong>{{ workshop_metrics.open_jobs or 0 }}</strong></article>
+    <article><span>In Progress</span><strong>{{ workshop_metrics.in_progress or 0 }}</strong></article>
+    <article><span>Waiting Parts</span><strong>{{ workshop_metrics.waiting_parts or 0 }}</strong></article>
+    <article><span>Completed</span><strong>{{ workshop_metrics.completed_jobs or 0 }}</strong></article>
+  </div>
+</section>
+
+<div class="command-table-grid">
+  <section id="rego-alerts" class="panel"><div class="panel-title"><h2>Registration Alerts</h2><span>Next 90 days</span></div><table class="compact-table"><tr><th>Vehicle</th><th>Registration</th><th>Expiry</th></tr>{% for v in rego_alerts %}<tr><td><a href="{{ url_for('vehicle_detail', vehicle_id=v.id) }}">{{ v.stock_no }} — {{ v.make }} {{ v.model }}</a></td><td>{{ v.registration or '' }}</td><td>{{ v.rego_expiry }}</td></tr>{% else %}<tr><td colspan="3">No registration alerts.</td></tr>{% endfor %}</table></section>
+  <section id="service-alerts" class="panel"><div class="panel-title"><h2>Service Alerts</h2><span>Next 90 days</span></div><table class="compact-table"><tr><th>Vehicle</th><th>Service Due</th></tr>{% for v in service_alerts %}<tr><td><a href="{{ url_for('vehicle_detail', vehicle_id=v.id) }}">{{ v.stock_no }} — {{ v.make }} {{ v.model }}</a></td><td>{{ v.service_due_date }}</td></tr>{% else %}<tr><td colspan="2">No service alerts.</td></tr>{% endfor %}</table></section>
+</div>
+
+<div class="command-table-grid">
+  <section id="ready-stock" class="panel"><div class="panel-title"><h2>Ready To Advertise</h2><a href="{{ url_for('vehicle_list') }}">Vehicle inventory</a></div><table class="compact-table"><tr><th>Stock</th><th>Vehicle</th><th>Asking Price</th></tr>{% for v in ready_to_advertise %}<tr><td><a href="{{ url_for('vehicle_detail', vehicle_id=v.id) }}">{{ v.stock_no }}</a></td><td>{{ v.year or '' }} {{ v.make }} {{ v.model }}</td><td>{{ v.asking_price|money }}</td></tr>{% else %}<tr><td colspan="3">No vehicles currently marked Ready for Sale.</td></tr>{% endfor %}</table></section>
+  <section class="panel"><div class="panel-title"><h2>Recently Added Stock</h2><span>Latest vehicles</span></div><table class="compact-table"><tr><th>Stock</th><th>Vehicle</th><th>Status</th><th>Purchase</th></tr>{% for v in recent_vehicles %}<tr><td><a href="{{ url_for('vehicle_detail', vehicle_id=v.id) }}">{{ v.stock_no }}</a></td><td>{{ v.year or '' }} {{ v.make }} {{ v.model }}</td><td><span class="status-pill">{{ v.status }}</span></td><td>{{ v.purchase_price_inc_gst|money }}</td></tr>{% else %}<tr><td colspan="4">No vehicles yet.</td></tr>{% endfor %}</table></section>
+</div>
+
+<div class="mini-kpi-grid command-finance-strip">
+  <article><span>Barry Contribution</span><strong>{{ barry_total|money }}</strong></article><article><span>Matt Contribution</span><strong>{{ matt_total|money }}</strong></article><article><span>Expenses</span><strong>{{ expense_total|money }}</strong></article><article><span>Job Cards</span><strong>{{ job_total|money }}</strong></article><article><span>Services</span><strong>{{ service_total|money }}</strong></article><article><span>Parts Used</span><strong>{{ parts_total|money }}</strong></article>
+</div>
+
+<script>
+const statusLabels={{ status_labels|tojson }}; const statusValues={{ status_values|tojson }}; const monthLabels={{ month_labels|tojson }}; const monthValues={{ month_values|tojson }};
+new Chart(document.getElementById('statusChart'),{type:'doughnut',data:{labels:statusLabels,datasets:[{data:statusValues,backgroundColor:['#2467ac','#20a08f','#f19a3e','#7a62b4','#3f8f67','#b75151','#74859a']}]},options:{responsive:true,plugins:{legend:{position:'bottom'}},cutout:'68%'}});
+new Chart(document.getElementById('salesChart'),{type:'line',data:{labels:monthLabels,datasets:[{label:'Sales',data:monthValues,tension:.35,borderColor:'#2e7bd3',backgroundColor:'rgba(46,123,211,.13)',fill:true,pointRadius:4}]},options:{responsive:true,plugins:{legend:{display:false}},scales:{y:{beginAtZero:true,ticks:{callback:value=>'$'+value.toLocaleString()}}}}});
+</script>
+{% endblock %}

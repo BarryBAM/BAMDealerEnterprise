@@ -1,0 +1,32 @@
+
+{% extends "base.html" %}
+{% block title %}Profit Report | BAM Motor Group{% endblock %}
+{% block content %}
+<div class="page-head">
+<div><h1>Vehicle Profit Report</h1><p>Purchase, expenses, job cards, sales and profit/loss by vehicle.</p></div>
+<div><a class="button" href="{{ url_for('export_profit_csv') }}">Export CSV</a></div>
+</div>
+<div class="cards">
+<div class="card"><span>Total Purchases</span><strong>{{ totals.purchase|money }}</strong></div>
+<div class="card"><span>Total Expenses</span><strong>{{ totals.expenses|money }}</strong></div>
+<div class="card"><span>Total Job Cards</span><strong>{{ totals.jobs|money }}</strong></div>
+<div class="card"><span>Total Sales</span><strong>{{ totals.sales|money }}</strong></div>
+<div class="card"><span>Total Profit/Loss</span><strong>{{ totals.profit|money }}</strong></div>
+</div>
+<table>
+<tr><th>Stock</th><th>Vehicle</th><th>Status</th><th>Purchase</th><th>Expenses</th><th>Jobs</th><th>Total Cost</th><th>Sale</th><th>Profit/Loss</th></tr>
+{% for r in rows %}
+<tr>
+<td><a href="{{ url_for('vehicle_detail', vehicle_id=r.id) }}">{{ r.stock_no }}</a></td>
+<td>{{ r.year or '' }} {{ r.make }} {{ r.model }}</td>
+<td>{{ r.status }}</td>
+<td>{{ r.purchase_price_inc_gst|money }}</td>
+<td>{{ r.expenses|money }}</td>
+<td>{{ r.jobs|money }}</td>
+<td>{{ r.total_cost|money }}</td>
+<td>{{ r.sale_price|money }}</td>
+<td class="{% if r.profit < 0 %}loss{% else %}profit{% endif %}">{{ r.profit|money }}</td>
+</tr>
+{% else %}<tr><td colspan="9">No vehicles yet.</td></tr>{% endfor %}
+</table>
+{% endblock %}

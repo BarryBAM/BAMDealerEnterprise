@@ -1,0 +1,952 @@
+{% extends "base.html" %}
+
+{% block title %}Advertisement Studio | BAM Motor Group{% endblock %}
+
+{% block content %}
+
+<style>
+    .studio-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        gap: 20px;
+        flex-wrap: wrap;
+        margin-bottom: 22px;
+    }
+
+    .studio-header h1 {
+        margin: 0 0 6px;
+    }
+
+    .studio-subtitle {
+        margin: 0;
+        color: #64748b;
+    }
+
+    .studio-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+    }
+
+    .hero-layout {
+        display: grid;
+        grid-template-columns: minmax(0, 2fr) minmax(280px, 1fr);
+        gap: 20px;
+        margin-bottom: 24px;
+    }
+
+    .hero-card,
+    .score-card,
+    .ad-panel {
+        background: #fff;
+        border: 1px solid #dbe2ea;
+        border-radius: 16px;
+        box-shadow: 0 7px 24px rgba(15, 23, 42, 0.08);
+    }
+
+    .hero-card {
+        overflow: hidden;
+        min-height: 390px;
+    }
+
+    .hero-photo {
+        width: 100%;
+        height: 390px;
+        display: block;
+        object-fit: cover;
+        background: #e2e8f0;
+    }
+
+    .hero-placeholder {
+        height: 390px;
+        display: grid;
+        place-items: center;
+        background: #e2e8f0;
+        color: #64748b;
+        font-weight: 700;
+    }
+
+    .hero-caption {
+        padding: 14px 18px;
+        font-weight: 700;
+    }
+
+    .score-card {
+        padding: 22px;
+    }
+
+    .score-number {
+        font-size: 46px;
+        font-weight: 800;
+        line-height: 1;
+        margin: 12px 0 5px;
+    }
+
+    .score-stars {
+        font-size: 26px;
+        letter-spacing: 3px;
+    }
+
+    .score-label {
+        font-size: 18px;
+        font-weight: 700;
+        margin-bottom: 16px;
+    }
+
+    .score-list {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+    }
+
+    .score-list li {
+        padding: 7px 0;
+        border-bottom: 1px solid #edf1f5;
+    }
+
+    .score-good {
+        font-weight: 700;
+    }
+
+    .score-warning {
+        color: #9a6700;
+        font-weight: 700;
+    }
+
+    .ad-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(280px, 1fr));
+        gap: 18px;
+    }
+
+    .ad-panel {
+        padding: 18px;
+        min-width: 0;
+    }
+
+    .ad-panel h2 {
+        margin: 0 0 14px;
+    }
+
+    .ad-title,
+    .ad-description {
+        box-sizing: border-box;
+        width: 100%;
+        border: 1px solid #cbd5e1;
+        border-radius: 9px;
+        background: #f8fafc;
+        padding: 11px;
+        font: inherit;
+    }
+
+    .ad-title {
+        font-weight: 700;
+        margin-bottom: 10px;
+    }
+
+    .ad-description {
+        min-height: 325px;
+        resize: vertical;
+        line-height: 1.5;
+        white-space: pre-wrap;
+    }
+
+    .counter-row {
+        display: flex;
+        justify-content: space-between;
+        gap: 10px;
+        margin-top: 8px;
+        color: #64748b;
+        font-size: 13px;
+    }
+
+    .counter-warning {
+        color: #b45309;
+        font-weight: 700;
+    }
+
+    .panel-button {
+        width: 100%;
+        margin-top: 12px;
+    }
+
+    .copy-message {
+        display: none;
+        text-align: center;
+        margin-top: 8px;
+        color: #15803d;
+        font-weight: 700;
+    }
+
+    .gallery-section {
+        margin-top: 28px;
+    }
+
+    .photo-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+        gap: 15px;
+    }
+
+    .photo-card {
+        overflow: hidden;
+        background: #fff;
+        border: 1px solid #dbe2ea;
+        border-radius: 12px;
+    }
+
+    .photo-card img {
+        width: 100%;
+        height: 155px;
+        object-fit: cover;
+        display: block;
+    }
+
+    .photo-card small {
+        display: block;
+        padding: 9px 11px;
+    }
+
+    .empty-message {
+        padding: 28px;
+        border: 1px dashed #94a3b8;
+        border-radius: 12px;
+        text-align: center;
+        color: #64748b;
+    }
+
+    @media (max-width: 1100px) {
+        .ad-grid {
+            grid-template-columns: 1fr;
+        }
+    }
+
+    @media (max-width: 800px) {
+        .hero-layout {
+            grid-template-columns: 1fr;
+        }
+    }
+
+    @media print {
+        nav,
+        header,
+        .studio-actions,
+        .panel-button,
+        .copy-message {
+            display: none !important;
+        }
+
+        .hero-layout,
+        .ad-grid {
+            display: block;
+        }
+
+        .hero-card,
+        .score-card,
+        .ad-panel {
+            box-shadow: none;
+            margin-bottom: 18px;
+            break-inside: avoid;
+        }
+
+        .ad-description {
+            min-height: 230px;
+        }
+    }
+</style>
+
+<div class="studio-header">
+    <div>
+        <h1>Dealer Advertisement Studio</h1>
+        <p class="studio-subtitle">
+            {{ vehicle.stock_no }} — {{ title }}
+        </p>
+    </div>
+
+    <div class="studio-actions">
+    <a class="button"
+       href="{{ url_for('vehicle_detail', vehicle_id=vehicle.id) }}">
+        Back to Vehicle
+        <button class="button"
+        type="button"
+        onclick="generateProfessionalAds()">
+    🤖 Generate Professional Ads
+</button>
+    </a>
+
+    <button class="button"
+            type="button"
+            onclick="improveAllAdvertisements()">
+        ✨ Improve All Ads
+    </button>
+
+    <button class="button"
+            type="button"
+            onclick="copyAllAds()">
+        Copy All
+    </button>
+
+    <button class="button"
+            type="button"
+            onclick="downloadTextFile()">
+        Download TXT
+    </button>
+
+    <button class="button"
+            type="button"
+            onclick="window.print()">
+        Print / Save PDF
+    </button>
+</div>
+</div>
+
+<div class="hero-layout">
+
+    <section class="hero-card">
+        {% if photos %}
+            <img
+                id="hero-photo"
+                class="hero-photo"
+                src="{{ url_for('uploaded_file', filename=photos[0].filename) }}"
+                alt="{{ photos[0].caption or title }}"
+            >
+            <div id="hero-caption" class="hero-caption">
+                {{ photos[0].caption or title }}
+            </div>
+        {% elif vehicle.photo_filename %}
+            <img
+                id="hero-photo"
+                class="hero-photo"
+                src="{{ url_for('uploaded_file', filename=vehicle.photo_filename) }}"
+                alt="{{ title }}"
+            >
+            <div id="hero-caption" class="hero-caption">{{ title }}</div>
+        {% else %}
+            <div class="hero-placeholder">No featured vehicle photo</div>
+        {% endif %}
+    </section>
+
+    <aside class="score-card">
+        <h2>Advertisement Score</h2>
+
+        <div id="score-number" class="score-number">0%</div>
+        <div id="score-stars" class="score-stars">☆☆☆☆☆</div>
+        <div id="score-label" class="score-label">Checking advertisement…</div>
+
+        <ul class="score-list">
+            <li id="check-kilometres">Checking kilometres…</li>
+            <li id="check-registration">Checking registration…</li>
+            <li id="check-roadworthy">Checking roadworthy…</li>
+            <li id="check-contact">Checking dealer contact…</li>
+            <li id="check-photo">
+                {% if photos or vehicle.photo_filename %}
+                    Vehicle photo included
+                {% else %}
+                    Vehicle photo missing
+                {% endif %}
+            </li>
+        </ul>
+    </aside>
+
+</div>
+
+<div class="ad-grid">
+
+    <section class="ad-panel">
+        <h2>Facebook Marketplace</h2>
+
+        <input
+            id="facebook-title"
+            class="ad-title"
+            value="{{ title }}"
+        >
+
+        <textarea
+            id="facebook-ad"
+            class="ad-description"
+            data-limit="5000"
+        >{{ marketplace }}</textarea>
+
+        <div class="counter-row">
+            <span>Facebook listing</span>
+            <span id="facebook-counter">0 / 5000</span>
+        </div>
+
+        <button
+            class="button panel-button"
+            type="button"
+            onclick="copyAdvertisement(
+                'facebook-title',
+                'facebook-ad',
+                'facebook-message'
+            )"
+        >
+            Copy Facebook Advertisement
+        </button>
+
+        <div id="facebook-message" class="copy-message">
+            Facebook advertisement copied.
+        </div>
+    </section>
+
+    <section class="ad-panel">
+        <h2>Carsales Advertisement</h2>
+
+        <input
+            id="carsales-title"
+            class="ad-title"
+            value="{{ title }}"
+        >
+
+        <textarea
+            id="carsales-ad"
+            class="ad-description"
+            data-limit="8000"
+        >{{ carsales }}</textarea>
+
+        <div class="counter-row">
+            <span>Carsales listing</span>
+            <span id="carsales-counter">0 / 8000</span>
+        </div>
+
+        <button
+            class="button panel-button"
+            type="button"
+            onclick="copyAdvertisement(
+                'carsales-title',
+                'carsales-ad',
+                'carsales-message'
+            )"
+        >
+            Copy Carsales Advertisement
+        </button>
+
+        <div id="carsales-message" class="copy-message">
+            Carsales advertisement copied.
+        </div>
+    </section>
+
+    <section class="ad-panel">
+        <h2>Gumtree / Trading Post</h2>
+
+        <input
+            id="gumtree-title"
+            class="ad-title"
+            value="{{ title }}"
+        >
+
+        <textarea
+            id="gumtree-ad"
+            class="ad-description"
+            data-limit="4000"
+        >{{ gumtree }}</textarea>
+
+        <div class="counter-row">
+            <span>Gumtree listing</span>
+            <span id="gumtree-counter">0 / 4000</span>
+        </div>
+
+        <button
+            class="button panel-button"
+            type="button"
+            onclick="copyAdvertisement(
+                'gumtree-title',
+                'gumtree-ad',
+                'gumtree-message'
+            )"
+        >
+            Copy Gumtree Advertisement
+        </button>
+
+        <div id="gumtree-message" class="copy-message">
+            Gumtree advertisement copied.
+        </div>
+    </section>
+
+</div>
+
+<section class="gallery-section">
+    <h2>Vehicle Photo Gallery</h2>
+
+    {% if photos %}
+        <div class="photo-grid">
+            {% for photo in photos %}
+                <button
+                    class="photo-card"
+                    type="button"
+                    onclick="setHeroPhoto(
+                        '{{ url_for('uploaded_file', filename=photo.filename) }}',
+                        '{{ photo.caption or title }}'
+                    )"
+                >
+                    <img
+                        src="{{ url_for('uploaded_file', filename=photo.filename) }}"
+                        alt="{{ photo.caption or title }}"
+                    >
+                    <small>{{ photo.caption or "Vehicle photo" }}</small>
+                </button>
+            {% endfor %}
+        </div>
+    {% else %}
+        <div class="empty-message">
+            No additional vehicle photos have been uploaded.
+        </div>
+    {% endif %}
+</section>
+
+<script>
+    const advertisementFields = [
+        {
+            title: "facebook-title",
+            text: "facebook-ad",
+            counter: "facebook-counter"
+        },
+        {
+            title: "carsales-title",
+            text: "carsales-ad",
+            counter: "carsales-counter"
+        },
+        {
+            title: "gumtree-title",
+            text: "gumtree-ad",
+            counter: "gumtree-counter"
+        }
+    ];
+
+    function setHeroPhoto(photoUrl, caption) {
+        const heroPhoto = document.getElementById("hero-photo");
+        const heroCaption = document.getElementById("hero-caption");
+
+        if (heroPhoto) {
+            heroPhoto.src = photoUrl;
+        }
+
+        if (heroCaption) {
+            heroCaption.textContent = caption;
+        }
+    }
+
+    function advertisementText(titleId, textId) {
+        const title = document.getElementById(titleId).value.trim();
+        const description = document.getElementById(textId).value.trim();
+
+        return title + "\n\n" + description;
+    }
+
+    async function copyText(text) {
+        try {
+            await navigator.clipboard.writeText(text);
+        } catch (error) {
+            const temporaryBox = document.createElement("textarea");
+            temporaryBox.value = text;
+            document.body.appendChild(temporaryBox);
+            temporaryBox.select();
+            document.execCommand("copy");
+            document.body.removeChild(temporaryBox);
+        }
+    }
+
+    async function copyAdvertisement(titleId, textId, messageId) {
+        await copyText(advertisementText(titleId, textId));
+
+        const message = document.getElementById(messageId);
+        message.style.display = "block";
+
+        setTimeout(function () {
+            message.style.display = "none";
+        }, 2500);
+    }
+
+    async function copyAllAds() {
+        const combinedText =
+            "FACEBOOK MARKETPLACE\n\n" +
+            advertisementText("facebook-title", "facebook-ad") +
+            "\n\n----------------------------------------\n\n" +
+            "CARSALES\n\n" +
+            advertisementText("carsales-title", "carsales-ad") +
+            "\n\n----------------------------------------\n\n" +
+            "GUMTREE / TRADING POST\n\n" +
+            advertisementText("gumtree-title", "gumtree-ad");
+
+        await copyText(combinedText);
+        alert("All advertisements copied.");
+    }
+
+    function downloadTextFile() {
+        const combinedText =
+            "BAM MOTOR GROUP — DEALER ADVERTISEMENT PACK\n\n" +
+            "Stock Number: {{ vehicle.stock_no }}\n\n" +
+            "FACEBOOK MARKETPLACE\n\n" +
+            advertisementText("facebook-title", "facebook-ad") +
+            "\n\n========================================\n\n" +
+            "CARSALES\n\n" +
+            advertisementText("carsales-title", "carsales-ad") +
+            "\n\n========================================\n\n" +
+            "GUMTREE / TRADING POST\n\n" +
+            advertisementText("gumtree-title", "gumtree-ad");
+
+        const fileBlob = new Blob(
+            [combinedText],
+            { type: "text/plain;charset=utf-8" }
+        );
+
+        const downloadLink = document.createElement("a");
+        downloadLink.href = URL.createObjectURL(fileBlob);
+        downloadLink.download =
+            "{{ vehicle.stock_no }} - {{ title }}.txt"
+                .replace(/[\\/:*?"<>|]/g, "-");
+
+        document.body.appendChild(downloadLink);
+        downloadLink.click();
+        document.body.removeChild(downloadLink);
+
+        URL.revokeObjectURL(downloadLink.href);
+    }
+
+    function updateCharacterCounter(textarea, counterId) {
+        const limit = Number(textarea.dataset.limit);
+        const currentLength = textarea.value.length;
+        const counter = document.getElementById(counterId);
+
+        counter.textContent = currentLength + " / " + limit;
+
+        if (currentLength > limit) {
+            counter.classList.add("counter-warning");
+        } else {
+            counter.classList.remove("counter-warning");
+        }
+    }
+
+    function containsAny(text, values) {
+        const lowerText = text.toLowerCase();
+
+        return values.some(function (value) {
+            return lowerText.includes(value);
+        });
+    }
+
+    function setChecklistItem(elementId, passed, goodText, warningText) {
+        const element = document.getElementById(elementId);
+
+        if (passed) {
+            element.textContent = "✓ " + goodText;
+            element.className = "score-good";
+        } else {
+            element.textContent = "△ " + warningText;
+            element.className = "score-warning";
+        }
+    }
+
+    function calculateAdvertisementScore() {
+        const text =
+            document.getElementById("facebook-ad").value.toLowerCase();
+
+        const checks = {
+            kilometres: containsAny(text, [" km", "kilometre", "odometer"]),
+            registration: containsAny(text, ["registration", "rego"]),
+            roadworthy: containsAny(text, ["roadworthy", "rwc"]),
+            contact: containsAny(text, [
+                "contact",
+                "bam motor group",
+                "phone",
+                "call"
+            ]),
+            photo: {{ "true" if photos or vehicle.photo_filename else "false" }}
+        };
+
+        setChecklistItem(
+            "check-kilometres",
+            checks.kilometres,
+            "Kilometres included",
+            "Add kilometres"
+        );
+
+        setChecklistItem(
+            "check-registration",
+            checks.registration,
+            "Registration included",
+            "Add registration details"
+        );
+
+        setChecklistItem(
+            "check-roadworthy",
+            checks.roadworthy,
+            "Roadworthy information included",
+            "Add roadworthy information"
+        );
+
+        setChecklistItem(
+            "check-contact",
+            checks.contact,
+            "Dealer contact included",
+            "Add dealer contact details"
+        );
+
+        setChecklistItem(
+            "check-photo",
+            checks.photo,
+            "Vehicle photo included",
+            "Add a vehicle photo"
+        );
+
+        const passedChecks = Object.values(checks).filter(Boolean).length;
+        const score = Math.round((passedChecks / 5) * 100);
+        const stars = Math.max(1, Math.round(score / 20));
+
+        document.getElementById("score-number").textContent = score + "%";
+        document.getElementById("score-stars").textContent =
+            "★".repeat(stars) + "☆".repeat(5 - stars);
+
+        let scoreLabel = "Needs Improvement";
+
+        if (score >= 100) {
+            scoreLabel = "Excellent Advertisement";
+        } else if (score >= 80) {
+            scoreLabel = "Ready to Publish";
+        } else if (score >= 60) {
+            scoreLabel = "Good — Add More Detail";
+        }
+
+        document.getElementById("score-label").textContent = scoreLabel;
+    }
+
+    advertisementFields.forEach(function (field) {
+        const textarea = document.getElementById(field.text);
+
+        updateCharacterCounter(textarea, field.counter);
+
+        textarea.addEventListener("input", function () {
+            updateCharacterCounter(textarea, field.counter);
+            calculateAdvertisementScore();
+        });
+    });
+
+    calculateAdvertisementScore();
+    function improveAllAdvertisements() {
+    const upgradeText = "\n\nWhy buy from BAM Motor Group?\n" +
+        "• Quality vehicle presentation\n" +
+        "• Honest, straightforward service\n" +
+        "• Buy • Sell • Trade\n" +
+        "• Inspection by appointment";
+
+    advertisementFields.forEach(function (field) {
+        const textarea = document.getElementById(field.text);
+
+        if (!textarea.value.includes("Why buy from BAM Motor Group?")) {
+            textarea.value = textarea.value.trim() + upgradeText;
+        }
+
+        updateCharacterCounter(textarea, field.counter);
+    });
+
+    calculateAdvertisementScore();
+
+    alert("Professional advertisement improvements applied.");
+}
+function generateProfessionalAds() {
+    const vehicle = {
+        year: {{ vehicle.year|default("", true)|tojson }},
+        make: {{ vehicle.make|default("", true)|tojson }},
+        model: {{ vehicle.model|default("", true)|tojson }},
+        variant: {{ vehicle.variant|default("", true)|tojson }},
+        kilometres: {{ vehicle.odometer_km|default(0, true)|tojson }},
+        registration: {{ vehicle.registration|default("Not listed", true)|tojson }},
+        colour: {{ vehicle.colour|default("Not listed", true)|tojson }},
+        roadworthy: {{ vehicle.roadworthy_status|default("Not checked", true)|tojson }},
+        stockNumber: {{ vehicle.stock_no|default("", true)|tojson }},
+        notes: {{ vehicle.notes|default("", true)|tojson }},
+        serviceHistory: {{ vehicle.service_history|default("", true)|tojson }},
+        transmission: {{ vehicle.transmission|default("", true)|tojson }},
+        fuelType: {{ vehicle.fuel_type|default("", true)|tojson }},
+        bodyType: {{ vehicle.body_type|default("", true)|tojson }}
+    };
+
+    const vehicleName = [
+        vehicle.year,
+        vehicle.make,
+        vehicle.model,
+        vehicle.variant
+    ].filter(Boolean).join(" ");
+
+    const combinedDetails = [
+        vehicleName,
+        vehicle.notes,
+        vehicle.serviceHistory,
+        vehicle.transmission,
+        vehicle.fuelType,
+        vehicle.bodyType
+    ].join(" ").toLowerCase();
+
+    const formattedKilometres = vehicle.kilometres
+        ? Number(vehicle.kilometres).toLocaleString() + " km"
+        : "Kilometres available on request";
+
+    function containsAny(words) {
+        return words.some(function (word) {
+            return combinedDetails.includes(word);
+        });
+    }
+
+    const features = [];
+
+    if (containsAny(["park lane"])) {
+        features.push("Desirable Park Lane special edition");
+    }
+
+    if (containsAny(["john cooper works", "jcw"])) {
+        features.push("John Cooper Works performance specification");
+    }
+
+    if (containsAny(["convertible", "cabriolet", "soft top"])) {
+        features.push("Convertible roof for open-air motoring");
+    }
+
+    if (containsAny(["leather", "full leather"])) {
+        features.push("Leather interior");
+    }
+
+    if (containsAny(["manual", "6 speed", "six speed"])) {
+        features.push("Engaging manual transmission");
+    }
+
+    if (containsAny(["automatic", "auto"])) {
+        features.push("Easy-to-drive automatic transmission");
+    }
+
+    if (containsAny(["turbo", "supercharged"])) {
+        features.push("Responsive performance engine");
+    }
+
+    if (containsAny(["full service history", "fully serviced"])) {
+        features.push("Comprehensive service history");
+    }
+
+    if (containsAny(["one owner", "1 owner"])) {
+        features.push("One-owner vehicle");
+    }
+
+    if (containsAny(["m sport", "m-sport"])) {
+        features.push("M Sport specification");
+    }
+
+    if (containsAny(["amg"])) {
+        features.push("AMG specification");
+    }
+
+    if (containsAny(["s line", "s-line"])) {
+        features.push("S line specification");
+    }
+
+    if (containsAny(["sunroof", "panoramic"])) {
+        features.push("Sunroof");
+    }
+
+    if (containsAny(["navigation", "sat nav", "gps"])) {
+        features.push("Satellite navigation");
+    }
+
+    if (containsAny(["reverse camera", "reversing camera"])) {
+        features.push("Reverse camera");
+    }
+
+    if (containsAny(["heated seats"])) {
+        features.push("Heated seats");
+    }
+
+    if (
+        vehicle.kilometres &&
+        Number(vehicle.kilometres) > 0 &&
+        Number(vehicle.kilometres) < 100000
+    ) {
+        features.push("Low kilometres for its age");
+    }
+
+    const featureSection = features.length
+        ? "\n\nKEY FEATURES\n" +
+          features.map(function (feature) {
+              return "✓ " + feature;
+          }).join("\n")
+        : "";
+
+    const serviceStatement =
+        containsAny(["full service history", "fully serviced"])
+            ? "It has been well maintained and comes with reassuring service history."
+            : "It presents as a practical opportunity for its next owner.";
+
+    const openingDescription =
+        "Beautifully presented " + vehicleName +
+        " finished in " + vehicle.colour + ". " +
+        "This vehicle has travelled " + formattedKilometres + ". " +
+        serviceStatement;
+
+    const vehicleDetails =
+        "VEHICLE DETAILS\n" +
+        "• Kilometres: " + formattedKilometres + "\n" +
+        "• Registration: " + vehicle.registration + "\n" +
+        "• Colour: " + vehicle.colour + "\n" +
+        "• Roadworthy: " + vehicle.roadworthy + "\n" +
+        "• Stock Number: " + vehicle.stockNumber;
+
+    const dealerClosing =
+        "Trade-ins are welcome and inspections can be arranged by appointment.\n\n" +
+        "Contact BAM Motor Group today.\n" +
+        "Buy • Sell • Trade\n" +
+        "Quality Vehicles. Honest Deals.";
+
+    const facebookText =
+        openingDescription +
+        featureSection +
+        "\n\n" +
+        vehicleDetails +
+        "\n\n" +
+        "Comfortable, distinctive and enjoyable to drive, this vehicle is " +
+        "well suited to everyday use or weekend motoring.\n\n" +
+        dealerClosing;
+
+    const carsalesText =
+        "BAM Motor Group is pleased to present this " + vehicleName + ".\n\n" +
+        openingDescription +
+        featureSection +
+        "\n\n" +
+        vehicleDetails +
+        "\n\n" +
+        "The vehicle can be inspected by appointment. Please contact our team " +
+        "for further information, additional photographs or to arrange a test drive.\n\n" +
+        dealerClosing;
+
+    const gumtreeText =
+        vehicleName + " now available from BAM Motor Group.\n\n" +
+        openingDescription +
+        featureSection +
+        "\n\n" +
+        vehicleDetails +
+        "\n\n" +
+        "An appealing vehicle with plenty of character, ready for its next owner.\n\n" +
+        dealerClosing;
+
+    document.getElementById("facebook-title").value = vehicleName;
+    document.getElementById("facebook-ad").value = facebookText;
+
+    document.getElementById("carsales-title").value = vehicleName;
+    document.getElementById("carsales-ad").value = carsalesText;
+
+    document.getElementById("gumtree-title").value = vehicleName;
+    document.getElementById("gumtree-ad").value = gumtreeText;
+
+    advertisementFields.forEach(function (field) {
+        const textarea = document.getElementById(field.text);
+        updateCharacterCounter(textarea, field.counter);
+    });
+
+    calculateAdvertisementScore();
+
+    alert(
+        "Intelligent advertisements generated with " +
+        features.length +
+        " detected selling features."
+    );
+}
+</script>
+
+{% endblock %}

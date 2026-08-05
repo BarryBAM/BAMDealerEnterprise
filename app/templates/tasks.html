@@ -1,0 +1,40 @@
+
+{% extends "base.html" %}
+{% block title %}Tasks | BAM Motor Group{% endblock %}
+{% block content %}
+<div class="page-head"><div><h1>Tasks</h1><p>Daily dealership and vehicle preparation work.</p></div></div>
+<div class="dashboard-grid">
+<section class="panel">
+<h2>Add Task</h2>
+<form method="post" class="stack">
+<select name="vehicle_id"><option value="">General business task</option>{% for v in vehicles %}<option value="{{ v.id }}">{{ v.stock_no }} — {{ v.make }} {{ v.model }}</option>{% endfor %}</select>
+<div class="form-two"><label>Task Date<input type="date" name="task_date"></label><label>Due Date<input type="date" name="due_date"></label></div>
+<input name="title" placeholder="Task title" required>
+<div class="form-two">
+<select name="category"><option>Workshop</option><option>Compliance</option><option>Presentation</option><option>Photography</option><option>Advertising</option><option>Sales</option><option>Administration</option><option>Other</option></select>
+<select name="assigned_to"><option>Barry</option><option>Matt</option><option>Shared</option><option>Workshop</option></select>
+</div>
+<div class="form-two">
+<select name="priority"><option>Normal</option><option>High</option><option>Urgent</option></select>
+<select name="status"><option>Open</option><option>In Progress</option><option>Completed</option></select>
+</div>
+<textarea name="notes" placeholder="Task notes"></textarea>
+<button>Add Task</button>
+</form>
+</section>
+<section class="panel">
+<h2>Task Register</h2>
+<table>
+<tr><th>Due</th><th>Vehicle</th><th>Task</th><th>Assigned</th><th>Priority</th><th>Status</th><th></th></tr>
+{% for t in rows %}
+<tr class="{% if t.priority=='Urgent' and t.status!='Completed' %}urgent-row{% endif %}">
+<td>{{ t.due_date or '' }}</td>
+<td>{% if t.vehicle_id %}<a href="{{ url_for('vehicle_detail', vehicle_id=t.vehicle_id) }}">{{ t.stock_no }}</a>{% endif %}</td>
+<td>{{ t.title }}</td><td>{{ t.assigned_to or '' }}</td><td>{{ t.priority }}</td><td>{{ t.status }}</td>
+<td>{% if t.status!='Completed' %}<form method="post" action="{{ url_for('complete_task', task_id=t.id) }}"><button class="small-button" type="submit">Complete</button></form>{% endif %}</td>
+</tr>
+{% else %}<tr><td colspan="7">No tasks yet.</td></tr>{% endfor %}
+</table>
+</section>
+</div>
+{% endblock %}

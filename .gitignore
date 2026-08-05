@@ -1,0 +1,13 @@
+.venv/
+__pycache__/
+*.py[cod]
+.env
+.vscode/
+database/*.db
+database/*.db-*
+uploads/*
+!uploads/.keep
+backups/*
+!backups/.keep
+reports/*
+!reports/.keep

@@ -1,0 +1,40 @@
+
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>{{ sale.contract_number }} | BAM Motor Group</title>
+<style>
+body{font-family:Arial,sans-serif;margin:30px;color:#1f2937}h1,h2{color:#0b1f3a}
+header{display:flex;justify-content:space-between;border-bottom:4px solid #0b1f3a;padding-bottom:15px}
+table{width:100%;border-collapse:collapse;margin:18px 0}th,td{border:1px solid #cbd5e1;padding:9px;text-align:left}
+th{background:#e2e8f0}.signatures{display:grid;grid-template-columns:1fr 1fr;gap:50px;margin-top:70px}
+.line{border-top:1px solid #111;padding-top:8px}.print{float:right}
+@media print{.print{display:none}body{margin:10mm}}
+</style>
+</head>
+<body>
+<button class="print" onclick="window.print()">Print Contract</button>
+<header><div><h1>BAM Motor Group</h1><p>Buy • Sell • Trade</p></div><div><b>SALES CONTRACT</b><br>{{ sale.contract_number }}<br>{{ sale.sale_date or '' }}</div></header>
+<h2>Buyer</h2>
+<p><strong>{{ sale.buyer_name or '' }}</strong><br>{{ sale.buyer_address or '' }}<br>{{ sale.buyer_phone or '' }}<br>{{ sale.buyer_email or '' }}</p>
+<h2>Vehicle</h2>
+<table>
+<tr><th>Stock</th><td>{{ vehicle.stock_no }}</td><th>VIN</th><td>{{ vehicle.vin or '' }}</td></tr>
+<tr><th>Vehicle</th><td>{{ vehicle.year or '' }} {{ vehicle.make }} {{ vehicle.model }} {{ vehicle.variant or '' }}</td><th>Registration</th><td>{{ vehicle.registration or '' }}</td></tr>
+<tr><th>Odometer</th><td>{{ vehicle.odometer_km or '' }}</td><th>Colour</th><td>{{ vehicle.colour or '' }}</td></tr>
+</table>
+<h2>Purchase Details</h2>
+<table>
+<tr><th>Sale Price Inc GST</th><td>{{ sale.sale_price_inc_gst|money }}</td></tr>
+<tr><th>Deposit</th><td>{{ sale.deposit_amount|money }} on {{ sale.deposit_date or '' }}</td></tr>
+<tr><th>Trade-in Value</th><td>{{ sale.trade_in_value|money }}</td></tr>
+<tr><th>Balance Due</th><td><strong>{{ balance_due|money }}</strong></td></tr>
+<tr><th>Payment Method</th><td>{{ sale.payment_method or '' }}</td></tr>
+<tr><th>Warranty</th><td>{{ sale.warranty_type or '' }}{% if sale.warranty_expiry %} — expires {{ sale.warranty_expiry }}{% endif %}</td></tr>
+</table>
+{% if sale.trade_in_description %}<h2>Trade-in</h2><p>{{ sale.trade_in_description }}</p>{% endif %}
+{% if sale.notes %}<h2>Terms / Notes</h2><p>{{ sale.notes }}</p>{% endif %}
+<div class="signatures"><div class="line">Buyer Signature / Date</div><div class="line">BAM Motor Group / Date</div></div>
+</body>
+</html>

@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}New Shipment | BAM Motor Group{% endblock %}
+{% block content %}
+<div class="page-head"><div><span class="eyebrow">Parts Dispatch</span><h1>Create Shipment</h1><p>Create the packing record and printable address label.</p></div><a class="button secondary" href="{{ url_for('shipping_centre') }}">Back</a></div>
+<form method="post" class="panel grid-form">
+  <div class="form-two"><label>Shipment Number<input name="shipment_number" value="{{ suggested_number }}" required></label><label>Part<select name="part_id"><option value="">General / unlinked shipment</option>{% for p in parts %}<option value="{{ p.id }}" {% if selected_part_id==p.id %}selected{% endif %}>{{ p.part_number or 'Unnumbered' }} — {{ p.part_name }} ({{ p.quantity_on_hand }} available)</option>{% endfor %}</select></label></div>
+  <div class="form-three"><label>Quantity<input type="number" min="0.01" step="0.01" name="quantity" value="1" required></label><label>Courier<select name="courier"><option>Australia Post</option><option>StarTrack</option><option>Aramex</option><option>TNT / FedEx</option><option>Toll</option><option>CouriersPlease</option><option>Customer Pickup</option><option>Other</option></select></label><label>Status<select name="status"><option>Ready to Pack</option><option>Packed</option><option>Sent</option></select></label></div>
+  <h2>Customer & Delivery</h2>
+  <div class="form-two"><label>Customer Name<input name="customer_name" required></label><label>Phone<input name="customer_phone"></label></div>
+  <div class="form-two"><label>Email<input type="email" name="customer_email"></label><label>Address<input name="address_line" required></label></div>
+  <div class="form-three"><label>Suburb<input name="suburb"></label><label>State<select name="state"><option></option>{% for st in ['NSW','VIC','QLD','SA','WA','TAS','NT','ACT'] %}<option>{{ st }}</option>{% endfor %}</select></label><label>Postcode<input name="postcode" inputmode="numeric"></label></div>
+  <h2>Parcel & Freight</h2>
+  <div class="form-three"><label>Weight (kg)<input type="number" step="0.01" name="parcel_weight_kg"></label><label>Tracking Number<input name="tracking_number"></label><label>Date Sent<input type="date" name="date_sent"></label></div>
+  <div class="form-three"><label>Length (cm)<input type="number" step="0.1" name="parcel_length_cm"></label><label>Width (cm)<input type="number" step="0.1" name="parcel_width_cm"></label><label>Height (cm)<input type="number" step="0.1" name="parcel_height_cm"></label></div>
+  <div class="form-two"><label>Courier Cost<input type="number" step="0.01" name="shipping_cost"></label><label>Freight Charged to Customer<input type="number" step="0.01" name="freight_charged"></label></div>
+  <div class="check-grid"><label><input type="checkbox" name="deduct_stock" value="1" checked> Deduct quantity from part stock</label><label><input type="checkbox" name="invoice_included"> Invoice included</label><label><input type="checkbox" name="bubble_wrapped"> Bubble wrapped</label><label><input type="checkbox" name="box_sealed"> Box sealed</label><label><input type="checkbox" name="tracking_sent"> Tracking sent to customer</label></div>
+  <label>Notes<textarea name="notes" rows="4" placeholder="Packing instructions, fragile items, warranty or delivery notes"></textarea></label>
+  <button class="save-button" type="submit">Create Shipment</button>
+</form>
+{% endblock %}

@@ -1,0 +1,16 @@
+
+{% extends "base.html" %}
+{% block title %}Stock Age | BAM Motor Group{% endblock %}
+{% block content %}
+<h1>Stock Age Report</h1>
+<table>
+<tr><th>Stock</th><th>Vehicle</th><th>Status</th><th>Purchase Date</th><th>Days in Stock</th><th>Purchase</th><th>Expenses</th><th>Jobs</th></tr>
+{% for v in rows %}
+<tr class="{% if (v.days_in_stock or 0)>90 %}urgent-row{% elif (v.days_in_stock or 0)>60 %}warning-row{% endif %}">
+<td><a href="{{ url_for('vehicle_detail', vehicle_id=v.id) }}">{{ v.stock_no }}</a></td>
+<td>{{ v.year or '' }} {{ v.make }} {{ v.model }}</td><td>{{ v.status }}</td><td>{{ v.purchase_date or '' }}</td><td>{{ v.days_in_stock or 0 }}</td>
+<td>{{ v.purchase_price_inc_gst|money }}</td><td>{{ v.expenses|money }}</td><td>{{ v.jobs|money }}</td>
+</tr>
+{% else %}<tr><td colspan="8">No active stock.</td></tr>{% endfor %}
+</table>
+{% endblock %}
