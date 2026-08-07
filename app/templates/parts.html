@@ -2,8 +2,8 @@
 {% block title %}Parts Centre | BAM Motor Group{% endblock %}
 {% block content %}
 <div class="page-head inventory-head">
-  <div><span class="eyebrow">Version 19 • Professional Parts</span><h1>Parts Centre</h1><p>Search, photograph, price, reserve, sell and trace every part back to its donor vehicle.</p></div>
-  <div><a class="button" href="{{ url_for('shipping_new') }}">📦 Create Shipment</a> <a class="button secondary" href="{{ url_for('shipping_centre') }}">Shipping Centre</a></div>
+  <div><span class="eyebrow">Version 21 • Professional Parts & Profit Centre</span><h1>Parts Centre</h1><p>Search, photograph, price, reserve, sell and trace every part back to its donor vehicle.</p></div>
+  <div><a class="button" href="{{ url_for('shipping_new') }}">📦 Create Shipment</a> <a class="button secondary" href="{{ url_for('dismantling_profit_report') }}">💰 Dismantling Profit</a> <a class="button secondary" href="{{ url_for('shipping_centre') }}">Shipping Centre</a></div>
 </div>
 <div class="parts-kpis">
   <article><span>Part Lines</span><strong>{{ part_metrics.part_lines or 0 }}</strong><small>Unique stock records</small></article>
@@ -51,7 +51,7 @@
     {% for p in parts %}<tr class="{% if p.quantity_on_hand <= p.reorder_level and p.status not in ['Sold','Scrap'] %}low-stock{% endif %}">
       <td><strong>{{ p.part_number or 'Unnumbered' }}</strong><small>{{ p.part_name }}{% if p.manufacturer_part_no %} • OEM {{ p.manufacturer_part_no }}{% endif %}</small></td>
       <td>{% if p.vehicle_stock_no %}<strong>{{ p.vehicle_stock_no }}</strong><small>{{ p.year or '' }} {{ p.make or '' }} {{ p.model or '' }}</small>{% else %}—{% endif %}</td>
-      <td>{{ p.condition or 'Used' }}{% if p.position %}<small>{{ p.position }}</small>{% endif %}</td><td><span class="status-pill">{{ p.status or 'In Stock' }}</span></td><td>{{ p.quantity_on_hand }}</td><td>{{ (p.selling_price or 0)|money }}</td><td>{{ p.storage_location or '—' }}</td><td><a class="button small-button" href="{{ url_for('part_detail', part_id=p.id) }}">Open</a></td>
+      <td>{{ p.condition or 'Used' }}{% if p.position %}<small>{{ p.position }}</small>{% endif %}</td><td><span class="status-pill">{{ p.status or 'In Stock' }}</span></td><td>{{ p.quantity_on_hand }}</td><td>{{ (p.selling_price or 0)|money }}</td><td>{{ p.storage_location or '—' }}</td><td><div class="table-actions"><a class="button small-button" href="{{ url_for('part_detail', part_id=p.id) }}">Open</a>{% if p.status not in ['Sold','Scrap'] %}<a class="button secondary small-button" href="{{ url_for('part_edit', part_id=p.id) }}">Edit</a>{% endif %}</div></td>
     </tr>{% else %}<tr><td colspan="8">No parts match the current filters.</td></tr>{% endfor %}
   </table></div>
 </section>

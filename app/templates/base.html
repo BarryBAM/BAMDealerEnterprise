@@ -45,6 +45,7 @@
     <span class="nav-section">Finance & Reports</span>
     <a href="{{ url_for('invoice_centre') }}" class="{% if request.endpoint in ['invoice_centre','sale_invoice_edit','sale_invoice','deal_file'] %}active{% endif %}">🧾 Invoice Centre</a>
     <a href="{{ url_for('profit_report') }}">▥ Profit Report</a>
+    <a href="{{ url_for('dismantling_profit_report') }}">⚙ Dismantling Profit</a>
     <a href="{{ url_for('finance_summary') }}">$ Finance</a>
     <a href="{{ url_for('performance_report') }}">▤ Performance</a>
     <a href="{{ url_for('bas_report') }}">GST BAS</a>

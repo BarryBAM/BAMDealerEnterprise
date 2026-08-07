@@ -1,0 +1,12 @@
+BAM Dealer Enterprise Cloud v21.0
+Dismantling Profit Centre & Editable Parts Inventory
+
+Highlights
+- Every recorded part sale is included automatically in the donor vehicle Financial Snapshot.
+- Financial Snapshot now shows parts revenue, shell/scrap revenue, total revenue, unsold parts retail value, investment recovery percentage, break-even status, remaining amount to break even, and net profit/loss.
+- Parts in Stock now has a direct Edit button for active inventory records.
+- Dismantling Workspace shows live recovery progress, remaining retail value and break-even position.
+- New Dismantling Profit report summarises investment, realised revenue, remaining inventory value and profit by donor vehicle.
+- Part sales now use safer SQLite transactions, record extra sale details, and write an audit-log entry.
+- Part editing now rolls back failed writes cleanly and adds a more useful audit history entry.
+- Existing Azure /home/bam-data databases are upgraded non-destructively; no destructive schema migration is required.

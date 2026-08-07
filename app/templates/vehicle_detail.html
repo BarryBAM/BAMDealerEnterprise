@@ -46,7 +46,7 @@
     </table>
   </div>
   <div class="panel finance-snapshot">
-    <h2>Financial Snapshot</h2>
+    <div class="panel-title"><h2>Financial Snapshot</h2>{% if (vehicle.vehicle_purpose or 'Retail Sale') == 'Parts Vehicle' or vehicle.status == 'BER' %}<span>Version 21 • Donor Profit Centre</span>{% endif %}</div>
     <div class="metric-row"><span>Purchase</span><strong>{{ vehicle.purchase_price_inc_gst|money }}</strong></div>
     <div class="metric-row"><span>Minimum Sale</span><strong>{{ vehicle.minimum_sale_price|money }}</strong></div>
     <div class="metric-row"><span>Asking Price</span><strong>{{ vehicle.asking_price|money }}</strong></div>
@@ -56,7 +56,19 @@
     <div class="metric-row"><span>Service</span><strong>{{ service_total|money }}</strong></div>
     <div class="metric-row"><span>Parts Used</span><strong>{{ parts_total|money }}</strong></div>
     <div class="metric-row total"><span>Total Invested</span><strong>{{ total_invested|money }}</strong></div>
-    <div class="metric-row total"><span>Profit / Loss</span><strong>{{ profit|money }}</strong></div>
+    {% if sale %}<div class="metric-row"><span>Vehicle Sale Revenue</span><strong>{{ sale.sale_price_inc_gst|money }}</strong></div>{% endif %}
+    {% if (vehicle.vehicle_purpose or 'Retail Sale') == 'Parts Vehicle' or vehicle.status == 'BER' or donor_revenue %}
+      <div class="metric-row v21-revenue"><span>Parts Revenue</span><strong>{{ donor_revenue|money }}</strong></div>
+      <div class="metric-row"><span>Shell / Scrap Revenue</span><strong>{{ vehicle.shell_sale_price|money }}</strong></div>
+      <div class="metric-row"><span>Unsold Parts Retail Value</span><strong>{{ donor_metrics.remaining_retail|money }}</strong></div>
+      <div class="metric-row"><span>Parts Sold</span><strong>{{ donor_units_sold|round(0)|int }} units / {{ donor_sale_count }} sale(s)</strong></div>
+      <div class="metric-row"><span>Investment Recovery</span><strong>{{ '%.1f'|format(recovery_pct) }}%</strong></div>
+      <div class="recovery-bar"><span style="width:{{ [recovery_pct,100]|min }}%"></span></div>
+      <div class="metric-row"><span>Break-even</span><strong>{{ break_even_status }}</strong></div>
+      <div class="metric-row"><span>Remaining to Break Even</span><strong>{{ remaining_to_break_even|money }}</strong></div>
+    {% endif %}
+    <div class="metric-row total"><span>Total Revenue</span><strong>{{ total_revenue|money }}</strong></div>
+    <div class="metric-row total {% if profit >= 0 %}profit-positive{% else %}profit-negative{% endif %}"><span>Net Profit / Loss</span><strong>{{ profit|money }}</strong></div>
   </div>
 </section>
 

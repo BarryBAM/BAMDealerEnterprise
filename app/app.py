@@ -46,7 +46,7 @@ app.config.update(
     PERMANENT_SESSION_LIFETIME=timedelta(hours=int(os.environ.get("BAM_SESSION_HOURS", "12"))),
 )
 
-APP_VERSION = "20.1"
+APP_VERSION = "21.0"
 APP_NAME = "BAM Dealer Enterprise Cloud"
 
 ALLOWED_EXTENSIONS = {"png", "jpg", "jpeg", "webp", "pdf"}
@@ -1280,8 +1280,8 @@ def vehicle_detail(vehicle_id):
     sale_price = float(sale["sale_price_inc_gst"] or 0) if sale else 0
     selling_costs = float((sale["advertising_cost"] or 0) + (sale["transfer_cost"] or 0)) if sale else 0
     total_invested = float(vehicle["purchase_price_inc_gst"] or 0) + expense_total + job_total + service_total + parts_total + selling_costs
-    profit = sale_price - total_invested
 
+    # Version 21 - every dismantled-part sale feeds back to the donor vehicle.
     donor_parts = conn.execute(
         "SELECT * FROM parts WHERE vehicle_id=? ORDER BY id DESC", (vehicle_id,)
     ).fetchall()
@@ -1291,12 +1291,21 @@ def vehicle_detail(vehicle_id):
                COALESCE(SUM(quantity_on_hand * selling_price),0) AS remaining_retail
         FROM parts WHERE vehicle_id=?
     """, (vehicle_id,)).fetchone()
-    donor_revenue = conn.execute("""
-        SELECT COALESCE(SUM(ps.sale_price),0) AS revenue
+    donor_sales = conn.execute("""
+        SELECT COALESCE(SUM(ps.sale_price),0) AS revenue,
+               COALESCE(SUM(ps.quantity),0) AS units_sold,
+               COUNT(ps.id) AS sale_count
         FROM part_sales ps JOIN parts p ON p.id=ps.part_id
         WHERE p.vehicle_id=?
-    """, (vehicle_id,)).fetchone()["revenue"]
-    donor_profit = float(donor_revenue or 0) + float(vehicle["shell_sale_price"] or 0) - total_invested
+    """, (vehicle_id,)).fetchone()
+    donor_revenue = float(donor_sales["revenue"] or 0)
+    shell_revenue = float(vehicle["shell_sale_price"] or 0)
+    total_revenue = sale_price + donor_revenue + shell_revenue
+    profit = total_revenue - total_invested
+    donor_profit = donor_revenue + shell_revenue - total_invested
+    recovery_pct = (total_revenue / total_invested * 100) if total_invested > 0 else (100.0 if total_revenue > 0 else 0.0)
+    remaining_to_break_even = max(0.0, total_invested - total_revenue)
+    break_even_status = "Recovered / Profitable" if total_revenue >= total_invested and total_invested > 0 else "Recovering Investment"
     conn.close()
 
     return render_template(
@@ -1319,8 +1328,14 @@ def vehicle_detail(vehicle_id):
         profit=profit,
         donor_parts=donor_parts,
         donor_metrics=donor_metrics,
-        donor_revenue=float(donor_revenue or 0),
+        donor_revenue=donor_revenue,
+        donor_units_sold=float(donor_sales["units_sold"] or 0),
+        donor_sale_count=int(donor_sales["sale_count"] or 0),
         donor_profit=donor_profit,
+        total_revenue=total_revenue,
+        recovery_pct=recovery_pct,
+        remaining_to_break_even=remaining_to_break_even,
+        break_even_status=break_even_status,
     )
 
 @app.route("/vehicles/<int:vehicle_id>/documents", methods=["POST"])
@@ -1951,6 +1966,49 @@ def profit_report():
     return render_template("profit_report.html", rows=report_rows, totals=totals)
 
 
+@app.route("/reports/dismantling-profit")
+@login_required
+def dismantling_profit_report():
+    conn = db()
+    rows = conn.execute("""
+        SELECT v.id,v.stock_no,v.year,v.make,v.model,v.status,v.dismantling_status,
+               v.purchase_price_inc_gst,v.shell_sale_price,
+               COALESCE((SELECT SUM(e.cost_inc_gst) FROM expenses e WHERE e.vehicle_id=v.id),0) AS expenses,
+               COALESCE((SELECT SUM(CASE WHEN j.actual_cost_inc_gst>0 THEN j.actual_cost_inc_gst ELSE j.estimated_cost END)
+                         FROM job_cards j WHERE j.vehicle_id=v.id),0) AS jobs,
+               COALESCE((SELECT SUM(se.cost_inc_gst) FROM service_entries se WHERE se.vehicle_id=v.id),0) AS services,
+               COALESCE((SELECT SUM(pu.quantity_used*pu.unit_cost_inc_gst) FROM part_usage pu WHERE pu.vehicle_id=v.id),0) AS parts_used,
+               COALESCE((SELECT SUM(ps.sale_price) FROM part_sales ps JOIN parts p ON p.id=ps.part_id WHERE p.vehicle_id=v.id),0) AS parts_revenue,
+               COALESCE((SELECT SUM(ps.quantity) FROM part_sales ps JOIN parts p ON p.id=ps.part_id WHERE p.vehicle_id=v.id),0) AS units_sold,
+               COALESCE((SELECT SUM(p.quantity_on_hand*p.selling_price) FROM parts p WHERE p.vehicle_id=v.id),0) AS remaining_retail,
+               COALESCE((SELECT COUNT(*) FROM parts p WHERE p.vehicle_id=v.id),0) AS part_lines,
+               COALESCE((SELECT s.sale_price_inc_gst FROM sales s WHERE s.vehicle_id=v.id),0) AS vehicle_sale
+        FROM vehicles v
+        WHERE COALESCE(v.vehicle_purpose,'Retail Sale')='Parts Vehicle' OR v.status='BER'
+        ORDER BY v.id DESC
+    """).fetchall()
+    conn.close()
+    report_rows = []
+    for row in rows:
+        item = dict(row)
+        invested = sum(float(item[k] or 0) for k in ["purchase_price_inc_gst","expenses","jobs","services","parts_used"])
+        revenue = float(item["parts_revenue"] or 0) + float(item["shell_sale_price"] or 0) + float(item["vehicle_sale"] or 0)
+        item["invested"] = invested
+        item["total_revenue"] = revenue
+        item["profit"] = revenue - invested
+        item["recovery_pct"] = (revenue / invested * 100) if invested > 0 else (100.0 if revenue > 0 else 0.0)
+        item["remaining_to_break_even"] = max(0.0, invested - revenue)
+        report_rows.append(item)
+    totals = {
+        "invested": sum(r["invested"] for r in report_rows),
+        "parts_revenue": sum(float(r["parts_revenue"] or 0) for r in report_rows),
+        "shell_revenue": sum(float(r["shell_sale_price"] or 0) for r in report_rows),
+        "remaining_retail": sum(float(r["remaining_retail"] or 0) for r in report_rows),
+        "profit": sum(r["profit"] for r in report_rows),
+    }
+    return render_template("dismantling_profit_report.html", rows=report_rows, totals=totals)
+
+
 @app.route("/invoices")
 @login_required
 def invoice_centre():
@@ -2267,17 +2325,31 @@ def vehicle_dismantling(vehicle_id):
         return redirect(url_for("vehicle_dismantling", vehicle_id=vehicle_id))
 
     parts = conn.execute("SELECT * FROM parts WHERE vehicle_id=? ORDER BY id DESC", (vehicle_id,)).fetchall()
-    revenue = conn.execute("""
+    revenue = float(conn.execute("""
         SELECT COALESCE(SUM(ps.sale_price),0) AS revenue
         FROM part_sales ps JOIN parts p ON p.id=ps.part_id
         WHERE p.vehicle_id=?
-    """, (vehicle_id,)).fetchone()["revenue"]
-    expense_total = conn.execute("SELECT COALESCE(SUM(cost_inc_gst),0) AS v FROM expenses WHERE vehicle_id=?", (vehicle_id,)).fetchone()["v"]
-    job_total = conn.execute("SELECT COALESCE(SUM(CASE WHEN actual_cost_inc_gst>0 THEN actual_cost_inc_gst ELSE estimated_cost END),0) AS v FROM job_cards WHERE vehicle_id=?", (vehicle_id,)).fetchone()["v"]
-    invested = float(vehicle["purchase_price_inc_gst"] or 0) + float(expense_total or 0) + float(job_total or 0)
-    profit = float(revenue or 0) + float(vehicle["shell_sale_price"] or 0) - invested
+    """, (vehicle_id,)).fetchone()["revenue"] or 0)
+    remaining_retail = float(conn.execute(
+        "SELECT COALESCE(SUM(quantity_on_hand*selling_price),0) AS v FROM parts WHERE vehicle_id=?",
+        (vehicle_id,),
+    ).fetchone()["v"] or 0)
+    expense_total = float(conn.execute("SELECT COALESCE(SUM(cost_inc_gst),0) AS v FROM expenses WHERE vehicle_id=?", (vehicle_id,)).fetchone()["v"] or 0)
+    job_total = float(conn.execute("SELECT COALESCE(SUM(CASE WHEN actual_cost_inc_gst>0 THEN actual_cost_inc_gst ELSE estimated_cost END),0) AS v FROM job_cards WHERE vehicle_id=?", (vehicle_id,)).fetchone()["v"] or 0)
+    service_total = float(conn.execute("SELECT COALESCE(SUM(cost_inc_gst),0) AS v FROM service_entries WHERE vehicle_id=?", (vehicle_id,)).fetchone()["v"] or 0)
+    parts_used_total = float(conn.execute("SELECT COALESCE(SUM(quantity_used*unit_cost_inc_gst),0) AS v FROM part_usage WHERE vehicle_id=?", (vehicle_id,)).fetchone()["v"] or 0)
+    invested = float(vehicle["purchase_price_inc_gst"] or 0) + expense_total + job_total + service_total + parts_used_total
+    realised_revenue = revenue + float(vehicle["shell_sale_price"] or 0)
+    profit = realised_revenue - invested
+    recovery_pct = (realised_revenue / invested * 100) if invested > 0 else (100.0 if realised_revenue > 0 else 0.0)
+    remaining_to_break_even = max(0.0, invested - realised_revenue)
+    break_even_status = "Investment recovered" if realised_revenue >= invested and invested > 0 else "Recovering investment"
     conn.close()
-    return render_template("dismantling.html", vehicle=vehicle, parts=parts, revenue=float(revenue or 0), invested=invested, profit=profit)
+    return render_template(
+        "dismantling.html", vehicle=vehicle, parts=parts, revenue=revenue, invested=invested, profit=profit,
+        remaining_retail=remaining_retail, recovery_pct=recovery_pct,
+        remaining_to_break_even=remaining_to_break_even, break_even_status=break_even_status,
+    )
 
 
 @app.route("/parts/<int:part_id>/sell", methods=["POST"])
@@ -2296,18 +2368,40 @@ def part_sell(part_id):
         return redirect(request.referrer or url_for("parts_page"))
     sale_price = float(request.form.get("sale_price") or part["selling_price"] or 0)
     remaining = max(0, float(part["quantity_on_hand"] or 0) - qty)
-    conn.execute("""
-        INSERT INTO part_sales(part_id,quantity,customer_name,customer_phone,customer_email,sale_price,payment_method,notes)
-        VALUES(?,?,?,?,?,?,?,?)
-    """, (part_id, qty, request.form.get("customer_name"), request.form.get("customer_phone"), request.form.get("customer_email"), sale_price, request.form.get("payment_method"), request.form.get("notes")))
-    conn.execute("UPDATE parts SET quantity_on_hand=?, status=? WHERE id=?", (remaining, "Sold" if remaining <= 0 else "In Stock", part_id))
-    conn.commit()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        conn.execute("""
+            INSERT INTO part_sales(
+                part_id,quantity,customer_name,customer_phone,customer_email,sale_price,freight_cost,
+                payment_method,warranty,invoice_number,notes
+            ) VALUES(?,?,?,?,?,?,?,?,?,?,?)
+        """, (
+            part_id, qty, request.form.get("customer_name"), request.form.get("customer_phone"),
+            request.form.get("customer_email"), sale_price, float(request.form.get("freight_cost") or 0),
+            request.form.get("payment_method"), request.form.get("warranty"),
+            request.form.get("invoice_number"), request.form.get("notes"),
+        ))
+        conn.execute(
+            "UPDATE parts SET quantity_on_hand=?, status=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
+            (remaining, "Sold" if remaining <= 0 else "In Stock", part_id),
+        )
+        conn.commit()
+    except (sqlite3.IntegrityError, sqlite3.OperationalError, ValueError) as exc:
+        conn.rollback()
+        conn.close()
+        flash(f"Could not record part sale: {exc}", "error")
+        return redirect(request.referrer or url_for("part_detail", part_id=part_id))
     vehicle_id = part["vehicle_id"]
+    part_number = part["part_number"] or f"Part {part_id}"
     conn.close()
-    flash("Part sale recorded.", "success")
+    log_action(
+        "Part sold", "part", part_id,
+        f"{part_number}; qty {qty:g}; sale ${sale_price:,.2f}; donor {part['vehicle_stock_no'] or 'none'}",
+    )
+    flash(f"Part sale recorded. {part_number} revenue is now included in the donor vehicle Financial Snapshot.", "success")
     if vehicle_id:
-        return redirect(url_for("vehicle_dismantling", vehicle_id=vehicle_id))
-    return redirect(url_for("parts_page"))
+        return redirect(url_for("vehicle_detail", vehicle_id=vehicle_id))
+    return redirect(url_for("part_detail", part_id=part_id))
 
 
 @app.route("/parts", methods=["GET", "POST"])
@@ -2490,12 +2584,21 @@ def part_edit(part_id):
                 request.form.get("manufacturer_part_no"), request.form.get("reserved_for"), request.form.get("reserved_until") or None, part_id,
             ))
         except sqlite3.IntegrityError:
+            conn.rollback()
             conn.close()
             flash(f"Part number {part_number} already exists.", "error")
             return redirect(url_for("part_edit", part_id=part_id))
+        except sqlite3.OperationalError as exc:
+            conn.rollback()
+            conn.close()
+            flash(f"Could not update part: {exc}", "error")
+            return redirect(url_for("part_edit", part_id=part_id))
         conn.commit()
         conn.close()
-        log_action("Part updated", "part", part_id, part_number)
+        log_action(
+            "Part updated", "part", part_id,
+            f"{part_number}; {request.form.get('part_name') or ''}; qty {request.form.get('quantity_on_hand') or 0}; status {request.form.get('status') or 'In Stock'}",
+        )
         flash("Part updated.", "success")
         return redirect(url_for("part_detail", part_id=part_id))
     donor_vehicles = conn.execute("SELECT id,stock_no,year,make,model FROM vehicles WHERE vehicle_purpose='Parts Vehicle' OR status='BER' ORDER BY stock_no").fetchall()

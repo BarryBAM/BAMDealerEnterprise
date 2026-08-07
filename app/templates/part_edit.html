@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Edit {{ part.part_number }} | Parts Centre{% endblock %}
 {% block content %}
-<div class="page-head"><div><span class="eyebrow">Version 19 • Parts Inventory</span><h1>Edit Part</h1><p>{{ part.part_number }} — {{ part.part_name }}</p></div><a class="button secondary" href="{{ url_for('part_detail', part_id=part.id) }}">Cancel</a></div>
+<div class="page-head"><div><span class="eyebrow">Version 21 • Editable Parts Inventory</span><h1>Edit Part</h1><p>{{ part.part_number }} — {{ part.part_name }}</p></div><a class="button secondary" href="{{ url_for('part_detail', part_id=part.id) }}">Cancel</a></div>
 <section class="panel"><form method="post" class="parts-form">
 <div class="form-two"><label>Part Number<input name="part_number" value="{{ part.part_number or '' }}"></label><label>Part Name<input name="part_name" value="{{ part.part_name or '' }}" required></label></div>
 <div class="form-three"><label>Category<input name="category" value="{{ part.category or '' }}"></label><label>Subcategory<input name="subcategory" value="{{ part.subcategory or '' }}"></label><label>Condition<input name="condition" value="{{ part.condition or '' }}"></label></div>

@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}Dismantling Profit | BAM Motor Group{% endblock %}
+{% block content %}
+<div class="page-head"><div><span class="eyebrow">Version 21 • Donor Vehicle Financials</span><h1>Dismantling Profit Centre</h1><p>Live recovery, revenue, remaining inventory value and profit for every parts vehicle.</p></div><a class="button secondary" href="{{ url_for('parts_page') }}">Parts Centre</a></div>
+<div class="parts-kpis">
+  <article><span>Total Invested</span><strong>{{ totals.invested|money }}</strong><small>Across donor vehicles</small></article>
+  <article><span>Parts Revenue</span><strong>{{ totals.parts_revenue|money }}</strong><small>Recorded part sales</small></article>
+  <article><span>Shell Revenue</span><strong>{{ totals.shell_revenue|money }}</strong><small>Scrap / shell sales</small></article>
+  <article><span>Unsold Retail Value</span><strong>{{ totals.remaining_retail|money }}</strong><small>Potential remaining sales</small></article>
+  <article><span>Net Profit / Loss</span><strong>{{ totals.profit|money }}</strong><small>Realised revenue less recorded investment</small></article>
+</div>
+<section class="panel"><div class="panel-title"><h2>Donor Vehicles</h2><span>{{ rows|length }} vehicle(s)</span></div><div class="table-wrap"><table class="compact-table">
+<tr><th>Vehicle</th><th>Invested</th><th>Parts Revenue</th><th>Shell</th><th>Unsold Retail</th><th>Recovery</th><th>Profit / Loss</th><th></th></tr>
+{% for r in rows %}<tr>
+<td><strong>{{ r.stock_no }}</strong><small>{{ r.year or '' }} {{ r.make }} {{ r.model }}</small></td>
+<td>{{ r.invested|money }}</td><td>{{ r.parts_revenue|money }}<small>{{ r.units_sold or 0 }} unit(s) sold</small></td><td>{{ r.shell_sale_price|money }}</td><td>{{ r.remaining_retail|money }}<small>{{ r.part_lines or 0 }} part line(s)</small></td>
+<td><strong>{{ '%.1f'|format(r.recovery_pct) }}%</strong><div class="recovery-bar mini"><span style="width:{{ [r.recovery_pct,100]|min }}%"></span></div>{% if r.remaining_to_break_even > 0 %}<small>{{ r.remaining_to_break_even|money }} to break even</small>{% else %}<small>Investment recovered</small>{% endif %}</td>
+<td class="{% if r.profit >= 0 %}profit-positive{% else %}profit-negative{% endif %}"><strong>{{ r.profit|money }}</strong></td>
+<td><a class="button small-button" href="{{ url_for('vehicle_detail', vehicle_id=r.id) }}">Open</a></td>
+</tr>{% else %}<tr><td colspan="8">No parts vehicles yet.</td></tr>{% endfor %}
+</table></div></section>
+{% endblock %}
