@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}Dealer Intelligence | {{ vehicle.stock_no }}{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div><span class="eyebrow">Version 22 • Dealer Intelligence</span><h1>{{ vehicle.stock_no }} — {{ vehicle.year or '' }} {{ vehicle.make }} {{ vehicle.model }}</h1><p>VIN intelligence, duplicate detection, pricing guidance and advertisement generation.</p></div>
+  <div class="page-actions"><a class="button secondary" href="{{ url_for('vehicle_detail',vehicle_id=vehicle.id) }}">Back to Vehicle</a><a class="button" href="{{ url_for('advertisement_pro',vehicle_id=vehicle.id) }}">Advertisement Studio</a></div>
+</div>
+<div class="kpi-grid command-primary-kpis">
+  <article class="kpi-card navy"><span>Suggested Low</span><strong>{{ market.low|money }}</strong><small>{{ market.source }}</small></article>
+  <article class="kpi-card teal"><span>Suggested Asking</span><strong>{{ market.mid|money }}</strong><small>{{ market.confidence }} confidence • {{ market.count }} comparable(s)</small></article>
+  <article class="kpi-card orange"><span>Suggested High</span><strong>{{ market.high|money }}</strong><small>Pricing guide only</small></article>
+  <article class="kpi-card purple"><span>Duplicate Check</span><strong>{% if duplicates %}⚠ {{ duplicates|length }}{% else %}✓ Clear{% endif %}</strong><small>VIN, registration and stock number</small></article>
+</div>
+<div class="workspace-two-column">
+<section class="panel">
+  <div class="panel-title"><div><h2>VIN Decoder & Specifications</h2><p>Decode the VIN and save specifications returned by the external VIN data service.</p></div></div>
+  <dl class="detail-list">
+    <div><dt>VIN</dt><dd>{{ vehicle.vin or 'Not entered' }}</dd></div><div><dt>Decoded</dt><dd>{{ vehicle.decoded_at or 'Not yet' }}</dd></div>
+    <div><dt>Manufacturer</dt><dd>{{ vehicle.manufacturer_name or '—' }}</dd></div><div><dt>Body Class</dt><dd>{{ vehicle.body_class or '—' }}</dd></div>
+    <div><dt>Drive Type</dt><dd>{{ vehicle.drive_type or '—' }}</dd></div><div><dt>Transmission</dt><dd>{{ vehicle.transmission_style or '—' }}</dd></div>
+    <div><dt>Engine</dt><dd>{% if vehicle.engine_displacement_l %}{{ vehicle.engine_displacement_l }} L{% endif %}{% if vehicle.engine_cylinders %} • {{ vehicle.engine_cylinders }} cyl{% endif %}</dd></div>
+    <div><dt>Fuel</dt><dd>{{ vehicle.fuel_type_primary or vehicle.fuel_type or '—' }}</dd></div><div><dt>Series / Trim</dt><dd>{{ vehicle.decoded_series or '' }} {{ vehicle.decoded_trim or '' }}</dd></div>
+  </dl>
+  <form method="post" action="{{ url_for('vehicle_decode_vin',vehicle_id=vehicle.id) }}"><button {% if not vehicle.vin %}disabled{% endif %}>Decode VIN & Save Specs</button></form>
+  <small>Some Australian or older vehicles may return limited data depending on the VIN provider.</small>
+</section>
+<section class="panel">
+  <div class="panel-title"><div><h2>Market Pricing Suggestion</h2><p>Uses recorded BAM vehicle sales first; when there are no comparables, it falls back to your cost and current pricing.</p></div></div>
+  <div class="pricing-trio"><div><span>Quick Sale</span><strong>{{ market.low|money }}</strong></div><div><span>Recommended</span><strong>{{ market.mid|money }}</strong></div><div><span>High Retail</span><strong>{{ market.high|money }}</strong></div></div>
+  <form method="post" action="{{ url_for('vehicle_market_suggestion_save',vehicle_id=vehicle.id) }}"><button>Refresh & Save Suggestion</button></form>
+  <h3>Recent BAM Comparables</h3><div class="table-wrap"><table><tr><th>Date</th><th>Vehicle</th><th>Sale Price</th></tr>{% for r in comparable_sales %}<tr><td>{{ r.sale_date or '' }}</td><td>{{ r.stock_no }} — {{ r.year or '' }} {{ r.make }} {{ r.model }}</td><td>{{ r.sale_price_inc_gst|money }}</td></tr>{% else %}<tr><td colspan="3">No recorded comparable vehicle sales yet.</td></tr>{% endfor %}</table></div>
+</section>
+</div>
+<div class="workspace-two-column">
+<section class="panel"><div class="panel-title"><div><h2>AI Advertisement</h2><p>Creates a draft from the vehicle facts already stored in BAM. It never changes your price automatically.</p></div><span class="status-pill">{% if ai_enabled %}AI Connected{% else %}Local Draft Mode{% endif %}</span></div><form method="post" action="{{ url_for('vehicle_generate_ai_ad',vehicle_id=vehicle.id) }}"><button>Generate Advertisement</button></form><small>{% if not ai_enabled %}Add OPENAI_API_KEY to Azure Environment Variables to enable OpenAI generation. Without it, BAM creates a professional local draft.{% endif %}</small></section>
+<section class="panel"><div class="panel-title"><h2>Duplicate Stock Detection</h2></div>{% if duplicates %}<div class="warning-box"><strong>Possible duplicate stock found.</strong>{% for d in duplicates %}<p><a href="{{ url_for('vehicle_detail',vehicle_id=d.id) }}">{{ d.stock_no }} — {{ d.year or '' }} {{ d.make }} {{ d.model }}</a><br>VIN {{ d.vin or '—' }} • Rego {{ d.registration or '—' }}</p>{% endfor %}</div>{% else %}<div class="success-box"><strong>✓ No duplicate VIN, registration or stock number detected.</strong></div>{% endif %}</section>
+</div>
+{% endblock %}

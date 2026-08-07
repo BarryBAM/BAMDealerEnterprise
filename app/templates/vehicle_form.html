@@ -8,12 +8,12 @@
 <label>Vehicle Purpose<select name="vehicle_purpose"><option>Retail Sale</option><option>Parts Vehicle</option><option>Workshop</option><option>Wholesale</option></select><small>Choose Parts Vehicle for donor/dismantling stock.</small></label>
 <label>Dismantling Status<select name="dismantling_status"><option>Not Started</option><option>Dismantling</option><option>Paused</option><option>Complete</option></select></label>
 <label>Purchase Date<input type="date" name="purchase_date"></label>
-<label>Make / Manufacturer<input name="make" required></label>
-<label>Model<input name="model" required></label>
+<label>Make / Manufacturer<input name="make" id="make-field" required></label>
+<label>Model<input name="model" id="model-field" required></label>
 <label>Variant / Series<input name="variant"></label>
-<label>Year<input type="number" name="year"></label>
-<label class="car-fields">VIN<input name="vin"></label>
-<label>Registration<input name="registration"></label>
+<label>Year<input type="number" name="year" id="year-field"></label>
+<label class="car-fields">VIN<input name="vin" id="vin-field"><small>17-character VIN. Duplicate check runs automatically.</small><button type="button" class="small-button" id="decode-vin-button">Decode VIN</button></label>
+<label>Registration<input name="registration" id="rego-field"></label>
 <label class="car-fields">Odometer km<input type="number" name="odometer_km"></label>
 <label>Colour<input name="colour"></label>
 <label>Purchase Price Inc GST<input type="number" step="0.01" name="purchase_price_inc_gst"></label>
@@ -44,7 +44,12 @@
 <label class="wide">Service History<textarea name="service_history"></textarea></label>
 <label>Primary Photo<input type="file" name="photo" accept=".png,.jpg,.jpeg,.webp"></label>
 <label class="wide">Notes<textarea name="notes"></textarea></label>
-<button class="wide" type="submit">Save Stock Item</button>
+<div id="duplicate-warning" class="wide warning-box" style="display:none"></div><button class="wide" type="submit">Save Stock Item</button>
 </form>
-<script>function toggleAssetFields(){const t=document.getElementById('asset-type').value;document.querySelectorAll('.caravan-fields').forEach(e=>e.style.display=t==='Caravan'?'block':'none');document.querySelectorAll('.boat-fields').forEach(e=>e.style.display=t==='Boat'?'block':'none');document.querySelectorAll('.car-fields').forEach(e=>e.style.display=['Car','Motorcycle'].includes(t)?'flex':'none');}document.addEventListener('DOMContentLoaded',toggleAssetFields);</script>
+<script>
+function toggleAssetFields(){const t=document.getElementById('asset-type').value;document.querySelectorAll('.caravan-fields').forEach(e=>e.style.display=t==='Caravan'?'block':'none');document.querySelectorAll('.boat-fields').forEach(e=>e.style.display=t==='Boat'?'block':'none');document.querySelectorAll('.car-fields').forEach(e=>e.style.display=['Car','Motorcycle'].includes(t)?'flex':'none');}
+async function checkDuplicates(){const vin=document.getElementById('vin-field')?.value||'';const registration=document.getElementById('rego-field')?.value||'';if(!vin&&!registration)return;const r=await fetch(`{{ url_for('vehicle_duplicate_check') }}?vin=${encodeURIComponent(vin)}&registration=${encodeURIComponent(registration)}`);const data=await r.json();const box=document.getElementById('duplicate-warning');if(data.matches?.length){box.style.display='block';box.innerHTML='<strong>⚠ Possible duplicate stock:</strong> '+data.matches.map(x=>`${x.stock_no} — ${x.year||''} ${x.make} ${x.model}`).join(', ');}else{box.style.display='none';box.textContent='';}}
+async function decodeVinNow(){const vin=document.getElementById('vin-field')?.value||'';const button=document.getElementById('decode-vin-button');if(vin.length!==17){alert('Enter a 17-character VIN first.');return;}button.disabled=true;button.textContent='Decoding…';try{const r=await fetch(`{{ url_for('api_vin_decode') }}?vin=${encodeURIComponent(vin)}`);const data=await r.json();if(data.specs){if(data.specs.make)document.getElementById('make-field').value=data.specs.make;if(data.specs.model)document.getElementById('model-field').value=data.specs.model;if(data.specs.year)document.getElementById('year-field').value=data.specs.year;alert('VIN decoded. Make, model and year were filled where available. Save the vehicle, then open Dealer Intelligence to save the full specification set.');}else{alert(data.error||'No VIN data returned.');}}catch(e){alert('VIN decoder unavailable: '+e);}finally{button.disabled=false;button.textContent='Decode VIN';}}
+document.addEventListener('DOMContentLoaded',()=>{toggleAssetFields();document.getElementById('vin-field')?.addEventListener('blur',checkDuplicates);document.getElementById('rego-field')?.addEventListener('blur',checkDuplicates);document.getElementById('decode-vin-button')?.addEventListener('click',decodeVinNow);});
+</script>
 {% endblock %}

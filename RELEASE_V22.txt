@@ -1,0 +1,22 @@
+BAM Dealer Enterprise Cloud v22.0 - Dealer Intelligence Edition
+
+New in v22:
+- VIN decoding with automatic vehicle specifications (external decoder, graceful fallback)
+- Dealer Intelligence page for each vehicle
+- AI-generated advertisements when OPENAI_API_KEY is configured; local professional draft fallback
+- Market pricing suggestions based on recorded BAM vehicle sales and vehicle cost data
+- Parts pricing suggestions based on recorded BAM parts sales
+- Duplicate VIN / registration / stock detection before saving vehicles
+- Customer purchase history combining vehicle and part purchases
+- Smart reminders for registration, service, aged stock and draft invoices
+- Business KPI dashboard for customers, reminders, parts revenue and stock age
+- Additive database migrations only; existing v21 data preserved
+
+Optional Azure settings:
+OPENAI_API_KEY=<your OpenAI API key>
+OPENAI_MODEL=gpt-5
+BAM_VIN_DECODER_URL=https://vpic.nhtsa.dot.gov/api/vehicles/DecodeVinValuesExtended/{vin}?format=json
+
+Notes:
+- Market and parts pricing are advisory only and never overwrite your asking/selling price automatically.
+- VIN coverage depends on the external VIN provider and can be limited for some Australian/older vehicles.

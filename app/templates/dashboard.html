@@ -64,6 +64,18 @@
   </aside>
 </section>
 
+<section class="panel v22-intelligence-panel">
+  <div class="panel-title"><div><span class="eyebrow">Version 22 • Business Intelligence</span><h2>Business KPI Dashboard</h2><p>Live indicators calculated from BAM vehicle, parts, customer and reminder records.</p></div><a class="button secondary" href="{{ url_for('customer_history') }}">Customer History</a></div>
+  <div class="tooling-dashboard-grid">
+    <a href="{{ url_for('customer_history') }}"><span>Customers</span><strong>{{ business_kpis.customers or 0 }}</strong><small>Vehicle + parts buyers</small></a>
+    <a href="{{ url_for('reminders_page') }}"><span>Smart Reminders</span><strong>{{ business_kpis.smart_reminders or 0 }}</strong><small>Open automated actions</small></a>
+    <a href="{{ url_for('parts_page') }}"><span>Parts Revenue This Month</span><strong>{{ business_kpis.parts_month|money }}</strong><small>{{ business_kpis.inventory_retail|money }} remaining retail inventory</small></a>
+    <a href="{{ url_for('vehicle_list') }}"><span>Average Stock Age</span><strong>{{ business_kpis.avg_stock_days|round(0)|int }} days</strong><small>{{ business_kpis.advertised or 0 }} advertised vehicles</small></a>
+    <a href="{{ url_for('vehicle_list') }}"><span>Vehicle Sales This Month</span><strong>{{ business_kpis.vehicle_month|money }}</strong><small>Recorded vehicle revenue</small></a>
+    <a href="{{ url_for('dismantling_profit_report') }}"><span>Donor Vehicles</span><strong>{{ business_kpis.donor_vehicles or 0 }}</strong><small>Parts vehicles / BER stock</small></a>
+  </div>
+</section>
+
 <section class="panel tooling-command-panel">
   <div class="panel-title"><div><span class="eyebrow">Workshop Assets</span><h2>🔧 Tooling & Equipment</h2><p>Manage tools, diagnostic gear, hoists, jacks and other BAM-owned equipment.</p></div><div><a class="button" href="{{ url_for('equipment_new') }}">＋ Add Tool</a> <a class="button secondary" href="{{ url_for('equipment_list') }}">Open Tooling</a></div></div>
   <div class="tooling-dashboard-grid">

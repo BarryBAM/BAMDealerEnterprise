@@ -8,6 +8,10 @@ import csv
 import json
 import shutil
 import zipfile
+import urllib.request
+import urllib.parse
+import urllib.error
+import statistics
 from datetime import datetime, date, timedelta
 from functools import wraps
 from pathlib import Path
@@ -46,8 +50,11 @@ app.config.update(
     PERMANENT_SESSION_LIFETIME=timedelta(hours=int(os.environ.get("BAM_SESSION_HOURS", "12"))),
 )
 
-APP_VERSION = "21.0"
+APP_VERSION = "22.0"
 APP_NAME = "BAM Dealer Enterprise Cloud"
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "").strip()
+OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-5").strip() or "gpt-5"
+VIN_DECODER_URL = os.environ.get("BAM_VIN_DECODER_URL", "https://vpic.nhtsa.dot.gov/api/vehicles/DecodeVinValuesExtended/{vin}?format=json")
 
 ALLOWED_EXTENSIONS = {"png", "jpg", "jpeg", "webp", "pdf"}
 BACKUP_EXTENSIONS = {"zip"}
@@ -330,6 +337,24 @@ def init_db():
     ensure_column(conn, "vehicles", "trailer_registration", "TEXT")
     ensure_column(conn, "vehicles", "capacity_people", "INTEGER")
     ensure_column(conn, "vehicles", "boat_features", "TEXT")
+
+    # Version 22 - Dealer Intelligence
+    ensure_column(conn, "vehicles", "vin_decode_json", "TEXT")
+    ensure_column(conn, "vehicles", "decoded_at", "TEXT")
+    ensure_column(conn, "vehicles", "manufacturer_name", "TEXT")
+    ensure_column(conn, "vehicles", "body_class", "TEXT")
+    ensure_column(conn, "vehicles", "drive_type", "TEXT")
+    ensure_column(conn, "vehicles", "transmission_style", "TEXT")
+    ensure_column(conn, "vehicles", "engine_cylinders", "TEXT")
+    ensure_column(conn, "vehicles", "engine_displacement_l", "TEXT")
+    ensure_column(conn, "vehicles", "fuel_type_primary", "TEXT")
+    ensure_column(conn, "vehicles", "decoded_model_year", "TEXT")
+    ensure_column(conn, "vehicles", "decoded_series", "TEXT")
+    ensure_column(conn, "vehicles", "decoded_trim", "TEXT")
+    ensure_column(conn, "vehicles", "market_price_low", "REAL DEFAULT 0")
+    ensure_column(conn, "vehicles", "market_price_mid", "REAL DEFAULT 0")
+    ensure_column(conn, "vehicles", "market_price_high", "REAL DEFAULT 0")
+    ensure_column(conn, "vehicles", "market_price_checked_at", "TEXT")
 
     # Version 18 - Parts Vehicle / Dismantling
     ensure_column(conn, "vehicles", "vehicle_purpose", "TEXT DEFAULT 'Retail Sale'")
@@ -640,6 +665,227 @@ def next_contract_number(conn=None):
     return f"CON-{highest + 1:05d}"
 
 
+
+def _clean_text(value):
+    value = str(value or "").strip()
+    return value if value and value.lower() not in {"not applicable", "not available", "null", "none"} else ""
+
+
+def decode_vin(vin):
+    """Decode a VIN using a configurable external decoder. Returns (data, error)."""
+    vin = re.sub(r"[^A-Za-z0-9]", "", vin or "").upper()
+    if len(vin) != 17:
+        return None, "VIN must contain exactly 17 characters."
+    try:
+        url = VIN_DECODER_URL.format(vin=urllib.parse.quote(vin))
+        req = urllib.request.Request(url, headers={"User-Agent": f"{APP_NAME}/{APP_VERSION}"})
+        with urllib.request.urlopen(req, timeout=12) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+        result = (payload.get("Results") or [{}])[0]
+        if not result:
+            return None, "VIN decoder returned no vehicle data."
+        specs = {
+            "vin": vin,
+            "make": _clean_text(result.get("Make")),
+            "model": _clean_text(result.get("Model")),
+            "year": _clean_text(result.get("ModelYear")),
+            "manufacturer_name": _clean_text(result.get("Manufacturer")),
+            "body_class": _clean_text(result.get("BodyClass")),
+            "drive_type": _clean_text(result.get("DriveType")),
+            "transmission_style": _clean_text(result.get("TransmissionStyle")),
+            "engine_cylinders": _clean_text(result.get("EngineCylinders")),
+            "engine_displacement_l": _clean_text(result.get("DisplacementL")),
+            "fuel_type_primary": _clean_text(result.get("FuelTypePrimary")),
+            "series": _clean_text(result.get("Series")),
+            "trim": _clean_text(result.get("Trim")),
+            "raw": result,
+        }
+        error_text = _clean_text(result.get("ErrorText"))
+        if not any(specs.get(k) for k in ("make", "model", "year", "body_class")):
+            return specs, error_text or "VIN decoded, but the provider returned limited specifications."
+        return specs, None
+    except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, ValueError, json.JSONDecodeError) as exc:
+        return None, f"VIN service unavailable: {exc}"
+
+
+def duplicate_vehicle_matches(conn, vin="", registration="", stock_no="", exclude_id=None):
+    checks = []
+    params = []
+    vin = (vin or "").strip().upper()
+    registration = (registration or "").strip().upper()
+    stock_no = (stock_no or "").strip().upper()
+    if vin:
+        checks.append("UPPER(COALESCE(vin,''))=?")
+        params.append(vin)
+    if registration:
+        checks.append("UPPER(COALESCE(registration,''))=?")
+        params.append(registration)
+    if stock_no:
+        checks.append("UPPER(COALESCE(stock_no,''))=?")
+        params.append(stock_no)
+    if not checks:
+        return []
+    sql = "SELECT id,stock_no,year,make,model,vin,registration,status FROM vehicles WHERE (" + " OR ".join(checks) + ")"
+    if exclude_id:
+        sql += " AND id<>?"
+        params.append(exclude_id)
+    return conn.execute(sql, params).fetchall()
+
+
+def market_price_suggestion(conn, vehicle):
+    rows = conn.execute("""
+        SELECT s.sale_price_inc_gst AS price, v.year, v.make, v.model
+        FROM sales s JOIN vehicles v ON v.id=s.vehicle_id
+        WHERE s.sale_price_inc_gst>0
+          AND LOWER(v.make)=LOWER(?) AND LOWER(v.model)=LOWER(?)
+          AND v.id<>?
+        ORDER BY s.sale_date DESC
+        LIMIT 20
+    """, (vehicle["make"], vehicle["model"], vehicle["id"])).fetchall()
+    source = "same make/model sales in BAM"
+    if not rows:
+        rows = conn.execute("""
+            SELECT s.sale_price_inc_gst AS price, v.year, v.make, v.model
+            FROM sales s JOIN vehicles v ON v.id=s.vehicle_id
+            WHERE s.sale_price_inc_gst>0 AND LOWER(v.make)=LOWER(?) AND v.id<>?
+            ORDER BY s.sale_date DESC LIMIT 20
+        """, (vehicle["make"], vehicle["id"])).fetchall()
+        source = "same-make sales in BAM"
+    prices = sorted(float(r["price"] or 0) for r in rows if float(r["price"] or 0)>0)
+    floor = max(float(vehicle["purchase_price_inc_gst"] or 0), float(vehicle["minimum_sale_price"] or 0))
+    if prices:
+        mid = statistics.median(prices)
+        low = prices[max(0, int((len(prices)-1)*0.25))]
+        high = prices[min(len(prices)-1, int((len(prices)-1)*0.75))]
+        if floor and mid < floor:
+            mid = floor * 1.08
+            low = floor
+            high = max(high, mid * 1.08)
+        confidence = "Good" if len(prices) >= 5 else "Limited"
+    else:
+        base = floor or float(vehicle["asking_price"] or 0) or 0
+        low, mid, high = base, base * 1.10 if base else 0, base * 1.20 if base else 0
+        source = "vehicle cost/asking price (no comparable BAM sales yet)"
+        confidence = "Estimate only"
+    return {"low": round(low,2), "mid": round(mid,2), "high": round(high,2), "count": len(prices), "source": source, "confidence": confidence}
+
+
+def parts_price_suggestion(conn, part):
+    rows = conn.execute("""
+        SELECT ps.sale_price, ps.quantity
+        FROM part_sales ps JOIN parts p ON p.id=ps.part_id
+        WHERE ps.sale_price>0 AND (LOWER(p.part_name)=LOWER(?) OR (COALESCE(?, '')<>'' AND LOWER(COALESCE(p.category,''))=LOWER(?)))
+        ORDER BY ps.sale_date DESC LIMIT 30
+    """, (part["part_name"], part["category"], part["category"])).fetchall()
+    unit_prices = [float(r["sale_price"] or 0)/max(float(r["quantity"] or 1), 1) for r in rows if float(r["sale_price"] or 0)>0]
+    if unit_prices:
+        mid = statistics.median(unit_prices)
+        return {"suggested": round(mid,2), "low": round(min(unit_prices),2), "high": round(max(unit_prices),2), "count": len(unit_prices), "source": "recorded BAM parts sales"}
+    current = float(part["selling_price"] or 0)
+    cost = float(part["unit_cost_inc_gst"] or 0)
+    suggestion = current or (cost * 1.5 if cost else 0)
+    return {"suggested": round(suggestion,2), "low": round(suggestion*0.9,2) if suggestion else 0, "high": round(suggestion*1.15,2) if suggestion else 0, "count": 0, "source": "current price/cost (no comparable sales yet)"}
+
+
+def generate_vehicle_ad_text(vehicle):
+    title = f"{vehicle['year'] or ''} {vehicle['make']} {vehicle['model']} {vehicle['variant'] or ''}".strip()
+    facts = []
+    if vehicle["odometer_km"]:
+        facts.append(f"{int(vehicle['odometer_km']):,} km")
+    if vehicle["colour"]:
+        facts.append(str(vehicle["colour"]))
+    if vehicle["fuel_type_primary"] or vehicle["fuel_type"]:
+        facts.append(str(vehicle["fuel_type_primary"] or vehicle["fuel_type"]))
+    fallback = title + "\n\n" + " • ".join(facts) + ("\n\n" + str(vehicle["notes"]) if vehicle["notes"] else "") + "\n\nContact BAM Motor Group — Buy • Sell • Trade."
+    if not OPENAI_API_KEY:
+        return fallback, "Professional local draft (set OPENAI_API_KEY in Azure to enable AI generation)."
+    prompt = (
+        "Write a clear, professional Australian used-vehicle advertisement. Do not invent features. "
+        "Use only the supplied facts. Include a short headline, a concise paragraph and bullet points. "
+        "Avoid exaggerated claims. Facts: " + json.dumps({
+            "stock_no": vehicle["stock_no"], "year": vehicle["year"], "make": vehicle["make"],
+            "model": vehicle["model"], "variant": vehicle["variant"], "odometer_km": vehicle["odometer_km"],
+            "colour": vehicle["colour"], "registration": vehicle["registration"], "roadworthy": vehicle["roadworthy_status"],
+            "body_class": vehicle["body_class"], "drive_type": vehicle["drive_type"], "fuel": vehicle["fuel_type_primary"] or vehicle["fuel_type"],
+            "asking_price": vehicle["asking_price"], "notes": vehicle["notes"],
+        }, ensure_ascii=False)
+    )
+    try:
+        payload = json.dumps({"model": OPENAI_MODEL, "input": prompt, "store": False}).encode("utf-8")
+        req = urllib.request.Request("https://api.openai.com/v1/responses", data=payload, headers={"Authorization": f"Bearer {OPENAI_API_KEY}", "Content-Type": "application/json"}, method="POST")
+        with urllib.request.urlopen(req, timeout=35) as response:
+            data = json.loads(response.read().decode("utf-8"))
+        text = data.get("output_text")
+        if not text:
+            parts = []
+            for item in data.get("output", []):
+                for content in item.get("content", []):
+                    if content.get("type") == "output_text" and content.get("text"):
+                        parts.append(content["text"])
+            text = "\n".join(parts).strip()
+        return text or fallback, f"AI draft using {OPENAI_MODEL}"
+    except Exception as exc:
+        return fallback, f"AI service unavailable; local draft used ({exc})."
+
+
+def ensure_smart_reminders(conn):
+    today = date.today()
+    def add_once(vehicle_id, due_date, title, notes):
+        exists = conn.execute("SELECT id FROM reminders WHERE vehicle_id=? AND title=? AND completed=0", (vehicle_id, title)).fetchone()
+        if not exists:
+            conn.execute("INSERT INTO reminders(vehicle_id,reminder_date,reminder_type,title,notes) VALUES(?,?,?,?,?)", (vehicle_id, due_date, "Smart Reminder", title, notes))
+
+    vehicles = conn.execute("SELECT * FROM vehicles WHERE status NOT IN ('Sold','BER')").fetchall()
+    for v in vehicles:
+        if v["rego_expiry"]:
+            try:
+                d = date.fromisoformat(v["rego_expiry"][:10])
+                if today <= d <= today + timedelta(days=30):
+                    add_once(v["id"], d.isoformat(), "Registration expires soon", f"{v['stock_no']} registration expires {d.isoformat()}.")
+            except ValueError:
+                pass
+        if v["service_due_date"]:
+            try:
+                d = date.fromisoformat(v["service_due_date"][:10])
+                if d <= today + timedelta(days=14):
+                    add_once(v["id"], d.isoformat(), "Service due", f"{v['stock_no']} service is due {d.isoformat()}.")
+            except ValueError:
+                pass
+        purchase_text = v["purchase_date"] or (str(v["created_at"] or "")[:10])
+        try:
+            bought = date.fromisoformat(purchase_text[:10])
+            days = (today - bought).days
+            if days >= 90:
+                add_once(v["id"], today.isoformat(), "Stock aged 90+ days", f"{v['stock_no']} has been in stock {days} days. Review pricing/advertising.")
+            elif days >= 60:
+                add_once(v["id"], today.isoformat(), "Stock aged 60+ days", f"{v['stock_no']} has been in stock {days} days. Review next action.")
+        except (ValueError, TypeError):
+            pass
+    drafts = conn.execute("""
+        SELECT s.vehicle_id,s.sale_date,v.stock_no FROM sales s JOIN vehicles v ON v.id=s.vehicle_id
+        WHERE COALESCE(s.invoice_status,'Draft')='Draft' AND COALESCE(s.sale_date,'')<>''
+    """).fetchall()
+    for row in drafts:
+        try:
+            d = date.fromisoformat(row["sale_date"][:10])
+            if d <= today - timedelta(days=7):
+                add_once(row["vehicle_id"], today.isoformat(), "Invoice still draft", f"Review the sale invoice for {row['stock_no']}.")
+        except ValueError:
+            pass
+    reserved_parts = conn.execute("""
+        SELECT id,vehicle_id,part_number,part_name,reserved_until,reserved_for
+        FROM parts WHERE status='Reserved' AND vehicle_id IS NOT NULL AND COALESCE(reserved_until,'')<>''
+    """).fetchall()
+    for part in reserved_parts:
+        try:
+            d = date.fromisoformat(part["reserved_until"][:10])
+            if d <= today + timedelta(days=2):
+                add_once(part["vehicle_id"], d.isoformat(), f"Reserved part due: {part['part_number'] or part['part_name']}", f"Reservation for {part['reserved_for'] or 'customer'} expires {d.isoformat()}.")
+        except ValueError:
+            pass
+    conn.commit()
+
+
 def login_required(fn):
     @wraps(fn)
     def wrapper(*args, **kwargs):
@@ -701,6 +947,7 @@ def logout():
 @login_required
 def dashboard():
     conn = db()
+    ensure_smart_reminders(conn)
 
     metrics = conn.execute("""
         SELECT
@@ -924,6 +1171,26 @@ def dashboard():
         LIMIT 5
     """, (rego_90,rego_90,rego_90)).fetchall()
 
+    # Version 22 - Business Intelligence KPIs
+    business_kpis = {}
+    business_kpis["customers"] = conn.execute("""
+        SELECT COUNT(*) AS c FROM (
+            SELECT LOWER(TRIM(COALESCE(buyer_email,buyer_phone,buyer_name,''))) AS customer_key FROM sales WHERE COALESCE(buyer_name,'')<>''
+            UNION
+            SELECT LOWER(TRIM(COALESCE(customer_email,customer_phone,customer_name,''))) FROM part_sales WHERE COALESCE(customer_name,'')<>''
+        ) WHERE customer_key<>''
+    """).fetchone()["c"]
+    business_kpis["smart_reminders"] = conn.execute("SELECT COUNT(*) AS c FROM reminders WHERE completed=0 AND reminder_type='Smart Reminder'").fetchone()["c"]
+    business_kpis["donor_vehicles"] = conn.execute("SELECT COUNT(*) AS c FROM vehicles WHERE COALESCE(vehicle_purpose,'Retail Sale')='Parts Vehicle' OR status='BER'").fetchone()["c"]
+    business_kpis["inventory_retail"] = parts_retail_value
+    business_kpis["parts_month"] = float(parts_sales_month["revenue"] or 0)
+    business_kpis["vehicle_month"] = float(conn.execute("SELECT COALESCE(SUM(sale_price_inc_gst),0) AS v FROM sales WHERE substr(sale_date,1,7)=substr(?,1,7)", (today_text,)).fetchone()["v"] or 0)
+    business_kpis["avg_stock_days"] = float(conn.execute("""
+        SELECT COALESCE(AVG(julianday(?) - julianday(COALESCE(purchase_date,substr(created_at,1,10)))),0) AS v
+        FROM vehicles WHERE status NOT IN ('Sold','BER')
+    """, (today_text,)).fetchone()["v"] or 0)
+    business_kpis["advertised"] = advertised_count
+
     conn.close()
 
     net_profit = sales_total - (metrics["purchase_total"] or 0) - expense_total - job_total - service_total - parts_total
@@ -970,6 +1237,7 @@ def dashboard():
         asset_totals=asset_totals,
         equipment_metrics=equipment_metrics,
         equipment_due=equipment_due,
+        business_kpis=business_kpis,
     )
 
 @app.route("/vehicles")
@@ -1018,6 +1286,10 @@ def vehicle_new():
             gst = round(price / 11, 2)
             conn = db()
             stock_no = request.form.get("stock_no", "").strip() or next_stock_number(conn)
+            duplicate_rows = duplicate_vehicle_matches(conn, request.form.get("vin"), request.form.get("registration"), stock_no)
+            if duplicate_rows:
+                hit = duplicate_rows[0]
+                raise ValueError(f"Possible duplicate stock: {hit['stock_no']} {hit['year'] or ''} {hit['make']} {hit['model']} (VIN/registration/stock match).")
             fields = [
                 "stock_no","status","purchase_date","make","model","variant","year","vin","registration",
                 "odometer_km","colour","purchase_price_inc_gst","purchase_gst","barry_contribution",
@@ -1132,6 +1404,10 @@ def vehicle_edit(vehicle_id):
             }
             if not values["make"] or not values["model"]:
                 raise ValueError("Make and model are required.")
+            duplicate_rows = duplicate_vehicle_matches(conn, values["vin"], values["registration"], values["stock_no"], exclude_id=vehicle_id)
+            if duplicate_rows:
+                hit = duplicate_rows[0]
+                raise ValueError(f"Possible duplicate stock: {hit['stock_no']} {hit['year'] or ''} {hit['make']} {hit['model']} (VIN/registration/stock match).")
 
             conn.execute("""
                 UPDATE vehicles SET
@@ -1220,6 +1496,104 @@ def vehicle_edit(vehicle_id):
 def upload_too_large(_error):
     flash("The selected files are too large. Upload fewer photos at a time or use smaller files.", "error")
     return redirect(request.referrer or url_for("vehicle_list"))
+
+@app.route("/api/vin-decode")
+@login_required
+def api_vin_decode():
+    specs, error = decode_vin(request.args.get("vin", ""))
+    return jsonify({"specs": specs, "error": error})
+
+
+@app.route("/api/vehicle-duplicate-check")
+@login_required
+def vehicle_duplicate_check():
+    conn = db()
+    rows = duplicate_vehicle_matches(conn, request.args.get("vin"), request.args.get("registration"), request.args.get("stock_no"), request.args.get("exclude_id", type=int))
+    conn.close()
+    return jsonify({"matches": [dict(r) for r in rows]})
+
+
+@app.route("/vehicles/<int:vehicle_id>/intelligence")
+@login_required
+def dealer_intelligence(vehicle_id):
+    conn = db()
+    vehicle = conn.execute("SELECT * FROM vehicles WHERE id=?", (vehicle_id,)).fetchone()
+    if not vehicle:
+        conn.close()
+        return "Vehicle not found", 404
+    market = market_price_suggestion(conn, vehicle)
+    duplicates = duplicate_vehicle_matches(conn, vehicle["vin"], vehicle["registration"], vehicle["stock_no"], exclude_id=vehicle_id)
+    comparable_sales = conn.execute("""
+        SELECT s.sale_date,s.sale_price_inc_gst,v.stock_no,v.year,v.make,v.model
+        FROM sales s JOIN vehicles v ON v.id=s.vehicle_id
+        WHERE s.sale_price_inc_gst>0 AND LOWER(v.make)=LOWER(?)
+        ORDER BY s.sale_date DESC LIMIT 8
+    """, (vehicle["make"],)).fetchall()
+    conn.close()
+    return render_template("dealer_intelligence.html", vehicle=vehicle, market=market, duplicates=duplicates,
+                           comparable_sales=comparable_sales, ai_enabled=bool(OPENAI_API_KEY))
+
+
+@app.route("/vehicles/<int:vehicle_id>/decode-vin", methods=["POST"])
+@login_required
+def vehicle_decode_vin(vehicle_id):
+    conn = db()
+    vehicle = conn.execute("SELECT * FROM vehicles WHERE id=?", (vehicle_id,)).fetchone()
+    if not vehicle:
+        conn.close()
+        return "Vehicle not found", 404
+    specs, error = decode_vin(vehicle["vin"])
+    if specs:
+        conn.execute("""
+            UPDATE vehicles SET vin_decode_json=?,decoded_at=CURRENT_TIMESTAMP,manufacturer_name=?,body_class=?,drive_type=?,
+                transmission_style=?,engine_cylinders=?,engine_displacement_l=?,fuel_type_primary=?,decoded_model_year=?,decoded_series=?,decoded_trim=?,
+                make=CASE WHEN COALESCE(make,'')='' THEN ? ELSE make END,
+                model=CASE WHEN COALESCE(model,'')='' THEN ? ELSE model END,
+                year=CASE WHEN year IS NULL OR year=0 THEN ? ELSE year END
+            WHERE id=?
+        """, (json.dumps(specs.get("raw", {})), specs.get("manufacturer_name"), specs.get("body_class"), specs.get("drive_type"),
+              specs.get("transmission_style"), specs.get("engine_cylinders"), specs.get("engine_displacement_l"), specs.get("fuel_type_primary"),
+              specs.get("year"), specs.get("series"), specs.get("trim"), specs.get("make"), specs.get("model"), specs.get("year") or None, vehicle_id))
+        conn.commit()
+        log_action("VIN decoded", "vehicle", vehicle_id, f"VIN {vehicle['vin']}; provider specs saved")
+        flash("VIN decoded and available specifications were saved." + (f" Note: {error}" if error else ""), "success")
+    else:
+        flash(error or "VIN could not be decoded.", "error")
+    conn.close()
+    return redirect(url_for("dealer_intelligence", vehicle_id=vehicle_id))
+
+
+@app.route("/vehicles/<int:vehicle_id>/market-suggestion", methods=["POST"])
+@login_required
+def vehicle_market_suggestion_save(vehicle_id):
+    conn = db()
+    vehicle = conn.execute("SELECT * FROM vehicles WHERE id=?", (vehicle_id,)).fetchone()
+    if not vehicle:
+        conn.close(); return "Vehicle not found", 404
+    market = market_price_suggestion(conn, vehicle)
+    conn.execute("UPDATE vehicles SET market_price_low=?,market_price_mid=?,market_price_high=?,market_price_checked_at=CURRENT_TIMESTAMP WHERE id=?",
+                 (market["low"], market["mid"], market["high"], vehicle_id))
+    conn.commit(); conn.close()
+    log_action("Market pricing suggestion refreshed", "vehicle", vehicle_id, json.dumps(market))
+    flash("Pricing suggestion refreshed from BAM's recorded sales and vehicle cost data.", "success")
+    return redirect(url_for("dealer_intelligence", vehicle_id=vehicle_id))
+
+
+@app.route("/vehicles/<int:vehicle_id>/generate-ai-ad", methods=["POST"])
+@login_required
+def vehicle_generate_ai_ad(vehicle_id):
+    conn = db()
+    vehicle = conn.execute("SELECT * FROM vehicles WHERE id=?", (vehicle_id,)).fetchone()
+    if not vehicle:
+        conn.close(); return "Vehicle not found", 404
+    text, source = generate_vehicle_ad_text(vehicle)
+    title = f"{vehicle['year'] or ''} {vehicle['make']} {vehicle['model']} {vehicle['variant'] or ''}".strip()
+    conn.execute("UPDATE vehicles SET advertisement_title=?,advertisement_description=? WHERE id=?", (title, text, vehicle_id))
+    conn.commit(); conn.close()
+    log_action("Advertisement generated", "vehicle", vehicle_id, source)
+    flash(f"Advertisement generated. {source}", "success")
+    return redirect(url_for("advertisement_pro", vehicle_id=vehicle_id))
+
 
 @app.route("/vehicles/<int:vehicle_id>")
 @login_required
@@ -2546,9 +2920,10 @@ def part_detail(part_id):
     sold_cost = sold_qty * float(part["unit_cost_inc_gst"] or 0)
     gross_profit = revenue - sold_cost - freight
     donor = conn.execute("SELECT * FROM vehicles WHERE id=?", (part["vehicle_id"],)).fetchone() if part["vehicle_id"] else None
+    price_suggestion = parts_price_suggestion(conn, part)
     conn.close()
     return render_template("part_detail.html", part=part, photos=photos, sales=sales, donor=donor,
-                           sold_qty=sold_qty, revenue=revenue, freight=freight, gross_profit=gross_profit)
+                           sold_qty=sold_qty, revenue=revenue, freight=freight, gross_profit=gross_profit, price_suggestion=price_suggestion)
 
 
 @app.route("/parts/<int:part_id>/edit", methods=["GET", "POST"])
@@ -2893,24 +3268,46 @@ def sale_contract(vehicle_id):
 def customer_history():
     conn = db()
     q = request.args.get("q", "").strip()
+    pattern = f"%{q}%"
+    vehicle_sql = """
+        SELECT 'Vehicle' AS purchase_type,s.id AS sale_id,s.vehicle_id,s.sale_date AS purchase_date,
+               s.buyer_name AS customer_name,s.buyer_phone AS customer_phone,s.buyer_email AS customer_email,
+               s.sale_price_inc_gst AS amount,s.invoice_number,
+               v.stock_no AS item_no,(COALESCE(v.year,'') || ' ' || v.make || ' ' || v.model) AS item_name,
+               v.registration
+        FROM sales s JOIN vehicles v ON v.id=s.vehicle_id
+    """
+    part_sql = """
+        SELECT 'Part' AS purchase_type,ps.id AS sale_id,p.vehicle_id,ps.sale_date AS purchase_date,
+               ps.customer_name,ps.customer_phone,ps.customer_email,ps.sale_price AS amount,ps.invoice_number,
+               p.part_number AS item_no,p.part_name AS item_name,'' AS registration
+        FROM part_sales ps JOIN parts p ON p.id=ps.part_id
+    """
+    params = []
     if q:
-        pattern = f"%{q}%"
-        rows = conn.execute("""
-            SELECT s.*,v.stock_no,v.year,v.make,v.model,v.registration
-            FROM sales s
-            JOIN vehicles v ON v.id=s.vehicle_id
-            WHERE s.buyer_name LIKE ? OR s.buyer_phone LIKE ? OR s.buyer_email LIKE ?
-            ORDER BY s.sale_date DESC,s.id DESC
-        """, (pattern, pattern, pattern)).fetchall()
-    else:
-        rows = conn.execute("""
-            SELECT s.*,v.stock_no,v.year,v.make,v.model,v.registration
-            FROM sales s
-            JOIN vehicles v ON v.id=s.vehicle_id
-            ORDER BY s.sale_date DESC,s.id DESC
-        """).fetchall()
+        vehicle_sql += " WHERE s.buyer_name LIKE ? OR s.buyer_phone LIKE ? OR s.buyer_email LIKE ?"
+        part_sql += " WHERE ps.customer_name LIKE ? OR ps.customer_phone LIKE ? OR ps.customer_email LIKE ?"
+        params = [pattern, pattern, pattern]
+    vehicle_rows = conn.execute(vehicle_sql + " ORDER BY purchase_date DESC", params).fetchall()
+    part_rows = conn.execute(part_sql + " ORDER BY purchase_date DESC", params).fetchall()
     conn.close()
-    return render_template("customer_history.html", rows=rows, q=q)
+
+    transactions = [dict(r) for r in vehicle_rows] + [dict(r) for r in part_rows]
+    transactions.sort(key=lambda r: str(r.get("purchase_date") or ""), reverse=True)
+    customers = {}
+    for row in transactions:
+        email = (row.get("customer_email") or "").strip().lower()
+        phone = re.sub(r"\s+", "", row.get("customer_phone") or "")
+        name = (row.get("customer_name") or "Unknown customer").strip()
+        key = email or phone or name.lower()
+        profile = customers.setdefault(key, {"name": name, "phone": row.get("customer_phone") or "", "email": row.get("customer_email") or "", "total_spend": 0.0, "vehicle_count": 0, "part_count": 0, "last_purchase": "", "transactions": []})
+        profile["total_spend"] += float(row.get("amount") or 0)
+        profile["vehicle_count"] += 1 if row["purchase_type"] == "Vehicle" else 0
+        profile["part_count"] += 1 if row["purchase_type"] == "Part" else 0
+        profile["last_purchase"] = max(profile["last_purchase"], str(row.get("purchase_date") or ""))
+        profile["transactions"].append(row)
+    customer_rows = sorted(customers.values(), key=lambda x: (x["total_spend"], x["last_purchase"]), reverse=True)
+    return render_template("customer_history.html", customers=customer_rows, transactions=transactions, q=q)
 
 
 @app.route("/reports/bas")

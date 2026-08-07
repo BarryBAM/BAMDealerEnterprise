@@ -1,23 +1,9 @@
-
 {% extends "base.html" %}
-{% block title %}Customer History | BAM Motor Group{% endblock %}
+{% block title %}Customer Purchase History | BAM Motor Group{% endblock %}
 {% block content %}
-<h1>Customer Purchase History</h1>
+<div class="page-head"><div><span class="eyebrow">Version 22 • Customer Intelligence</span><h1>Customer Purchase History</h1><p>Vehicle purchases and parts purchases in one customer view.</p></div></div>
 <form method="get" class="search"><input name="q" value="{{ q }}" placeholder="Search customer, phone or email"><button>Search</button></form>
-<table>
-<tr><th>Date</th><th>Customer</th><th>Contact</th><th>Vehicle</th><th>Registration</th><th>Sale</th><th>Deposit</th><th>Warranty</th><th>Documents</th></tr>
-{% for r in rows %}
-<tr>
-<td>{{ r.sale_date or '' }}</td>
-<td>{{ r.buyer_name or '' }}</td>
-<td>{{ r.buyer_phone or '' }}<br>{{ r.buyer_email or '' }}</td>
-<td><a href="{{ url_for('vehicle_detail', vehicle_id=r.vehicle_id) }}">{{ r.stock_no }} — {{ r.year or '' }} {{ r.make }} {{ r.model }}</a></td>
-<td>{{ r.registration or '' }}</td>
-<td>{{ r.sale_price_inc_gst|money }}</td>
-<td>{{ r.deposit_amount|money }}</td>
-<td>{{ r.warranty_type or '' }}{% if r.warranty_expiry %}<br>{{ r.warranty_expiry }}{% endif %}</td>
-<td><a href="{{ url_for('sale_invoice', vehicle_id=r.vehicle_id) }}" target="_blank">Invoice</a> | <a href="{{ url_for('sale_contract', vehicle_id=r.vehicle_id) }}" target="_blank">Contract</a></td>
-</tr>
-{% else %}<tr><td colspan="9">No completed sales yet.</td></tr>{% endfor %}
-</table>
+<div class="parts-kpis"><article><span>Customers</span><strong>{{ customers|length }}</strong><small>Matching current filter</small></article><article><span>Transactions</span><strong>{{ transactions|length }}</strong><small>Vehicles + parts</small></article><article><span>Total Spend</span><strong>{{ customers|sum(attribute='total_spend')|money }}</strong><small>Recorded customer purchases</small></article></div>
+<section class="panel"><div class="panel-title"><h2>Customer Profiles</h2><span>{{ customers|length }} profiles</span></div><div class="table-wrap"><table><tr><th>Customer</th><th>Contact</th><th>Vehicles</th><th>Parts</th><th>Total Spend</th><th>Last Purchase</th></tr>{% for c in customers %}<tr><td><strong>{{ c.name }}</strong></td><td>{{ c.phone }}<br>{{ c.email }}</td><td>{{ c.vehicle_count }}</td><td>{{ c.part_count }}</td><td>{{ c.total_spend|money }}</td><td>{{ c.last_purchase }}</td></tr>{% else %}<tr><td colspan="6">No customer purchases found.</td></tr>{% endfor %}</table></div></section>
+<section class="panel"><div class="panel-title"><h2>Purchase Timeline</h2><span>{{ transactions|length }} transactions</span></div><div class="table-wrap"><table><tr><th>Date</th><th>Customer</th><th>Type</th><th>Item</th><th>Amount</th><th>Invoice</th></tr>{% for r in transactions %}<tr><td>{{ r.purchase_date or '' }}</td><td>{{ r.customer_name or '' }}<small>{{ r.customer_phone or '' }} {{ r.customer_email or '' }}</small></td><td><span class="status-pill">{{ r.purchase_type }}</span></td><td>{% if r.purchase_type=='Vehicle' and r.vehicle_id %}<a href="{{ url_for('vehicle_detail',vehicle_id=r.vehicle_id) }}">{{ r.item_no }} — {{ r.item_name }}</a>{% else %}{{ r.item_no or '' }} — {{ r.item_name }}{% endif %}</td><td>{{ r.amount|money }}</td><td>{{ r.invoice_number or '—' }}</td></tr>{% else %}<tr><td colspan="6">No purchases found.</td></tr>{% endfor %}</table></div></section>
 {% endblock %}

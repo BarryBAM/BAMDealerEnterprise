@@ -39,7 +39,7 @@
 <label>Replace Main Photo<input type="file" name="photo" accept=".png,.jpg,.jpeg,.webp"><small>Leave blank to keep current photo.</small></label>
 {% if vehicle.photo_filename %}<div class="wide current-photo"><img class="vehicle-edit-preview" src="{{ url_for('uploaded_file', filename=vehicle.photo_filename) }}"></div>{% endif %}
 <label class="wide">Service History<textarea name="service_history">{{ vehicle.service_history or '' }}</textarea></label><label class="wide">Notes<textarea name="notes">{{ vehicle.notes or '' }}</textarea></label>
-<div class="wide edit-actions"><button type="submit">Save Changes</button><button type="submit" name="continue_editing" value="1">Save & Continue Editing</button><a class="button" href="{{ url_for('vehicle_detail', vehicle_id=vehicle.id) }}">Cancel</a></div>
+<div class="wide edit-actions"><button type="submit">Save Changes</button><a class="button secondary" href="{{ url_for('dealer_intelligence',vehicle_id=vehicle.id) }}">🧠 Dealer Intelligence</a><button type="submit" name="continue_editing" value="1">Save & Continue Editing</button><a class="button" href="{{ url_for('vehicle_detail', vehicle_id=vehicle.id) }}">Cancel</a></div>
 </form>
 <script>
 function toggleAssetFields(){const t=document.getElementById('asset-type').value;document.querySelectorAll('.caravan-fields').forEach(e=>e.style.display=t==='Caravan'?'block':'none');document.querySelectorAll('.boat-fields').forEach(e=>e.style.display=t==='Boat'?'block':'none');document.querySelectorAll('.car-fields').forEach(e=>e.style.display=['Car','Motorcycle'].includes(t)?'flex':'none');}

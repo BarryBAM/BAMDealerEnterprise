@@ -26,4 +26,4 @@ if __name__ == "__main__":
     test_project_folders_exist()
     test_application_compiles()
     test_database_opens()
-    print("BAM Dealer Enterprise v16.0 health check passed.")
+    print("BAM Dealer Enterprise v22.0 health check passed.")

@@ -75,3 +75,6 @@ Open **Invoice Centre** from the sidebar to search, view and edit saved vehicle 
 - Minimum sale price and asking price are editable on the stock-item editor.
 - Live margin estimates compare both prices with the purchase price.
 - The prepare-for-sale pricing task completes automatically once both prices are saved.
+
+## Version 22 - Dealer Intelligence
+Version 22 adds VIN decoding, automatic specification storage, optional AI advertisement generation, internal market and parts pricing suggestions, duplicate stock detection, combined customer purchase history, smart reminders and a business KPI dashboard. External services are optional; BAM continues operating if they are unavailable.
