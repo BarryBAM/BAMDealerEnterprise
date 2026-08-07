@@ -1,0 +1,15 @@
+BAM Dealer Enterprise Cloud v20.0
+
+Version 20 - Dealer Operations & Intelligence
+
+New features:
+- Complete Vehicle Timeline combining purchase, expenses, workshop, services, reminders, tasks, dismantled parts, part sales, vehicle sale and audit activity.
+- Universal Search now searches vehicles, parts, OEM/manufacturer numbers, barcodes, storage locations, contacts and vehicle invoices.
+- Printable professional stock labels for Parts Centre inventory.
+- Direct Timeline button from every vehicle workspace.
+- Direct Print Stock Label button from every part workspace.
+- Version updated to v20.0.
+
+Database safety:
+- No destructive schema changes are required for this release.
+- Existing Azure /home/bam-data records remain compatible.

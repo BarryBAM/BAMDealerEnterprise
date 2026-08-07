@@ -1,0 +1,8 @@
+BAM Dealer Enterprise Cloud v20.1
+
+Hotfix: Professional Parts SKU reliability
+- Uses one continuous business-wide automatic PRT-000001 sequence.
+- Server allocates the next PRT number inside a write transaction.
+- Stale PRT values posted by an open form are ignored.
+- Failed inserts are rolled back so SQLite is not left locked.
+- Existing custom non-PRT part numbers remain supported.

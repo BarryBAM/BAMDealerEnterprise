@@ -7,7 +7,7 @@
     <h1>{{ vehicle.stock_no }}</h1>
     <p>{{ vehicle.year or '' }} {{ vehicle.make }} {{ vehicle.model }} {{ vehicle.variant or '' }}</p>
   </div>
-  <div class="page-actions">
+  <div class="page-actions"><a class="button secondary" href="{{ url_for('vehicle_timeline', vehicle_id=vehicle.id) }}">Timeline</a>
     <span class="status">{{ vehicle.status }}</span>
     <a class="button" href="{{ url_for('vehicle_edit', vehicle_id=vehicle.id) }}">Edit Asset</a>
     {% if (vehicle.vehicle_purpose or 'Retail Sale') == 'Parts Vehicle' or vehicle.status == 'BER' %}<a class="button" href="{{ url_for('vehicle_dismantling', vehicle_id=vehicle.id) }}">🔧 Dismantling</a>{% endif %}
@@ -18,7 +18,7 @@
 </div>
 
 <nav class="asset-workspace-nav" aria-label="Asset workspace">
-  <a href="#overview">Overview</a><a href="#photos">Photos</a><a href="#documents">Documents</a>
+  <a href="#overview">Overview</a><a href="{{ url_for('vehicle_timeline', vehicle_id=vehicle.id) }}">Timeline</a><a href="#photos">Photos</a><a href="#documents">Documents</a>
   <a href="#expenses">Expenses</a><a href="#workshop">Workshop</a><a href="#parts">Parts</a>{% if (vehicle.vehicle_purpose or 'Retail Sale') == 'Parts Vehicle' or vehicle.status == 'BER' %}<a href="#dismantling">Dismantling</a>{% endif %}
   <a href="#reminders">Reminders</a><a href="#sale">Sale & Profit</a>
 </nav>

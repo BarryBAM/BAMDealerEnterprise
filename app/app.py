@@ -46,7 +46,7 @@ app.config.update(
     PERMANENT_SESSION_LIFETIME=timedelta(hours=int(os.environ.get("BAM_SESSION_HOURS", "12"))),
 )
 
-APP_VERSION = "19.0"
+APP_VERSION = "20.1"
 APP_NAME = "BAM Dealer Enterprise Cloud"
 
 ALLOWED_EXTENSIONS = {"png", "jpg", "jpeg", "webp", "pdf"}
@@ -575,7 +575,7 @@ def next_part_number(conn=None):
             highest = max(highest, int(match.group(1)))
     if own_conn:
         conn.close()
-    return f"PRT-{highest + 1:05d}"
+    return f"PRT-{highest + 1:06d}"
 
 
 def next_shipment_number(conn=None):
@@ -2222,28 +2222,46 @@ def vehicle_dismantling(vehicle_id):
         cost = float(request.form.get("unit_cost_inc_gst") or 0)
         selling = float(request.form.get("selling_price") or 0)
         gst = round(cost / 11, 2)
-        part_number = (request.form.get("part_number") or "").strip() or next_part_number(conn)
-        conn.execute("""
-            INSERT INTO parts(
-                part_number,part_name,category,supplier,quantity_on_hand,reorder_level,
-                unit_cost_inc_gst,gst_amount_per_unit,storage_location,notes,
-                vehicle_id,vehicle_stock_no,vin,make,model,year,condition,selling_price,status,date_added,
-                position,fitment,manufacturer_part_no,updated_at
-            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP,?,?,?,CURRENT_TIMESTAMP)
-        """, (
-            part_number, part_name, request.form.get("category"),
-            "Donor vehicle", qty, 0, cost, gst, request.form.get("storage_location"),
-            request.form.get("notes"), vehicle_id, vehicle["stock_no"], vehicle["vin"],
-            vehicle["make"], vehicle["model"], vehicle["year"],
-            request.form.get("condition") or "Used", selling,
-            request.form.get("status") or "In Stock", request.form.get("position"),
-            request.form.get("fitment"), request.form.get("manufacturer_part_no"),
-        ))
-        conn.execute(
-            "UPDATE vehicles SET vehicle_purpose='Parts Vehicle', dismantling_status=CASE WHEN COALESCE(dismantling_status,'Not Started')='Not Started' THEN 'Dismantling' ELSE dismantling_status END WHERE id=?",
-            (vehicle_id,),
-        )
-        conn.commit()
+        # PRT numbers are allocated by the server from one business-wide sequence.
+        # Ignore stale PRT values posted by an open browser form so a duplicate SKU
+        # can never be reused accidentally. Custom non-PRT numbers are still allowed.
+        requested_number = (request.form.get("part_number") or "").strip()
+        part_number = requested_number if requested_number and not requested_number.upper().startswith("PRT-") else None
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            if not part_number:
+                part_number = next_part_number(conn)
+            conn.execute("""
+                INSERT INTO parts(
+                    part_number,part_name,category,supplier,quantity_on_hand,reorder_level,
+                    unit_cost_inc_gst,gst_amount_per_unit,storage_location,notes,
+                    vehicle_id,vehicle_stock_no,vin,make,model,year,condition,selling_price,status,date_added,
+                    position,fitment,manufacturer_part_no,updated_at
+                ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP,?,?,?,CURRENT_TIMESTAMP)
+            """, (
+                part_number, part_name, request.form.get("category"),
+                "Donor vehicle", qty, 0, cost, gst, request.form.get("storage_location"),
+                request.form.get("notes"), vehicle_id, vehicle["stock_no"], vehicle["vin"],
+                vehicle["make"], vehicle["model"], vehicle["year"],
+                request.form.get("condition") or "Used", selling,
+                request.form.get("status") or "In Stock", request.form.get("position"),
+                request.form.get("fitment"), request.form.get("manufacturer_part_no"),
+            ))
+            conn.execute(
+                "UPDATE vehicles SET vehicle_purpose='Parts Vehicle', dismantling_status=CASE WHEN COALESCE(dismantling_status,'Not Started')='Not Started' THEN 'Dismantling' ELSE dismantling_status END WHERE id=?",
+                (vehicle_id,),
+            )
+            conn.commit()
+        except sqlite3.IntegrityError as exc:
+            conn.rollback()
+            conn.close()
+            flash(f"Could not add part: {exc}", "error")
+            return redirect(url_for("vehicle_dismantling", vehicle_id=vehicle_id))
+        except sqlite3.OperationalError as exc:
+            conn.rollback()
+            conn.close()
+            flash(f"Database busy while adding part. Please try again: {exc}", "error")
+            return redirect(url_for("vehicle_dismantling", vehicle_id=vehicle_id))
         conn.close()
         flash(f"{part_name} added to Parts Centre.", "success")
         return redirect(url_for("vehicle_dismantling", vehicle_id=vehicle_id))
@@ -2306,13 +2324,17 @@ def parts_page():
         quantity = float(request.form.get("quantity_on_hand") or 0)
         unit_cost = float(request.form.get("unit_cost_inc_gst") or 0)
         gst = round(unit_cost / 11, 2)
-        part_number = (request.form.get("part_number") or "").strip() or next_part_number(conn)
+        requested_number = (request.form.get("part_number") or "").strip()
+        part_number = requested_number if requested_number and not requested_number.upper().startswith("PRT-") else None
         source_stock = (request.form.get("vehicle_stock_no") or "").strip()
         donor = None
         if source_stock:
             donor = conn.execute("SELECT * FROM vehicles WHERE stock_no=?", (source_stock,)).fetchone()
 
         try:
+            conn.execute("BEGIN IMMEDIATE")
+            if not part_number:
+                part_number = next_part_number(conn)
             conn.execute("""
                 INSERT INTO parts(
                     part_number,part_name,category,supplier,quantity_on_hand,reorder_level,
@@ -2334,8 +2356,14 @@ def parts_page():
                 request.form.get("fitment"), request.form.get("manufacturer_part_no"), request.form.get("barcode"),
             ))
         except sqlite3.IntegrityError:
+            conn.rollback()
             conn.close()
             flash(f"Part number {part_number} already exists.", "error")
+            return redirect(url_for("parts_page"))
+        except sqlite3.OperationalError as exc:
+            conn.rollback()
+            conn.close()
+            flash(f"Database busy while adding part. Please try again: {exc}", "error")
             return redirect(url_for("parts_page"))
         conn.commit()
         part_id = conn.execute("SELECT last_insert_rowid() AS id").fetchone()["id"]
@@ -2579,6 +2607,55 @@ def use_part(vehicle_id):
     return redirect(url_for("vehicle_detail", vehicle_id=vehicle_id))
 
 
+@app.route("/vehicles/<int:vehicle_id>/timeline")
+@login_required
+def vehicle_timeline(vehicle_id):
+    conn = db()
+    vehicle = conn.execute("SELECT * FROM vehicles WHERE id=?", (vehicle_id,)).fetchone()
+    if not vehicle:
+        conn.close()
+        return "Vehicle not found", 404
+
+    events = []
+    def add_event(event_date, event_type, title, details="", amount=None, status=""):
+        if event_date:
+            events.append({
+                "date": str(event_date), "type": event_type, "title": title,
+                "details": details or "", "amount": amount, "status": status or ""
+            })
+
+    add_event(vehicle["created_at"], "Vehicle", "Vehicle created", f"{vehicle['stock_no']} - {vehicle['year'] or ''} {vehicle['make']} {vehicle['model']}")
+    add_event(vehicle["purchase_date"], "Purchase", "Vehicle purchased", "Purchase recorded", vehicle["purchase_price_inc_gst"])
+
+    for row in conn.execute("SELECT * FROM expenses WHERE vehicle_id=?", (vehicle_id,)).fetchall():
+        add_event(row["expense_date"], "Expense", row["category"] or "Expense", row["description"], row["cost_inc_gst"])
+    for row in conn.execute("SELECT * FROM job_cards WHERE vehicle_id=?", (vehicle_id,)).fetchall():
+        amount = row["actual_cost_inc_gst"] if float(row["actual_cost_inc_gst"] or 0) > 0 else row["estimated_cost"]
+        add_event(row["job_date"], "Workshop", row["description"], row["category"] or "Workshop job", amount, row["status"] or "")
+    for row in conn.execute("SELECT * FROM service_entries WHERE vehicle_id=?", (vehicle_id,)).fetchall():
+        add_event(row["service_date"], "Service", row["service_type"] or "Service", row["description"], row["cost_inc_gst"])
+    for row in conn.execute("SELECT * FROM reminders WHERE vehicle_id=?", (vehicle_id,)).fetchall():
+        add_event(row["reminder_date"], "Reminder", row["title"], row["reminder_type"], None, "Completed" if row["completed"] else "Open")
+    for row in conn.execute("SELECT * FROM tasks WHERE vehicle_id=?", (vehicle_id,)).fetchall():
+        add_event(row["task_date"] or row["created_at"], "Task", row["title"], row["category"] or "", None, row["status"] or "")
+    for row in conn.execute("SELECT * FROM parts WHERE vehicle_id=?", (vehicle_id,)).fetchall():
+        add_event(row["date_added"] or row["updated_at"], "Dismantling", f"Part added: {row['part_number'] or ''} {row['part_name']}", row["storage_location"] or "", row["selling_price"], row["status"] or "")
+    for row in conn.execute("""
+        SELECT ps.*,p.part_number,p.part_name FROM part_sales ps
+        JOIN parts p ON p.id=ps.part_id WHERE p.vehicle_id=?
+    """, (vehicle_id,)).fetchall():
+        add_event(row["sale_date"], "Part Sale", f"Sold {row['part_number'] or ''} {row['part_name']}", row["customer_name"] or "", row["sale_price"], "Sold")
+    sale = conn.execute("SELECT * FROM sales WHERE vehicle_id=?", (vehicle_id,)).fetchone()
+    if sale:
+        add_event(sale["sale_date"], "Vehicle Sale", f"Vehicle sold to {sale['buyer_name'] or 'buyer'}", sale["invoice_number"] or "", sale["sale_price_inc_gst"], sale["invoice_status"] or "")
+    for row in conn.execute("SELECT * FROM audit_log WHERE entity_type='vehicle' AND entity_id=?", (vehicle_id,)).fetchall():
+        add_event(row["created_at"], "Activity", row["action"], row["details"] or "")
+
+    events.sort(key=lambda x: x["date"] or "", reverse=True)
+    conn.close()
+    return render_template("vehicle_timeline.html", vehicle=vehicle, events=events)
+
+
 @app.route("/search")
 @login_required
 def global_search():
@@ -2586,20 +2663,35 @@ def global_search():
     conn = db()
     vehicles = []
     contacts = []
+    parts = []
+    invoices = []
     if q:
         pattern = f"%{q}%"
         vehicles = conn.execute("""
             SELECT * FROM vehicles
             WHERE stock_no LIKE ? OR vin LIKE ? OR registration LIKE ? OR make LIKE ? OR model LIKE ?
-            ORDER BY id DESC
+            ORDER BY id DESC LIMIT 50
         """, (pattern, pattern, pattern, pattern, pattern)).fetchall()
         contacts = conn.execute("""
             SELECT * FROM contacts
             WHERE name LIKE ? OR phone LIKE ? OR email LIKE ?
-            ORDER BY name
+            ORDER BY name LIMIT 50
         """, (pattern, pattern, pattern)).fetchall()
+        parts = conn.execute("""
+            SELECT * FROM parts
+            WHERE part_number LIKE ? OR part_name LIKE ? OR manufacturer_part_no LIKE ?
+               OR barcode LIKE ? OR vehicle_stock_no LIKE ? OR storage_location LIKE ? OR fitment LIKE ?
+            ORDER BY id DESC LIMIT 50
+        """, (pattern, pattern, pattern, pattern, pattern, pattern, pattern)).fetchall()
+        invoices = conn.execute("""
+            SELECT s.*,v.stock_no,v.make,v.model,v.year FROM sales s
+            JOIN vehicles v ON v.id=s.vehicle_id
+            WHERE s.invoice_number LIKE ? OR s.buyer_name LIKE ? OR s.buyer_phone LIKE ?
+               OR v.stock_no LIKE ? OR v.registration LIKE ?
+            ORDER BY s.id DESC LIMIT 50
+        """, (pattern, pattern, pattern, pattern, pattern)).fetchall()
     conn.close()
-    return render_template("global_search.html", q=q, vehicles=vehicles, contacts=contacts)
+    return render_template("global_search.html", q=q, vehicles=vehicles, contacts=contacts, parts=parts, invoices=invoices)
 
 
 @app.route("/reports/finance")
@@ -3601,6 +3693,19 @@ def user_edit(user_id):
             conn.close(); flash(str(exc),"error")
     else: conn.close()
     return render_template("user_form.html", user=user)
+
+
+@app.route("/parts/<int:part_id>/label")
+@login_required
+def part_label(part_id):
+    conn = db()
+    part = conn.execute("SELECT * FROM parts WHERE id=?", (part_id,)).fetchone()
+    if not part:
+        conn.close()
+        return "Part not found", 404
+    donor = conn.execute("SELECT * FROM vehicles WHERE id=?", (part["vehicle_id"],)).fetchone() if part["vehicle_id"] else None
+    conn.close()
+    return render_template("part_label.html", part=part, donor=donor)
 
 
 @app.route("/uploads/<path:filename>")

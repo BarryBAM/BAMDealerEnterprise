@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}{{ vehicle.stock_no }} Timeline | BAM Motor Group{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div><span class="eyebrow">Version 20 • Vehicle Timeline</span><h1>{{ vehicle.stock_no }}</h1><p>{{ vehicle.year or '' }} {{ vehicle.make }} {{ vehicle.model }} • complete activity history</p></div>
+  <div class="page-actions"><a class="button secondary" href="{{ url_for('vehicle_detail', vehicle_id=vehicle.id) }}">Back to Vehicle</a><button class="button" onclick="window.print()">Print Timeline</button></div>
+</div>
+<div class="timeline-summary detail-cards">
+  <div><small>Status</small><strong>{{ vehicle.status }}</strong></div>
+  <div><small>Purpose</small><strong>{{ vehicle.vehicle_purpose or 'Retail Sale' }}</strong></div>
+  <div><small>Purchase</small><strong>{{ vehicle.purchase_price_inc_gst|money }}</strong></div>
+  <div><small>Events</small><strong>{{ events|length }}</strong></div>
+</div>
+<section class="panel">
+  <div class="panel-title"><h2>Activity Timeline</h2><span>Newest first</span></div>
+  <div class="activity-timeline">
+    {% for e in events %}
+    <article class="timeline-event">
+      <div class="timeline-dot"></div>
+      <div class="timeline-date">{{ e.date }}</div>
+      <div class="timeline-card">
+        <div class="timeline-card-head"><span class="timeline-type">{{ e.type }}</span>{% if e.status %}<span class="status-pill">{{ e.status }}</span>{% endif %}{% if e.amount is not none %}<strong>{{ e.amount|money }}</strong>{% endif %}</div>
+        <h3>{{ e.title }}</h3>{% if e.details %}<p>{{ e.details }}</p>{% endif %}
+      </div>
+    </article>
+    {% else %}<p>No activity recorded for this vehicle yet.</p>{% endfor %}
+  </div>
+</section>
+{% endblock %}

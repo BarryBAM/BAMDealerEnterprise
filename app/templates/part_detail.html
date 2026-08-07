@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}{{ part.part_number }} | Parts Centre{% endblock %}
 {% block content %}
-<div class="page-head"><div><span class="eyebrow">Version 19 • Part Workspace</span><h1>{{ part.part_number or 'Unnumbered Part' }}</h1><p>{{ part.part_name }}{% if part.vehicle_stock_no %} • donor {{ part.vehicle_stock_no }}{% endif %}</p></div><div class="page-actions"><a class="button secondary" href="{{ url_for('parts_page') }}">Parts Centre</a><a class="button" href="{{ url_for('part_edit', part_id=part.id) }}">Edit Part</a></div></div>
+<div class="page-head"><div><span class="eyebrow">Version 20 • Part Workspace</span><h1>{{ part.part_number or 'Unnumbered Part' }}</h1><p>{{ part.part_name }}{% if part.vehicle_stock_no %} • donor {{ part.vehicle_stock_no }}{% endif %}</p></div><div class="page-actions"><a class="button secondary" href="{{ url_for('parts_page') }}">Parts Centre</a><a class="button secondary" target="_blank" href="{{ url_for('part_label', part_id=part.id) }}">Print Stock Label</a><a class="button" href="{{ url_for('part_edit', part_id=part.id) }}">Edit Part</a></div></div>
 <div class="detail-cards"><div><small>Status</small><strong>{{ part.status or 'In Stock' }}</strong></div><div><small>On Hand</small><strong>{{ part.quantity_on_hand }}</strong></div><div><small>Selling Price</small><strong>{{ part.selling_price|money }}</strong></div><div><small>Sales Revenue</small><strong>{{ revenue|money }}</strong></div><div><small>Gross Profit</small><strong>{{ gross_profit|money }}</strong></div></div>
 <div class="workspace-two-column">
 <section class="panel"><div class="panel-title"><h2>Part Details</h2><span>{{ part.condition or 'Used' }}</span></div>

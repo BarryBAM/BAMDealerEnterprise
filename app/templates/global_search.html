@@ -1,23 +1,13 @@
-
 {% extends "base.html" %}
 {% block title %}Global Search | BAM Motor Group{% endblock %}
 {% block content %}
-<h1>Global Search</h1>
-<form method="get" class="search"><input name="q" value="{{ q }}" placeholder="Stock number, VIN, registration, make, model, customer or phone"><button>Search</button></form>
+<div class="page-head"><div><span class="eyebrow">Version 20 • Universal Search</span><h1>Global Search</h1><p>Search vehicles, parts, customers and invoices from one place.</p></div></div>
+<form method="get" class="search universal-search"><input name="q" value="{{ q }}" autofocus placeholder="Stock, VIN, rego, SKU, OEM, barcode, location, customer or invoice"><button>Search Everything</button></form>
 {% if q %}
-<h2>Vehicles</h2>
-<table>
-<tr><th>Stock</th><th>Vehicle</th><th>VIN</th><th>Registration</th><th>Status</th></tr>
-{% for v in vehicles %}
-<tr><td><a href="{{ url_for('vehicle_detail', vehicle_id=v.id) }}">{{ v.stock_no }}</a></td><td>{{ v.year or '' }} {{ v.make }} {{ v.model }}</td><td>{{ v.vin or '' }}</td><td>{{ v.registration or '' }}</td><td>{{ v.status }}</td></tr>
-{% else %}<tr><td colspan="5">No vehicles found.</td></tr>{% endfor %}
-</table>
-<h2>Contacts</h2>
-<table>
-<tr><th>Type</th><th>Name</th><th>Phone</th><th>Email</th></tr>
-{% for c in contacts %}
-<tr><td>{{ c.contact_type or '' }}</td><td>{{ c.name }}</td><td>{{ c.phone or '' }}</td><td>{{ c.email or '' }}</td></tr>
-{% else %}<tr><td colspan="4">No contacts found.</td></tr>{% endfor %}
-</table>
+<div class="detail-cards search-counts"><div><small>Vehicles</small><strong>{{ vehicles|length }}</strong></div><div><small>Parts</small><strong>{{ parts|length }}</strong></div><div><small>Contacts</small><strong>{{ contacts|length }}</strong></div><div><small>Invoices</small><strong>{{ invoices|length }}</strong></div></div>
+<section class="panel"><div class="panel-title"><h2>Vehicles</h2><span>{{ vehicles|length }} results</span></div><div class="table-wrap"><table><tr><th>Stock</th><th>Vehicle</th><th>VIN</th><th>Registration</th><th>Status</th></tr>{% for v in vehicles %}<tr><td><a href="{{ url_for('vehicle_detail', vehicle_id=v.id) }}">{{ v.stock_no }}</a></td><td>{{ v.year or '' }} {{ v.make }} {{ v.model }}</td><td>{{ v.vin or '' }}</td><td>{{ v.registration or '' }}</td><td>{{ v.status }}</td></tr>{% else %}<tr><td colspan="5">No vehicles found.</td></tr>{% endfor %}</table></div></section>
+<section class="panel"><div class="panel-title"><h2>Parts</h2><span>{{ parts|length }} results</span></div><div class="table-wrap"><table><tr><th>SKU</th><th>Part</th><th>Donor</th><th>OEM</th><th>Location</th><th>Status</th></tr>{% for p in parts %}<tr><td><a href="{{ url_for('part_detail', part_id=p.id) }}">{{ p.part_number or '—' }}</a></td><td>{{ p.part_name }}</td><td>{{ p.vehicle_stock_no or '—' }}</td><td>{{ p.manufacturer_part_no or '—' }}</td><td>{{ p.storage_location or '—' }}</td><td>{{ p.status or 'In Stock' }}</td></tr>{% else %}<tr><td colspan="6">No parts found.</td></tr>{% endfor %}</table></div></section>
+<section class="panel"><div class="panel-title"><h2>Contacts</h2><span>{{ contacts|length }} results</span></div><div class="table-wrap"><table><tr><th>Type</th><th>Name</th><th>Phone</th><th>Email</th></tr>{% for c in contacts %}<tr><td>{{ c.contact_type or '' }}</td><td>{{ c.name }}</td><td>{{ c.phone or '' }}</td><td>{{ c.email or '' }}</td></tr>{% else %}<tr><td colspan="4">No contacts found.</td></tr>{% endfor %}</table></div></section>
+<section class="panel"><div class="panel-title"><h2>Invoices</h2><span>{{ invoices|length }} results</span></div><div class="table-wrap"><table><tr><th>Invoice</th><th>Vehicle</th><th>Buyer</th><th>Sale Date</th><th>Amount</th></tr>{% for s in invoices %}<tr><td><a href="{{ url_for('sale_invoice', vehicle_id=s.vehicle_id) }}">{{ s.invoice_number or 'Draft' }}</a></td><td>{{ s.stock_no }} — {{ s.year or '' }} {{ s.make }} {{ s.model }}</td><td>{{ s.buyer_name or '—' }}</td><td>{{ s.sale_date or '—' }}</td><td>{{ s.sale_price_inc_gst|money }}</td></tr>{% else %}<tr><td colspan="5">No invoices found.</td></tr>{% endfor %}</table></div></section>
 {% endif %}
 {% endblock %}
