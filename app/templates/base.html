@@ -41,6 +41,7 @@
     <a href="{{ url_for('global_search') }}">⌕ Global Search</a>
     <span class="nav-section">Customers & Work</span>
     <a href="{{ url_for('contacts_page') }}">👥 Buyers / Sellers</a>
+    <a href="{{ url_for('email_centre') }}" class="{% if request.endpoint and request.endpoint.startswith('email_') %}active{% endif %}">✉ Email Centre</a>
     <a href="{{ url_for('tasks_page') }}">✓ Tasks</a>
     <a href="{{ url_for('reminders_page') }}">🔔 Reminders</a>
     <span class="nav-section">Finance & Reports</span>

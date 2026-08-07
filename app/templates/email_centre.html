@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}Email Centre | BAM Motor Group{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div><p class="eyebrow">Version 23.1 • Communications</p><h1>Email Centre</h1><p>Keep customer, supplier and workshop correspondence linked to BAM records.</p></div>
+  <div class="page-actions">
+    {% if email_webmail_url %}<a class="button" target="_blank" rel="noopener" href="{{ email_webmail_url }}">Open Webmail</a>{% endif %}
+    {% if email_address %}<a class="button secondary" href="mailto:{{ email_address }}">Compose Email</a>{% endif %}
+  </div>
+</div>
+
+<div class="mini-kpi-grid">
+  <article><span>Total Email Records</span><strong>{{ metrics.total or 0 }}</strong></article>
+  <article><span>Unread</span><strong>{{ metrics.unread or 0 }}</strong></article>
+  <article><span>Follow Up</span><strong>{{ metrics.follow_up or 0 }}</strong></article>
+</div>
+
+<div class="two-column-grid email-centre-grid">
+<section class="panel">
+  <div class="panel-title"><div><h2>Log Email</h2><p>Record important correspondence and link it to a vehicle or customer.</p></div></div>
+  <form method="post" class="form-grid">
+    <label>Direction<select name="direction"><option>Incoming</option><option>Outgoing</option></select></label>
+    <label>Date<input type="date" name="message_date" value="{{ today if today is defined else '' }}"></label>
+    <label>From<input name="sender" placeholder="sender@example.com"></label>
+    <label>To<input name="recipient" value="{{ email_address }}" placeholder="recipient@example.com"></label>
+    <label class="wide">Subject<input name="subject" required></label>
+    <label>Status<select name="status"><option>Unread</option><option>Read</option><option>Follow Up</option><option>Completed</option></select></label>
+    <label>Follow-up Date<input type="date" name="follow_up_date"></label>
+    <label>Vehicle<select name="vehicle_id"><option value="">— None —</option>{% for v in vehicles %}<option value="{{ v.id }}">{{ v.stock_no }} — {{ v.year or '' }} {{ v.make }} {{ v.model }}</option>{% endfor %}</select></label>
+    <label>Contact<select name="contact_id"><option value="">— None —</option>{% for c in contacts %}<option value="{{ c.id }}">{{ c.name }}{% if c.email %} — {{ c.email }}{% endif %}</option>{% endfor %}</select></label>
+    <label class="wide">Email / Message Reference<input name="external_reference" placeholder="Message ID, conversation link or reference"></label>
+    <label class="wide">Message Notes<textarea name="body_excerpt" rows="6" placeholder="Paste the important part of the email or write a short summary"></textarea></label>
+    <button class="wide">Save Email Record</button>
+  </form>
+</section>
+
+<section class="panel">
+  <div class="panel-title"><div><h2>Email Setup</h2><p>BAM can open your normal webmail while keeping business correspondence organised here.</p></div></div>
+  {% if email_webmail_url %}<p><strong>Webmail is configured.</strong></p><a class="button" target="_blank" rel="noopener" href="{{ email_webmail_url }}">Open Webmail</a>{% else %}<p>No webmail shortcut is configured yet.</p><p class="muted">Optional Azure setting: <code>BAM_EMAIL_WEBMAIL_URL</code>. For example, use your Outlook or Gmail webmail address.</p>{% endif %}
+  {% if email_address %}<p><strong>BAM email:</strong> {{ email_address }}</p>{% else %}<p class="muted">Optional Azure setting: <code>BAM_EMAIL_ADDRESS</code>.</p>{% endif %}
+  <div class="notice"><strong>Privacy:</strong> Version 23.1 does not store your email password and does not scrape your mailbox. It records the correspondence you choose to link to BAM and opens your existing webmail securely in a separate tab.</div>
+</section>
+</div>
+
+<section class="panel">
+  <div class="panel-title"><div><h2>Correspondence Register</h2><p>Search and manage saved email records.</p></div></div>
+  <form method="get" class="filter-row"><input name="q" value="{{ q }}" placeholder="Search subject, sender, customer, vehicle..."><select name="status"><option value="">All statuses</option>{% for st in ['Unread','Read','Follow Up','Completed'] %}<option value="{{ st }}" {% if status_filter==st %}selected{% endif %}>{{ st }}</option>{% endfor %}</select><button>Search</button></form>
+  <table class="compact-table"><tr><th>Date</th><th>Status</th><th>Direction</th><th>Subject</th><th>Linked To</th><th>From / To</th><th></th></tr>
+    {% for m in messages %}<tr>
+      <td>{{ m.message_date or '' }}</td><td><span class="status-pill">{{ m.status }}</span></td><td>{{ m.direction }}</td>
+      <td><strong>{{ m.subject }}</strong>{% if m.body_excerpt %}<br><small>{{ m.body_excerpt[:120] }}{% if m.body_excerpt|length > 120 %}…{% endif %}</small>{% endif %}</td>
+      <td>{% if m.stock_no %}<a href="{{ url_for('vehicle_detail', vehicle_id=m.vehicle_id) }}">{{ m.stock_no }}</a>{% endif %}{% if m.contact_name %}{% if m.stock_no %}<br>{% endif %}{{ m.contact_name }}{% endif %}{% if not m.stock_no and not m.contact_name %}—{% endif %}</td>
+      <td><small>{{ m.sender or '—' }} → {{ m.recipient or '—' }}</small></td>
+      <td><form method="post" action="{{ url_for('email_message_status', message_id=m.id) }}" class="inline-form"><select name="status" onchange="this.form.submit()">{% for st in ['Unread','Read','Follow Up','Completed'] %}<option {% if m.status==st %}selected{% endif %}>{{ st }}</option>{% endfor %}</select></form><form method="post" action="{{ url_for('email_message_delete', message_id=m.id) }}" onsubmit="return confirm('Delete this email record?')"><button class="small-button danger">Delete</button></form></td>
+    </tr>{% else %}<tr><td colspan="7">No email records yet.</td></tr>{% endfor %}
+  </table>
+</section>
+{% endblock %}

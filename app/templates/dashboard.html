@@ -56,6 +56,7 @@
       <a href="{{ url_for('tasks_page') }}"><b>✓</b><span>Add Task</span></a>
       <a href="{{ url_for('profit_report') }}"><b>$</b><span>Profit Report</span></a>
       <a href="{{ url_for('finance_summary') }}"><b>▤</b><span>Finance</span></a>
+      <a href="{{ url_for('email_centre') }}"><b>✉</b><span>Email Centre{% if email_metrics.unread %} ({{ email_metrics.unread }}){% endif %}</span></a>
     </div>
     <div class="daily-money">
       <div><span>GST Position</span><strong>{{ (gst_collected-gst_paid)|money }}</strong></div>

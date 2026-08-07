@@ -7,7 +7,26 @@
 <section class="panel"><h2>Vehicle Identification</h2><table class="summary-table">
 <tr><th>VIN</th><td>{{ vehicle.vin or '—' }}</td></tr><tr><th>Make / Model</th><td>{{ vehicle.make }} {{ vehicle.model }} {{ vehicle.variant or '' }}</td></tr><tr><th>Year</th><td>{{ vehicle.year or vehicle.decoded_model_year or '—' }}</td></tr><tr><th>Body</th><td>{{ vehicle.body_class or '—' }}</td></tr><tr><th>Drive</th><td>{{ vehicle.drive_type or '—' }}</td></tr><tr><th>Transmission</th><td>{{ vehicle.transmission_style or '—' }}</td></tr><tr><th>Engine</th><td>{{ vehicle.engine_model or vehicle.engine_displacement_l or '—' }}{% if vehicle.engine_cylinders %} • {{ vehicle.engine_cylinders }} cyl{% endif %}</td></tr><tr><th>Fuel</th><td>{{ vehicle.fuel_type_primary or vehicle.fuel_type or '—' }}</td></tr></table>
 {% if vehicle.vin %}<form method="post" action="{{ url_for('vehicle_decode_vin', vehicle_id=vehicle.id) }}"><button>Refresh VIN Specifications</button></form>{% endif %}</section>
-<section class="panel"><h2>Licensed Workshop Data</h2>{% if provider_url %}<p><strong>{{ provider_name }}</strong> is configured for this BAM installation.</p><p>Use the provider link for licensed workshop manuals, OEM procedures, wiring diagrams and authoritative labour times.</p><a class="button" target="_blank" rel="noopener" href="{{ provider_url }}">Open Vehicle in Provider</a>{% else %}<p>No licensed workshop-data portal is configured yet.</p><p class="muted">Set <code>BAM_WORKSHOP_PROVIDER_NAME</code> and <code>BAM_WORKSHOP_PORTAL_URL</code> in Azure. The URL can contain <code>{vin}</code>, <code>{make}</code>, <code>{model}</code>, <code>{year}</code> or <code>{stock_no}</code>.</p>{% endif %}<div class="notice"><strong>Important:</strong> BAM does not invent or copy proprietary workshop procedures. Labour times and manual links below are stored from your licensed source or your own workshop records.</div></section>
+<section class="panel emanual-panel">
+  <div class="section-head"><div><span class="eyebrow">Version 23.1 • Workshop Provider</span><h2>eManualOnline</h2></div></div>
+  <p><strong>{{ provider_name }}</strong> is configured as the workshop-manual provider.</p>
+  <p>Use the vehicle details below to find the correct purchased manual, then save the manual link against this BAM vehicle.</p>
+  <div class="emanual-search-box">
+    <label>Vehicle manual search
+      <input id="emanualSearchPhrase" value="{{ manual_search_phrase }}" readonly>
+    </label>
+    <div class="page-actions">
+      <a class="button" target="_blank" rel="noopener" href="{{ provider_url }}">Open eManualOnline</a>
+      <button class="button secondary" type="button" onclick="navigator.clipboard.writeText(document.getElementById('emanualSearchPhrase').value)">Copy Search</button>
+    </div>
+  </div>
+  <form method="post" action="{{ url_for('emanual_link_add', vehicle_id=vehicle.id) }}" class="stack emanual-link-form">
+    <input name="title" value="{{ vehicle.year or '' }} {{ vehicle.make }} {{ vehicle.model }} eManualOnline Workshop Manual" aria-label="Manual title">
+    <input type="url" name="reference_url" placeholder="Paste your purchased eManualOnline manual link" required>
+    <button>Save eManual to Vehicle</button>
+  </form>
+  <div class="notice"><strong>Licensed content:</strong> BAM stores your eManualOnline links and labour references; it does not copy or redistribute the manual itself. Use the manual for the authoritative procedure, specifications and any labour information it provides.</div>
+</section>
 <section class="panel"><h2>Quick Labour Quote</h2><label>Labour Hours<input id="quote-hours" type="number" min="0" step="0.01" value="1"></label><label>Workshop Rate<input id="quote-rate" type="number" min="0" step="0.01" value="{{ default_labour_rate }}"></label><div class="metric-row total"><span>Estimated Labour</span><strong id="quote-total">{{ default_labour_rate|money }}</strong></div><script>function bamLabourQuote(){const h=parseFloat(document.getElementById('quote-hours').value||0),r=parseFloat(document.getElementById('quote-rate').value||0);document.getElementById('quote-total').textContent=new Intl.NumberFormat('en-AU',{style:'currency',currency:'AUD'}).format(h*r);}document.getElementById('quote-hours').addEventListener('input',bamLabourQuote);document.getElementById('quote-rate').addEventListener('input',bamLabourQuote);</script></section>
 </div>
 

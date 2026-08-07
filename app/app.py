@@ -50,14 +50,16 @@ app.config.update(
     PERMANENT_SESSION_LIFETIME=timedelta(hours=int(os.environ.get("BAM_SESSION_HOURS", "12"))),
 )
 
-APP_VERSION = "23.0"
+APP_VERSION = "23.1"
 APP_NAME = "BAM Dealer Enterprise Cloud"
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "").strip()
 OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-5").strip() or "gpt-5"
 VIN_DECODER_URL = os.environ.get("BAM_VIN_DECODER_URL", "https://vpic.nhtsa.dot.gov/api/vehicles/DecodeVinValuesExtended/{vin}?format=json")
-WORKSHOP_PROVIDER_NAME = os.environ.get("BAM_WORKSHOP_PROVIDER_NAME", "Licensed workshop data provider").strip() or "Licensed workshop data provider"
-WORKSHOP_PORTAL_URL = os.environ.get("BAM_WORKSHOP_PORTAL_URL", "").strip()
+WORKSHOP_PROVIDER_NAME = os.environ.get("BAM_WORKSHOP_PROVIDER_NAME", "eManualOnline").strip() or "eManualOnline"
+WORKSHOP_PORTAL_URL = os.environ.get("BAM_WORKSHOP_PORTAL_URL", "https://www.emanualonline.com/cars/").strip() or "https://www.emanualonline.com/cars/"
 DEFAULT_LABOUR_RATE = float(os.environ.get("BAM_LABOUR_RATE", "145") or 145)
+EMAIL_WEBMAIL_URL = os.environ.get("BAM_EMAIL_WEBMAIL_URL", "").strip()
+EMAIL_ADDRESS = os.environ.get("BAM_EMAIL_ADDRESS", "").strip()
 
 ALLOWED_EXTENSIONS = {"png", "jpg", "jpeg", "webp", "pdf"}
 BACKUP_EXTENSIONS = {"zip"}
@@ -577,6 +579,28 @@ def init_db():
     ensure_column(conn, "job_cards", "labour_source", "TEXT")
     ensure_column(conn, "job_cards", "labour_code", "TEXT")
     ensure_column(conn, "job_cards", "procedure_url", "TEXT")
+
+    # Version 23.1 - eManualOnline + Email Centre
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS email_messages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            direction TEXT NOT NULL DEFAULT 'Incoming',
+            message_date TEXT,
+            sender TEXT,
+            recipient TEXT,
+            subject TEXT NOT NULL,
+            body_excerpt TEXT,
+            status TEXT NOT NULL DEFAULT 'Unread',
+            follow_up_date TEXT,
+            vehicle_id INTEGER,
+            contact_id INTEGER,
+            external_reference TEXT,
+            created_by TEXT,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(vehicle_id) REFERENCES vehicles(id) ON DELETE SET NULL,
+            FOREIGN KEY(contact_id) REFERENCES contacts(id) ON DELETE SET NULL
+        );
+    """)
 
     count = conn.execute(
         "SELECT COUNT(*) AS c FROM users"
@@ -1240,6 +1264,21 @@ def dashboard():
     """, (today_text,)).fetchone()["v"] or 0)
     business_kpis["advertised"] = advertised_count
 
+    email_metrics = conn.execute("""
+        SELECT COUNT(*) AS total,
+               SUM(CASE WHEN status='Unread' THEN 1 ELSE 0 END) AS unread,
+               SUM(CASE WHEN status='Follow Up' THEN 1 ELSE 0 END) AS follow_up
+        FROM email_messages
+    """).fetchone()
+    recent_emails = conn.execute("""
+        SELECT em.*, v.stock_no, c.name AS contact_name
+        FROM email_messages em
+        LEFT JOIN vehicles v ON v.id=em.vehicle_id
+        LEFT JOIN contacts c ON c.id=em.contact_id
+        ORDER BY COALESCE(em.message_date, substr(em.created_at,1,10)) DESC, em.id DESC
+        LIMIT 5
+    """).fetchall()
+
     conn.close()
 
     net_profit = sales_total - (metrics["purchase_total"] or 0) - expense_total - job_total - service_total - parts_total
@@ -1287,6 +1326,8 @@ def dashboard():
         equipment_metrics=equipment_metrics,
         equipment_due=equipment_due,
         business_kpis=business_kpis,
+        email_metrics=email_metrics,
+        recent_emails=recent_emails,
     )
 
 @app.route("/vehicles")
@@ -4326,10 +4367,11 @@ def workshop_intelligence(vehicle_id):
         specs = json.loads(vehicle["vin_decode_json"] or "{}") if vehicle["vin_decode_json"] else {}
     except Exception:
         specs = {}
+    manual_search_phrase = " ".join(str(x).strip() for x in [vehicle["year"], vehicle["make"], vehicle["model"], vehicle["variant"], "workshop service repair manual"] if x)
     return render_template("workshop_intelligence.html", vehicle=vehicle, operations=operations, references=refs,
                            parts=parts, jobs=jobs, provider_name=WORKSHOP_PROVIDER_NAME,
                            provider_url=_workshop_provider_vehicle_url(vehicle), default_labour_rate=DEFAULT_LABOUR_RATE,
-                           decoded_specs=specs)
+                           decoded_specs=specs, manual_search_phrase=manual_search_phrase)
 
 
 @app.route("/vehicles/<int:vehicle_id>/workshop-operation", methods=["POST"])
@@ -4472,6 +4514,99 @@ def workshop_labour_import(vehicle_id):
         conn.rollback(); flash(f"Labour import failed: {exc}", "error")
     finally:
         conn.close()
+    return redirect(url_for("workshop_intelligence", vehicle_id=vehicle_id))
+
+
+@app.route("/email-centre", methods=["GET", "POST"])
+@login_required
+def email_centre():
+    conn = db()
+    if request.method == "POST":
+        subject = (request.form.get("subject") or "").strip()
+        if not subject:
+            flash("Email subject is required.", "error")
+        else:
+            try:
+                conn.execute("""
+                    INSERT INTO email_messages(direction,message_date,sender,recipient,subject,body_excerpt,status,
+                        follow_up_date,vehicle_id,contact_id,external_reference,created_by)
+                    VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
+                """, (
+                    request.form.get("direction") or "Incoming",
+                    request.form.get("message_date") or date.today().isoformat(),
+                    request.form.get("sender"), request.form.get("recipient"), subject,
+                    request.form.get("body_excerpt"), request.form.get("status") or "Unread",
+                    request.form.get("follow_up_date"),
+                    int(request.form.get("vehicle_id")) if request.form.get("vehicle_id") else None,
+                    int(request.form.get("contact_id")) if request.form.get("contact_id") else None,
+                    request.form.get("external_reference"), session.get("display_name")
+                ))
+                conn.commit()
+                flash("Email correspondence saved.", "success")
+                return redirect(url_for("email_centre"))
+            except (ValueError, sqlite3.Error) as exc:
+                conn.rollback(); flash(f"Could not save email: {exc}", "error")
+    q = (request.args.get("q") or "").strip()
+    status = (request.args.get("status") or "").strip()
+    params=[]; where=[]
+    if q:
+        like=f"%{q}%"; where.append("(em.subject LIKE ? OR em.sender LIKE ? OR em.recipient LIKE ? OR em.body_excerpt LIKE ? OR v.stock_no LIKE ? OR c.name LIKE ?)"); params += [like]*6
+    if status:
+        where.append("em.status=?"); params.append(status)
+    sql="""
+        SELECT em.*, v.stock_no, v.make, v.model, c.name AS contact_name
+        FROM email_messages em
+        LEFT JOIN vehicles v ON v.id=em.vehicle_id
+        LEFT JOIN contacts c ON c.id=em.contact_id
+    """
+    if where: sql += " WHERE " + " AND ".join(where)
+    sql += " ORDER BY COALESCE(em.message_date, substr(em.created_at,1,10)) DESC, em.id DESC LIMIT 250"
+    messages=conn.execute(sql, params).fetchall()
+    vehicles=conn.execute("SELECT id,stock_no,year,make,model FROM vehicles ORDER BY stock_no DESC").fetchall()
+    contacts=conn.execute("SELECT id,name,email FROM contacts ORDER BY name").fetchall()
+    metrics=conn.execute("SELECT COUNT(*) total, SUM(CASE WHEN status='Unread' THEN 1 ELSE 0 END) unread, SUM(CASE WHEN status='Follow Up' THEN 1 ELSE 0 END) follow_up FROM email_messages").fetchone()
+    conn.close()
+    return render_template("email_centre.html", messages=messages, vehicles=vehicles, contacts=contacts, metrics=metrics,
+                           email_webmail_url=EMAIL_WEBMAIL_URL, email_address=EMAIL_ADDRESS, q=q, status_filter=status,
+                           today=date.today().isoformat())
+
+
+@app.route("/email-centre/<int:message_id>/status", methods=["POST"])
+@login_required
+def email_message_status(message_id):
+    new_status = request.form.get("status") or "Read"
+    if new_status not in {"Unread","Read","Follow Up","Completed"}: new_status="Read"
+    conn=db(); conn.execute("UPDATE email_messages SET status=? WHERE id=?", (new_status,message_id)); conn.commit(); conn.close()
+    flash("Email status updated.", "success")
+    return redirect(request.referrer or url_for("email_centre"))
+
+
+@app.route("/email-centre/<int:message_id>/delete", methods=["POST"])
+@login_required
+def email_message_delete(message_id):
+    conn=db(); conn.execute("DELETE FROM email_messages WHERE id=?", (message_id,)); conn.commit(); conn.close()
+    flash("Email record removed.", "success")
+    return redirect(url_for("email_centre"))
+
+
+@app.route("/vehicles/<int:vehicle_id>/emanual-link", methods=["POST"])
+@login_required
+def emanual_link_add(vehicle_id):
+    link=(request.form.get("reference_url") or "").strip()
+    title=(request.form.get("title") or "eManualOnline Workshop Manual").strip()
+    if not link:
+        flash("Paste the purchased eManualOnline manual link first.", "error")
+        return redirect(url_for("workshop_intelligence", vehicle_id=vehicle_id))
+    conn=db()
+    vehicle=conn.execute("SELECT * FROM vehicles WHERE id=?", (vehicle_id,)).fetchone()
+    if not vehicle:
+        conn.close(); return "Vehicle not found",404
+    conn.execute("""
+        INSERT INTO workshop_references(vehicle_id,reference_type,title,provider_name,reference_url,reference_code,notes,created_by)
+        VALUES(?,?,?,?,?,?,?,?)
+    """, (vehicle_id,"Workshop Manual",title,"eManualOnline",link,vehicle["vin"],"Saved eManualOnline vehicle manual",session.get("display_name")))
+    conn.commit(); conn.close()
+    flash("eManualOnline manual linked to this vehicle.", "success")
     return redirect(url_for("workshop_intelligence", vehicle_id=vehicle_id))
 
 

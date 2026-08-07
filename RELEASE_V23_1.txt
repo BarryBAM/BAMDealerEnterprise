@@ -1,0 +1,19 @@
+BAM Dealer Enterprise Cloud v23.1
+
+eManualOnline + Email Centre
+
+- eManualOnline is the default Workshop Intelligence provider.
+- Vehicle-specific manual search phrase and direct eManualOnline launch.
+- Save purchased eManualOnline manual links against each vehicle.
+- Keeps proprietary workshop content external; BAM stores links/references only.
+- Adds Email Centre dashboard tile and sidebar navigation.
+- Email correspondence register can link messages to vehicles and contacts.
+- Tracks unread, follow-up, read and completed correspondence.
+- Optional webmail shortcut and BAM email address via Azure environment variables.
+- No email password is stored by BAM v23.1.
+
+Azure optional settings:
+BAM_WORKSHOP_PROVIDER_NAME=eManualOnline
+BAM_WORKSHOP_PORTAL_URL=https://www.emanualonline.com/cars/
+BAM_EMAIL_ADDRESS=
+BAM_EMAIL_WEBMAIL_URL=

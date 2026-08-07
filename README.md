@@ -82,3 +82,7 @@ Version 23.0 adds VIN decoding, automatic specification storage, optional AI adv
 
 ## Version 23 - Workshop Intelligence
 VIN-led workshop workspace, labour time library, licensed technical-data links, CSV import and automatic labour job-card estimates.
+
+## Version 23.1 – eManualOnline + Email Centre
+
+Version 23.1 configures eManualOnline as the default Workshop Intelligence provider and adds a BAM Email Centre. Vehicle Workshop Intelligence can launch eManualOnline, copy a vehicle-specific manual search phrase, and save a purchased manual URL against the vehicle. The Email Centre records important customer/supplier correspondence, links it to vehicles and contacts, tracks follow-up status, and can open your normal webmail through optional Azure environment settings. BAM does not store mailbox passwords or copy proprietary manual content.
