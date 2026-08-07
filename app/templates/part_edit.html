@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Edit {{ part.part_number }} | Parts Centre{% endblock %}
+{% block content %}
+<div class="page-head"><div><span class="eyebrow">Version 19 • Parts Inventory</span><h1>Edit Part</h1><p>{{ part.part_number }} — {{ part.part_name }}</p></div><a class="button secondary" href="{{ url_for('part_detail', part_id=part.id) }}">Cancel</a></div>
+<section class="panel"><form method="post" class="parts-form">
+<div class="form-two"><label>Part Number<input name="part_number" value="{{ part.part_number or '' }}"></label><label>Part Name<input name="part_name" value="{{ part.part_name or '' }}" required></label></div>
+<div class="form-three"><label>Category<input name="category" value="{{ part.category or '' }}"></label><label>Subcategory<input name="subcategory" value="{{ part.subcategory or '' }}"></label><label>Condition<input name="condition" value="{{ part.condition or '' }}"></label></div>
+<div class="form-two"><label>OEM / Manufacturer No.<input name="manufacturer_part_no" value="{{ part.manufacturer_part_no or '' }}"></label><label>Barcode<input name="barcode" value="{{ part.barcode or '' }}"></label></div>
+<div class="form-two"><label>Source Stock No.<input name="vehicle_stock_no" value="{{ part.vehicle_stock_no or '' }}" list="donor-list"></label><label>Position<input name="position" value="{{ part.position or '' }}"></label></div><datalist id="donor-list">{% for v in donor_vehicles %}<option value="{{ v.stock_no }}">{{ v.year or '' }} {{ v.make }} {{ v.model }}</option>{% endfor %}</datalist>
+<div class="form-two"><label>Fitment<input name="fitment" value="{{ part.fitment or '' }}"></label><label>Storage Location<input name="storage_location" value="{{ part.storage_location or '' }}"></label></div>
+<div class="form-three"><label>Quantity On Hand<input type="number" step="0.01" name="quantity_on_hand" value="{{ part.quantity_on_hand or 0 }}"></label><label>Reorder Level<input type="number" step="0.01" name="reorder_level" value="{{ part.reorder_level or 0 }}"></label><label>Status<select name="status">{% for st in ['In Stock','Reserved','Sold','Scrap'] %}<option {% if part.status==st %}selected{% endif %}>{{ st }}</option>{% endfor %}</select></label></div>
+<div class="form-two"><label>Unit Cost Inc GST<input type="number" step="0.01" name="unit_cost_inc_gst" value="{{ part.unit_cost_inc_gst or 0 }}"></label><label>Selling Price<input type="number" step="0.01" name="selling_price" value="{{ part.selling_price or 0 }}"></label></div>
+<div class="form-two"><label>Reserved For<input name="reserved_for" value="{{ part.reserved_for or '' }}"></label><label>Reserved Until<input type="date" name="reserved_until" value="{{ part.reserved_until or '' }}"></label></div>
+<div class="form-two"><label>Engine Code<input name="engine_code" value="{{ part.engine_code or '' }}"></label><label>Transmission Code<input name="transmission_code" value="{{ part.transmission_code or '' }}"></label></div>
+<label>Description<textarea name="description" rows="3">{{ part.description or '' }}</textarea></label><label>Notes<textarea name="notes" rows="4">{{ part.notes or '' }}</textarea></label>
+<button class="save-button">Save Part Changes</button></form></section>
+{% endblock %}

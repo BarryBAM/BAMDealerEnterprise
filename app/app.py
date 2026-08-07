@@ -46,7 +46,7 @@ app.config.update(
     PERMANENT_SESSION_LIFETIME=timedelta(hours=int(os.environ.get("BAM_SESSION_HOURS", "12"))),
 )
 
-APP_VERSION = "18.0"
+APP_VERSION = "19.0"
 APP_NAME = "BAM Dealer Enterprise Cloud"
 
 ALLOWED_EXTENSIONS = {"png", "jpg", "jpeg", "webp", "pdf"}
@@ -455,6 +455,14 @@ def init_db():
     ensure_column(conn, "parts", "transmission_code", "TEXT")
     ensure_column(conn, "parts", "barcode", "TEXT")
     ensure_column(conn, "parts", "date_added", "TEXT")
+
+    # Version 19 - Professional Parts Inventory
+    ensure_column(conn, "parts", "position", "TEXT")
+    ensure_column(conn, "parts", "fitment", "TEXT")
+    ensure_column(conn, "parts", "manufacturer_part_no", "TEXT")
+    ensure_column(conn, "parts", "reserved_for", "TEXT")
+    ensure_column(conn, "parts", "reserved_until", "TEXT")
+    ensure_column(conn, "parts", "updated_at", "TEXT")
     conn.executescript("""
         CREATE TABLE IF NOT EXISTS equipment (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -554,6 +562,20 @@ def next_invoice_number(conn=None):
 
     return f"INV-{highest + 1:05d}"
 
+
+
+def next_part_number(conn=None):
+    own_conn = conn is None
+    conn = conn or db()
+    highest = 0
+    rows = conn.execute("SELECT part_number FROM parts WHERE part_number LIKE 'PRT-%'").fetchall()
+    for row in rows:
+        match = re.search(r"(\d+)$", row["part_number"] or "")
+        if match:
+            highest = max(highest, int(match.group(1)))
+    if own_conn:
+        conn.close()
+    return f"PRT-{highest + 1:05d}"
 
 
 def next_shipment_number(conn=None):
@@ -2200,19 +2222,22 @@ def vehicle_dismantling(vehicle_id):
         cost = float(request.form.get("unit_cost_inc_gst") or 0)
         selling = float(request.form.get("selling_price") or 0)
         gst = round(cost / 11, 2)
+        part_number = (request.form.get("part_number") or "").strip() or next_part_number(conn)
         conn.execute("""
             INSERT INTO parts(
                 part_number,part_name,category,supplier,quantity_on_hand,reorder_level,
                 unit_cost_inc_gst,gst_amount_per_unit,storage_location,notes,
-                vehicle_id,vehicle_stock_no,vin,make,model,year,condition,selling_price,status,date_added
-            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)
+                vehicle_id,vehicle_stock_no,vin,make,model,year,condition,selling_price,status,date_added,
+                position,fitment,manufacturer_part_no,updated_at
+            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP,?,?,?,CURRENT_TIMESTAMP)
         """, (
-            request.form.get("part_number") or None, part_name, request.form.get("category"),
+            part_number, part_name, request.form.get("category"),
             "Donor vehicle", qty, 0, cost, gst, request.form.get("storage_location"),
             request.form.get("notes"), vehicle_id, vehicle["stock_no"], vehicle["vin"],
             vehicle["make"], vehicle["model"], vehicle["year"],
             request.form.get("condition") or "Used", selling,
-            request.form.get("status") or "In Stock",
+            request.form.get("status") or "In Stock", request.form.get("position"),
+            request.form.get("fitment"), request.form.get("manufacturer_part_no"),
         ))
         conn.execute(
             "UPDATE vehicles SET vehicle_purpose='Parts Vehicle', dismantling_status=CASE WHEN COALESCE(dismantling_status,'Not Started')='Not Started' THEN 'Dismantling' ELSE dismantling_status END WHERE id=?",
@@ -2272,47 +2297,78 @@ def part_sell(part_id):
 def parts_page():
     conn = db()
     if request.method == "POST":
+        part_name = (request.form.get("part_name") or "").strip()
+        if not part_name:
+            conn.close()
+            flash("Part name is required.", "error")
+            return redirect(url_for("parts_page"))
+
         quantity = float(request.form.get("quantity_on_hand") or 0)
         unit_cost = float(request.form.get("unit_cost_inc_gst") or 0)
         gst = round(unit_cost / 11, 2)
-        conn.execute("""
-            INSERT INTO parts(
-                part_number,part_name,category,supplier,quantity_on_hand,reorder_level,
-                unit_cost_inc_gst,gst_amount_per_unit,storage_location,notes,
-                vehicle_stock_no,make,model,year,condition,selling_price,status
-            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-        """, (
-            request.form.get("part_number") or None,
-            request.form.get("part_name"),
-            request.form.get("category"),
-            request.form.get("supplier"),
-            quantity,
-            float(request.form.get("reorder_level") or 0),
-            unit_cost,
-            gst,
-            request.form.get("storage_location"),
-            request.form.get("notes"),
-            request.form.get("vehicle_stock_no"),
-            request.form.get("make"),
-            request.form.get("model"),
-            request.form.get("year") or None,
-            request.form.get("condition") or "Used",
-            float(request.form.get("selling_price") or 0),
-            request.form.get("status") or "In Stock",
-        ))
+        part_number = (request.form.get("part_number") or "").strip() or next_part_number(conn)
+        source_stock = (request.form.get("vehicle_stock_no") or "").strip()
+        donor = None
+        if source_stock:
+            donor = conn.execute("SELECT * FROM vehicles WHERE stock_no=?", (source_stock,)).fetchone()
+
+        try:
+            conn.execute("""
+                INSERT INTO parts(
+                    part_number,part_name,category,supplier,quantity_on_hand,reorder_level,
+                    unit_cost_inc_gst,gst_amount_per_unit,storage_location,notes,
+                    vehicle_id,vehicle_stock_no,vin,make,model,year,condition,selling_price,status,
+                    position,fitment,manufacturer_part_no,barcode,date_added,updated_at
+                ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
+            """, (
+                part_number, part_name, request.form.get("category"), request.form.get("supplier"),
+                quantity, float(request.form.get("reorder_level") or 0), unit_cost, gst,
+                request.form.get("storage_location"), request.form.get("notes"),
+                donor["id"] if donor else None, source_stock or None,
+                donor["vin"] if donor else request.form.get("vin"),
+                donor["make"] if donor else request.form.get("make"),
+                donor["model"] if donor else request.form.get("model"),
+                donor["year"] if donor else (request.form.get("year") or None),
+                request.form.get("condition") or "Used", float(request.form.get("selling_price") or 0),
+                request.form.get("status") or "In Stock", request.form.get("position"),
+                request.form.get("fitment"), request.form.get("manufacturer_part_no"), request.form.get("barcode"),
+            ))
+        except sqlite3.IntegrityError:
+            conn.close()
+            flash(f"Part number {part_number} already exists.", "error")
+            return redirect(url_for("parts_page"))
         conn.commit()
-        flash("Part added.", "success")
-        return redirect(url_for("parts_page"))
+        part_id = conn.execute("SELECT last_insert_rowid() AS id").fetchone()["id"]
+        conn.close()
+        log_action("Part added", "part", part_id, f"{part_number} - {part_name}")
+        flash(f"{part_number} added to Parts Centre.", "success")
+        return redirect(url_for("part_detail", part_id=part_id))
 
     q = request.args.get("q", "").strip()
+    status_filter = request.args.get("status", "").strip()
+    category_filter = request.args.get("category", "").strip()
+    source_filter = request.args.get("source", "").strip()
+
+    where = []
+    params = []
     if q:
-        rows = conn.execute("""
-            SELECT * FROM parts
-            WHERE part_number LIKE ? OR part_name LIKE ? OR category LIKE ? OR supplier LIKE ?
-            ORDER BY part_name
-        """, tuple([f"%{q}%"] * 4)).fetchall()
-    else:
-        rows = conn.execute("SELECT * FROM parts ORDER BY part_name").fetchall()
+        token = f"%{q}%"
+        where.append("(part_number LIKE ? OR part_name LIKE ? OR category LIKE ? OR supplier LIKE ? OR storage_location LIKE ? OR vehicle_stock_no LIKE ? OR manufacturer_part_no LIKE ? OR barcode LIKE ?)")
+        params.extend([token] * 8)
+    if status_filter:
+        where.append("status=?")
+        params.append(status_filter)
+    if category_filter:
+        where.append("category=?")
+        params.append(category_filter)
+    if source_filter:
+        where.append("vehicle_stock_no=?")
+        params.append(source_filter)
+    sql = "SELECT * FROM parts"
+    if where:
+        sql += " WHERE " + " AND ".join(where)
+    sql += " ORDER BY CASE WHEN status='In Stock' THEN 0 WHEN status='Reserved' THEN 1 ELSE 2 END, part_name, id DESC"
+    rows = conn.execute(sql, params).fetchall()
 
     part_metrics = conn.execute("""
         SELECT
@@ -2320,8 +2376,15 @@ def parts_page():
           COALESCE(SUM(quantity_on_hand),0) AS parts_on_hand,
           COALESCE(SUM(quantity_on_hand * unit_cost_inc_gst),0) AS stock_cost,
           COALESCE(SUM(quantity_on_hand * selling_price),0) AS retail_value,
-          SUM(CASE WHEN quantity_on_hand <= reorder_level THEN 1 ELSE 0 END) AS low_stock
+          SUM(CASE WHEN quantity_on_hand <= reorder_level AND status NOT IN ('Sold','Scrap') THEN 1 ELSE 0 END) AS low_stock,
+          SUM(CASE WHEN status='Reserved' THEN 1 ELSE 0 END) AS reserved_lines
         FROM parts
+    """).fetchone()
+    sales_metrics = conn.execute("""
+        SELECT COALESCE(SUM(quantity),0) AS units_sold,
+               COALESCE(SUM(sale_price),0) AS revenue,
+               COALESCE(SUM(freight_cost),0) AS freight
+        FROM part_sales
     """).fetchone()
     donor_vehicles = conn.execute("""
         SELECT v.*,
@@ -2334,8 +2397,139 @@ def parts_page():
         GROUP BY v.id
         ORDER BY CASE WHEN COALESCE(v.dismantling_status,'Not Started')='Complete' THEN 1 ELSE 0 END, v.id DESC
     """).fetchall()
+    categories = conn.execute("SELECT DISTINCT category FROM parts WHERE COALESCE(category,'')!='' ORDER BY category").fetchall()
+    sources = conn.execute("SELECT DISTINCT vehicle_stock_no FROM parts WHERE COALESCE(vehicle_stock_no,'')!='' ORDER BY vehicle_stock_no").fetchall()
+    next_part = next_part_number(conn)
     conn.close()
-    return render_template("parts.html", parts=rows, q=q, part_metrics=part_metrics, donor_vehicles=donor_vehicles)
+    return render_template(
+        "parts.html", parts=rows, q=q, status_filter=status_filter, category_filter=category_filter,
+        source_filter=source_filter, part_metrics=part_metrics, sales_metrics=sales_metrics,
+        donor_vehicles=donor_vehicles, categories=categories, sources=sources, next_part=next_part,
+    )
+
+
+@app.route("/parts/<int:part_id>")
+@login_required
+def part_detail(part_id):
+    conn = db()
+    part = conn.execute("SELECT * FROM parts WHERE id=?", (part_id,)).fetchone()
+    if not part:
+        conn.close()
+        return "Part not found", 404
+    photos = conn.execute("SELECT * FROM part_photos WHERE part_id=? ORDER BY is_featured DESC,id DESC", (part_id,)).fetchall()
+    sales = conn.execute("SELECT * FROM part_sales WHERE part_id=? ORDER BY sale_date DESC,id DESC", (part_id,)).fetchall()
+    sold_qty = sum(float(r["quantity"] or 0) for r in sales)
+    revenue = sum(float(r["sale_price"] or 0) for r in sales)
+    freight = sum(float(r["freight_cost"] or 0) for r in sales)
+    sold_cost = sold_qty * float(part["unit_cost_inc_gst"] or 0)
+    gross_profit = revenue - sold_cost - freight
+    donor = conn.execute("SELECT * FROM vehicles WHERE id=?", (part["vehicle_id"],)).fetchone() if part["vehicle_id"] else None
+    conn.close()
+    return render_template("part_detail.html", part=part, photos=photos, sales=sales, donor=donor,
+                           sold_qty=sold_qty, revenue=revenue, freight=freight, gross_profit=gross_profit)
+
+
+@app.route("/parts/<int:part_id>/edit", methods=["GET", "POST"])
+@login_required
+def part_edit(part_id):
+    conn = db()
+    part = conn.execute("SELECT * FROM parts WHERE id=?", (part_id,)).fetchone()
+    if not part:
+        conn.close()
+        return "Part not found", 404
+    if request.method == "POST":
+        part_number = (request.form.get("part_number") or "").strip() or part["part_number"] or next_part_number(conn)
+        source_stock = (request.form.get("vehicle_stock_no") or "").strip()
+        donor = conn.execute("SELECT * FROM vehicles WHERE stock_no=?", (source_stock,)).fetchone() if source_stock else None
+        try:
+            conn.execute("""
+                UPDATE parts SET
+                    part_number=?,part_name=?,category=?,subcategory=?,description=?,supplier=?,quantity_on_hand=?,reorder_level=?,
+                    unit_cost_inc_gst=?,gst_amount_per_unit=?,selling_price=?,storage_location=?,notes=?,vehicle_id=?,vehicle_stock_no=?,
+                    vin=?,make=?,model=?,year=?,condition=?,status=?,engine_code=?,transmission_code=?,barcode=?,position=?,fitment=?,
+                    manufacturer_part_no=?,reserved_for=?,reserved_until=?,updated_at=CURRENT_TIMESTAMP
+                WHERE id=?
+            """, (
+                part_number, request.form.get("part_name"), request.form.get("category"), request.form.get("subcategory"),
+                request.form.get("description"), request.form.get("supplier"), float(request.form.get("quantity_on_hand") or 0),
+                float(request.form.get("reorder_level") or 0), float(request.form.get("unit_cost_inc_gst") or 0),
+                round(float(request.form.get("unit_cost_inc_gst") or 0)/11, 2), float(request.form.get("selling_price") or 0),
+                request.form.get("storage_location"), request.form.get("notes"), donor["id"] if donor else part["vehicle_id"],
+                source_stock or None, donor["vin"] if donor else request.form.get("vin"), donor["make"] if donor else request.form.get("make"),
+                donor["model"] if donor else request.form.get("model"), donor["year"] if donor else (request.form.get("year") or None),
+                request.form.get("condition") or "Used", request.form.get("status") or "In Stock", request.form.get("engine_code"),
+                request.form.get("transmission_code"), request.form.get("barcode"), request.form.get("position"), request.form.get("fitment"),
+                request.form.get("manufacturer_part_no"), request.form.get("reserved_for"), request.form.get("reserved_until") or None, part_id,
+            ))
+        except sqlite3.IntegrityError:
+            conn.close()
+            flash(f"Part number {part_number} already exists.", "error")
+            return redirect(url_for("part_edit", part_id=part_id))
+        conn.commit()
+        conn.close()
+        log_action("Part updated", "part", part_id, part_number)
+        flash("Part updated.", "success")
+        return redirect(url_for("part_detail", part_id=part_id))
+    donor_vehicles = conn.execute("SELECT id,stock_no,year,make,model FROM vehicles WHERE vehicle_purpose='Parts Vehicle' OR status='BER' ORDER BY stock_no").fetchall()
+    conn.close()
+    return render_template("part_edit.html", part=part, donor_vehicles=donor_vehicles)
+
+
+@app.route("/parts/<int:part_id>/photos", methods=["POST"])
+@login_required
+def part_photo_add(part_id):
+    conn = db()
+    part = conn.execute("SELECT * FROM parts WHERE id=?", (part_id,)).fetchone()
+    if not part:
+        conn.close()
+        return "Part not found", 404
+    files = request.files.getlist("photos")
+    added = 0
+    image_exts = {"png", "jpg", "jpeg", "webp"}
+    for file in files:
+        if not file or not file.filename:
+            continue
+        ext = file.filename.rsplit(".", 1)[-1].lower() if "." in file.filename else ""
+        if ext not in image_exts:
+            continue
+        filename = save_upload(file)
+        featured = 1 if added == 0 and not conn.execute("SELECT id FROM part_photos WHERE part_id=? LIMIT 1", (part_id,)).fetchone() else 0
+        conn.execute("INSERT INTO part_photos(part_id,filename,caption,is_featured) VALUES(?,?,?,?)",
+                     (part_id, filename, request.form.get("caption"), featured))
+        added += 1
+    conn.commit()
+    conn.close()
+    flash(f"{added} part photo(s) uploaded." if added else "No valid images selected.", "success" if added else "error")
+    return redirect(url_for("part_detail", part_id=part_id))
+
+
+@app.route("/parts/<int:part_id>/photos/<int:photo_id>/feature", methods=["POST"])
+@login_required
+def part_photo_feature(part_id, photo_id):
+    conn = db()
+    conn.execute("UPDATE part_photos SET is_featured=0 WHERE part_id=?", (part_id,))
+    conn.execute("UPDATE part_photos SET is_featured=1 WHERE id=? AND part_id=?", (photo_id, part_id))
+    conn.commit(); conn.close()
+    flash("Featured part photo updated.", "success")
+    return redirect(url_for("part_detail", part_id=part_id))
+
+
+@app.route("/parts/<int:part_id>/photos/<int:photo_id>/delete", methods=["POST"])
+@login_required
+def part_photo_delete(part_id, photo_id):
+    conn = db()
+    photo = conn.execute("SELECT * FROM part_photos WHERE id=? AND part_id=?", (photo_id, part_id)).fetchone()
+    if photo:
+        conn.execute("DELETE FROM part_photos WHERE id=?", (photo_id,))
+        conn.commit()
+    conn.close()
+    if photo:
+        try:
+            (UPLOAD_DIR / photo["filename"]).unlink(missing_ok=True)
+        except OSError:
+            pass
+    flash("Part photo deleted.", "success")
+    return redirect(url_for("part_detail", part_id=part_id))
 
 
 @app.route("/vehicles/<int:vehicle_id>/use-part", methods=["POST"])

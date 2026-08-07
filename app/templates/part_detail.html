@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}{{ part.part_number }} | Parts Centre{% endblock %}
+{% block content %}
+<div class="page-head"><div><span class="eyebrow">Version 19 • Part Workspace</span><h1>{{ part.part_number or 'Unnumbered Part' }}</h1><p>{{ part.part_name }}{% if part.vehicle_stock_no %} • donor {{ part.vehicle_stock_no }}{% endif %}</p></div><div class="page-actions"><a class="button secondary" href="{{ url_for('parts_page') }}">Parts Centre</a><a class="button" href="{{ url_for('part_edit', part_id=part.id) }}">Edit Part</a></div></div>
+<div class="detail-cards"><div><small>Status</small><strong>{{ part.status or 'In Stock' }}</strong></div><div><small>On Hand</small><strong>{{ part.quantity_on_hand }}</strong></div><div><small>Selling Price</small><strong>{{ part.selling_price|money }}</strong></div><div><small>Sales Revenue</small><strong>{{ revenue|money }}</strong></div><div><small>Gross Profit</small><strong>{{ gross_profit|money }}</strong></div></div>
+<div class="workspace-two-column">
+<section class="panel"><div class="panel-title"><h2>Part Details</h2><span>{{ part.condition or 'Used' }}</span></div>
+  <div class="info-grid">
+    <div><small>Category</small><strong>{{ part.category or '—' }}</strong></div><div><small>OEM / Manufacturer No.</small><strong>{{ part.manufacturer_part_no or '—' }}</strong></div>
+    <div><small>Location</small><strong>{{ part.storage_location or '—' }}</strong></div><div><small>Position</small><strong>{{ part.position or '—' }}</strong></div>
+    <div><small>Fitment</small><strong>{{ part.fitment or '—' }}</strong></div><div><small>Barcode</small><strong>{{ part.barcode or '—' }}</strong></div>
+    <div><small>Cost Inc GST</small><strong>{{ part.unit_cost_inc_gst|money }}</strong></div><div><small>Reserved For</small><strong>{{ part.reserved_for or '—' }}</strong></div>
+  </div>
+  {% if donor %}<hr><h3>Donor Vehicle</h3><p><strong>{{ donor.stock_no }}</strong> — {{ donor.year or '' }} {{ donor.make }} {{ donor.model }}{% if donor.vin %}<br>VIN: {{ donor.vin }}{% endif %}</p><a class="button secondary" href="{{ url_for('vehicle_dismantling', vehicle_id=donor.id) }}">Open Dismantling Workspace</a>{% endif %}
+  {% if part.notes %}<hr><h3>Notes</h3><p>{{ part.notes }}</p>{% endif %}
+</section>
+<section class="panel"><div class="panel-title"><h2>Photos</h2><span>{{ photos|length }} images</span></div>
+  <form method="post" action="{{ url_for('part_photo_add', part_id=part.id) }}" enctype="multipart/form-data" class="stack"><input type="file" name="photos" accept="image/*" multiple><input name="caption" placeholder="Optional caption"><button>Upload Photos</button></form>
+  <div class="part-photo-grid">{% for photo in photos %}<div class="part-photo-card"><img src="{{ url_for('uploaded_file', filename=photo.filename) }}" alt="Part photo"><div>{% if photo.is_featured %}<strong>★ Featured</strong>{% endif %}<small>{{ photo.caption or '' }}</small></div><div class="photo-actions">{% if not photo.is_featured %}<form method="post" action="{{ url_for('part_photo_feature', part_id=part.id, photo_id=photo.id) }}"><button class="small-button">Feature</button></form>{% endif %}<form method="post" action="{{ url_for('part_photo_delete', part_id=part.id, photo_id=photo.id) }}" onsubmit="return confirm('Delete this photo?')"><button class="small-button danger-button">Delete</button></form></div></div>{% else %}<p>No photos uploaded yet.</p>{% endfor %}</div>
+</section></div>
+<div class="workspace-two-column">
+<section class="panel"><div class="panel-title"><h2>Record Sale</h2><span>{{ sold_qty }} units sold</span></div>{% if part.quantity_on_hand > 0 %}<form method="post" action="{{ url_for('part_sell', part_id=part.id) }}" class="stack"><input type="number" step="0.01" min="0.01" max="{{ part.quantity_on_hand }}" name="quantity" value="1"><input name="customer_name" placeholder="Buyer name"><input name="customer_phone" placeholder="Phone"><input name="customer_email" placeholder="Email"><input type="number" step="0.01" name="sale_price" value="{{ part.selling_price or 0 }}" placeholder="Total sale price"><select name="payment_method"><option value="">Payment method</option><option>Cash</option><option>Bank Transfer</option><option>Card</option><option>PayPal</option><option>Other</option></select><textarea name="notes" placeholder="Sale notes"></textarea><button>Record Part Sale</button></form>{% else %}<p>This part has no stock remaining.</p>{% endif %}</section>
+<section class="panel"><div class="panel-title"><h2>Sales History</h2><span>{{ sales|length }} sales</span></div><div class="table-wrap"><table><tr><th>Date</th><th>Buyer</th><th>Qty</th><th>Sale</th><th>Payment</th></tr>{% for sale in sales %}<tr><td>{{ sale.sale_date }}</td><td>{{ sale.customer_name or '—' }}</td><td>{{ sale.quantity }}</td><td>{{ sale.sale_price|money }}</td><td>{{ sale.payment_method or '—' }}</td></tr>{% else %}<tr><td colspan="5">No sales recorded.</td></tr>{% endfor %}</table></div></section>
+</div>
+{% endblock %}

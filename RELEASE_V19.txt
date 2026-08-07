@@ -1,0 +1,18 @@
+BAM Dealer Enterprise Cloud v19.0
+
+PROFESSIONAL PARTS CENTRE
+
+New in Version 19:
+- Automatic PRT-00001 style part numbering when SKU is left blank
+- Dedicated part workspace with donor vehicle traceability
+- Multiple part photo uploads with featured image support
+- Part edit screen with condition, OEM number, barcode, position and fitment
+- Rack / shelf / bin storage tracking
+- Reserve parts for a buyer with reserved-until date
+- Advanced Parts Centre filters by status, category and donor vehicle
+- Sales history, parts revenue and gross profit per part
+- Direct links between dismantling workspace and individual parts
+- Donor stock number can automatically populate VIN, make, model and year
+- Additive database migration preserves existing Version 18 data
+
+Azure data remains under BAM_DATA_ROOT (/home/bam-data in the configured production app).
