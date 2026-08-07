@@ -10,6 +10,7 @@
   <div class="page-actions">
     <span class="status">{{ vehicle.status }}</span>
     <a class="button" href="{{ url_for('vehicle_edit', vehicle_id=vehicle.id) }}">Edit Asset</a>
+    {% if (vehicle.vehicle_purpose or 'Retail Sale') == 'Parts Vehicle' or vehicle.status == 'BER' %}<a class="button" href="{{ url_for('vehicle_dismantling', vehicle_id=vehicle.id) }}">🔧 Dismantling</a>{% endif %}
     <a class="button" href="{{ url_for('advertisement_pro', vehicle_id=vehicle.id) }}">Advertisement Studio</a>
     <a class="button" href="{{ url_for('window_card', vehicle_id=vehicle.id) }}" target="_blank">Window Card</a>
     <a class="button" href="{{ url_for('vehicle_report', vehicle_id=vehicle.id) }}" target="_blank">Print Report</a>
@@ -18,7 +19,7 @@
 
 <nav class="asset-workspace-nav" aria-label="Asset workspace">
   <a href="#overview">Overview</a><a href="#photos">Photos</a><a href="#documents">Documents</a>
-  <a href="#expenses">Expenses</a><a href="#workshop">Workshop</a><a href="#parts">Parts</a>
+  <a href="#expenses">Expenses</a><a href="#workshop">Workshop</a><a href="#parts">Parts</a>{% if (vehicle.vehicle_purpose or 'Retail Sale') == 'Parts Vehicle' or vehicle.status == 'BER' %}<a href="#dismantling">Dismantling</a>{% endif %}
   <a href="#reminders">Reminders</a><a href="#sale">Sale & Profit</a>
 </nav>
 
@@ -58,6 +59,20 @@
     <div class="metric-row total"><span>Profit / Loss</span><strong>{{ profit|money }}</strong></div>
   </div>
 </section>
+
+{% if (vehicle.vehicle_purpose or 'Retail Sale') == 'Parts Vehicle' or vehicle.status == 'BER' %}
+<section id="dismantling" class="panel">
+  <div class="section-head"><div><h2>Dismantling Snapshot</h2><p>Parts removed from this donor stay linked to {{ vehicle.stock_no }}.</p></div><a class="button" href="{{ url_for('vehicle_dismantling', vehicle_id=vehicle.id) }}">Open Dismantling Workspace</a></div>
+  <div class="detail-cards">
+    <div><small>Status</small><strong>{{ vehicle.dismantling_status or 'Not Started' }}</strong></div>
+    <div><small>Part Lines</small><strong>{{ donor_metrics.part_lines or 0 }}</strong></div>
+    <div><small>Units Remaining</small><strong>{{ donor_metrics.units_on_hand or 0 }}</strong></div>
+    <div><small>Parts Revenue</small><strong>{{ donor_revenue|money }}</strong></div>
+    <div><small>Shell Sale</small><strong>{{ vehicle.shell_sale_price|money }}</strong></div>
+    <div><small>Donor Profit / Loss</small><strong>{{ donor_profit|money }}</strong></div>
+  </div>
+</section>
+{% endif %}
 
 {% if (vehicle.asset_type or 'Car') == 'Caravan' %}
 <section class="panel"><h2>Caravan Details</h2><div class="detail-cards">

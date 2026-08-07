@@ -12,6 +12,15 @@
   <article><span>Retail Value</span><strong>{{ part_metrics.retail_value|money }}</strong><small>Potential sales value</small></article>
   <article class="{% if part_metrics.low_stock %}attention-kpi{% endif %}"><span>Low Stock</span><strong>{{ part_metrics.low_stock or 0 }}</strong><small>At or below reorder level</small></article>
 </div>
+<section class="panel" style="margin-bottom:18px">
+  <div class="panel-title"><h2>Parts Vehicles</h2><span>{{ donor_vehicles|length }} donor vehicles</span></div>
+  <div class="table-wrap"><table class="parts-table">
+    <tr><th>Stock</th><th>Vehicle</th><th>Dismantling</th><th>Part Lines</th><th>Units Remaining</th><th>Retail Remaining</th><th></th></tr>
+    {% for v in donor_vehicles %}
+    <tr><td><strong>{{ v.stock_no }}</strong></td><td>{{ v.year or '' }} {{ v.make }} {{ v.model }}</td><td><span class="status-pill">{{ v.dismantling_status or 'Not Started' }}</span></td><td>{{ v.part_lines or 0 }}</td><td>{{ v.units_remaining or 0 }}</td><td>{{ v.remaining_retail|money }}</td><td><a class="button small-button" href="{{ url_for('vehicle_dismantling', vehicle_id=v.id) }}">Open</a></td></tr>
+    {% else %}<tr><td colspan="7">No parts vehicles yet. Mark a vehicle as Parts Vehicle or BER.</td></tr>{% endfor %}
+  </table></div>
+</section>
 <div class="parts-layout">
 <section class="panel add-part-panel">
   <div class="panel-title"><h2>Add Part</h2><span>Workshop or dismantling stock</span></div>

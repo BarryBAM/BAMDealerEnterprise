@@ -1,0 +1,28 @@
+BAM Dealer Enterprise v18.0
+============================
+
+New in Version 18
+- Vehicle Purpose field: Retail Sale, Parts Vehicle, Workshop, Wholesale.
+- Dismantling Status field: Not Started, Dismantling, Paused, Complete.
+- BER vehicles can open the Dismantling workspace even before purpose is changed.
+- Dedicated Dismantling Workspace for each donor vehicle.
+- Removed parts are inserted directly into the existing Parts Centre and linked by vehicle_id, stock number, VIN, make, model and year.
+- Parts Centre now lists donor / parts vehicles with dismantling status and remaining stock value.
+- Record a one-unit part sale from the Dismantling Workspace; stock quantity is reduced and sale is stored in part_sales.
+- Shell / scrap sale price and date are tracked on the donor vehicle.
+- Donor profit / loss snapshot combines parts revenue + shell sale - invested vehicle cost.
+- Version display updated to 18.0.
+
+Database safety
+- Existing data is preserved.
+- New vehicle fields use the existing ensure_column migration pattern.
+- No destructive DROP/DELETE migrations are included.
+
+Deployment
+1. Back up the live BAM database and uploads first.
+2. Replace repository files with this release.
+3. Commit and push to main in GitHub Desktop.
+4. Wait for Azure GitHub Actions deployment to succeed.
+5. Restart the Azure App Service.
+6. Open BAM and confirm the footer shows v18.0.
+7. Test using one non-critical/temporary vehicle before entering live dismantling records.

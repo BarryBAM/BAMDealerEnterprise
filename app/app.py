@@ -46,7 +46,7 @@ app.config.update(
     PERMANENT_SESSION_LIFETIME=timedelta(hours=int(os.environ.get("BAM_SESSION_HOURS", "12"))),
 )
 
-APP_VERSION = "17.0"
+APP_VERSION = "18.0"
 APP_NAME = "BAM Dealer Enterprise Cloud"
 
 ALLOWED_EXTENSIONS = {"png", "jpg", "jpeg", "webp", "pdf"}
@@ -330,6 +330,12 @@ def init_db():
     ensure_column(conn, "vehicles", "trailer_registration", "TEXT")
     ensure_column(conn, "vehicles", "capacity_people", "INTEGER")
     ensure_column(conn, "vehicles", "boat_features", "TEXT")
+
+    # Version 18 - Parts Vehicle / Dismantling
+    ensure_column(conn, "vehicles", "vehicle_purpose", "TEXT DEFAULT 'Retail Sale'")
+    ensure_column(conn, "vehicles", "dismantling_status", "TEXT DEFAULT 'Not Started'")
+    ensure_column(conn, "vehicles", "shell_sale_price", "REAL DEFAULT 0")
+    ensure_column(conn, "vehicles", "shell_sale_date", "TEXT")
 
     ensure_column(conn, "sales", "invoice_number", "TEXT")
     ensure_column(conn, "sales", "buyer_email", "TEXT")
@@ -997,7 +1003,7 @@ def vehicle_new():
                 "service_due_date","service_history","asset_type","length_m","tare_weight_kg","atm_kg","gtm_kg",
                 "berths","axles","caravan_features","boat_type","hull_material","engine_make","engine_model",
                 "engine_hours","horsepower","fuel_type","hin","trailer_included","trailer_registration",
-                "capacity_people","boat_features"
+                "capacity_people","boat_features","vehicle_purpose","dismantling_status"
             ]
             values = [
                 stock_no, request.form.get("status") or "In Stock", request.form.get("purchase_date"),
@@ -1018,7 +1024,9 @@ def vehicle_new():
                 request.form.get("horsepower") or None, request.form.get("fuel_type"),
                 request.form.get("hin"), 1 if request.form.get("trailer_included") else 0,
                 request.form.get("trailer_registration"), request.form.get("capacity_people") or None,
-                request.form.get("boat_features")
+                request.form.get("boat_features"),
+                request.form.get("vehicle_purpose") or ("Parts Vehicle" if (request.form.get("status") == "BER") else "Retail Sale"),
+                request.form.get("dismantling_status") or "Not Started"
             ]
             if not values[3] or not values[4]:
                 raise ValueError("Make and model are required.")
@@ -1095,6 +1103,10 @@ def vehicle_edit(vehicle_id):
                 "trailer_registration": request.form.get("trailer_registration") or None,
                 "capacity_people": request.form.get("capacity_people") or None,
                 "boat_features": request.form.get("boat_features") or None,
+                "vehicle_purpose": request.form.get("vehicle_purpose") or ("Parts Vehicle" if (request.form.get("status") == "BER") else "Retail Sale"),
+                "dismantling_status": request.form.get("dismantling_status") or "Not Started",
+                "shell_sale_price": float(request.form.get("shell_sale_price") or 0),
+                "shell_sale_date": request.form.get("shell_sale_date") or None,
             }
             if not values["make"] or not values["model"]:
                 raise ValueError("Make and model are required.")
@@ -1109,7 +1121,8 @@ def vehicle_edit(vehicle_id):
                     service_due_date=?, service_history=?, asset_type=?, length_m=?, tare_weight_kg=?,
                     atm_kg=?, gtm_kg=?, berths=?, axles=?, caravan_features=?, boat_type=?, hull_material=?,
                     engine_make=?, engine_model=?, engine_hours=?, horsepower=?, fuel_type=?, hin=?,
-                    trailer_included=?, trailer_registration=?, capacity_people=?, boat_features=?
+                    trailer_included=?, trailer_registration=?, capacity_people=?, boat_features=?,
+                    vehicle_purpose=?, dismantling_status=?, shell_sale_price=?, shell_sale_date=?
                 WHERE id=?
             """, (
                 values["stock_no"], values["status"], values["purchase_date"],
@@ -1126,7 +1139,8 @@ def vehicle_edit(vehicle_id):
                 values["hull_material"], values["engine_make"], values["engine_model"],
                 values["engine_hours"], values["horsepower"], values["fuel_type"], values["hin"],
                 values["trailer_included"], values["trailer_registration"], values["capacity_people"],
-                values["boat_features"], vehicle_id,
+                values["boat_features"], values["vehicle_purpose"], values["dismantling_status"],
+                values["shell_sale_price"], values["shell_sale_date"], vehicle_id,
             ))
             if values["asking_price"] > 0 and values["minimum_sale_price"] > 0:
                 conn.execute("""
@@ -1150,7 +1164,8 @@ def vehicle_edit(vehicle_id):
                 "atm_kg", "gtm_kg", "berths", "axles", "caravan_features", "boat_type",
                 "hull_material", "engine_make", "engine_model", "engine_hours", "horsepower",
                 "fuel_type", "hin", "trailer_included", "trailer_registration", "capacity_people",
-                "boat_features", "notes",
+                "boat_features", "vehicle_purpose", "dismantling_status", "shell_sale_price",
+                "shell_sale_date", "notes",
             ]
             for field in watched:
                 old = old_values.get(field)
@@ -1244,6 +1259,22 @@ def vehicle_detail(vehicle_id):
     selling_costs = float((sale["advertising_cost"] or 0) + (sale["transfer_cost"] or 0)) if sale else 0
     total_invested = float(vehicle["purchase_price_inc_gst"] or 0) + expense_total + job_total + service_total + parts_total + selling_costs
     profit = sale_price - total_invested
+
+    donor_parts = conn.execute(
+        "SELECT * FROM parts WHERE vehicle_id=? ORDER BY id DESC", (vehicle_id,)
+    ).fetchall()
+    donor_metrics = conn.execute("""
+        SELECT COUNT(*) AS part_lines,
+               COALESCE(SUM(quantity_on_hand),0) AS units_on_hand,
+               COALESCE(SUM(quantity_on_hand * selling_price),0) AS remaining_retail
+        FROM parts WHERE vehicle_id=?
+    """, (vehicle_id,)).fetchone()
+    donor_revenue = conn.execute("""
+        SELECT COALESCE(SUM(ps.sale_price),0) AS revenue
+        FROM part_sales ps JOIN parts p ON p.id=ps.part_id
+        WHERE p.vehicle_id=?
+    """, (vehicle_id,)).fetchone()["revenue"]
+    donor_profit = float(donor_revenue or 0) + float(vehicle["shell_sale_price"] or 0) - total_invested
     conn.close()
 
     return render_template(
@@ -1264,6 +1295,10 @@ def vehicle_detail(vehicle_id):
         parts_total=parts_total,
         total_invested=total_invested,
         profit=profit,
+        donor_parts=donor_parts,
+        donor_metrics=donor_metrics,
+        donor_revenue=float(donor_revenue or 0),
+        donor_profit=donor_profit,
     )
 
 @app.route("/vehicles/<int:vehicle_id>/documents", methods=["POST"])
@@ -2123,6 +2158,115 @@ def export_profit_csv():
     )
 
 
+@app.route("/vehicles/<int:vehicle_id>/dismantling", methods=["GET", "POST"])
+@login_required
+def vehicle_dismantling(vehicle_id):
+    conn = db()
+    vehicle = conn.execute("SELECT * FROM vehicles WHERE id=?", (vehicle_id,)).fetchone()
+    if not vehicle:
+        conn.close()
+        return "Vehicle not found", 404
+
+    if request.method == "POST":
+        action = request.form.get("action") or "add_part"
+        if action == "update_status":
+            status = request.form.get("dismantling_status") or "Not Started"
+            conn.execute(
+                "UPDATE vehicles SET vehicle_purpose='Parts Vehicle', dismantling_status=? WHERE id=?",
+                (status, vehicle_id),
+            )
+            conn.commit()
+            conn.close()
+            flash("Dismantling status updated.", "success")
+            return redirect(url_for("vehicle_dismantling", vehicle_id=vehicle_id))
+
+        if action == "shell_sale":
+            price = float(request.form.get("shell_sale_price") or 0)
+            conn.execute(
+                "UPDATE vehicles SET vehicle_purpose='Parts Vehicle', shell_sale_price=?, shell_sale_date=? WHERE id=?",
+                (price, request.form.get("shell_sale_date") or None, vehicle_id),
+            )
+            conn.commit()
+            conn.close()
+            flash("Shell sale recorded.", "success")
+            return redirect(url_for("vehicle_dismantling", vehicle_id=vehicle_id))
+
+        part_name = (request.form.get("part_name") or "").strip()
+        if not part_name:
+            conn.close()
+            flash("Part name is required.", "error")
+            return redirect(url_for("vehicle_dismantling", vehicle_id=vehicle_id))
+        qty = float(request.form.get("quantity_on_hand") or 1)
+        cost = float(request.form.get("unit_cost_inc_gst") or 0)
+        selling = float(request.form.get("selling_price") or 0)
+        gst = round(cost / 11, 2)
+        conn.execute("""
+            INSERT INTO parts(
+                part_number,part_name,category,supplier,quantity_on_hand,reorder_level,
+                unit_cost_inc_gst,gst_amount_per_unit,storage_location,notes,
+                vehicle_id,vehicle_stock_no,vin,make,model,year,condition,selling_price,status,date_added
+            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)
+        """, (
+            request.form.get("part_number") or None, part_name, request.form.get("category"),
+            "Donor vehicle", qty, 0, cost, gst, request.form.get("storage_location"),
+            request.form.get("notes"), vehicle_id, vehicle["stock_no"], vehicle["vin"],
+            vehicle["make"], vehicle["model"], vehicle["year"],
+            request.form.get("condition") or "Used", selling,
+            request.form.get("status") or "In Stock",
+        ))
+        conn.execute(
+            "UPDATE vehicles SET vehicle_purpose='Parts Vehicle', dismantling_status=CASE WHEN COALESCE(dismantling_status,'Not Started')='Not Started' THEN 'Dismantling' ELSE dismantling_status END WHERE id=?",
+            (vehicle_id,),
+        )
+        conn.commit()
+        conn.close()
+        flash(f"{part_name} added to Parts Centre.", "success")
+        return redirect(url_for("vehicle_dismantling", vehicle_id=vehicle_id))
+
+    parts = conn.execute("SELECT * FROM parts WHERE vehicle_id=? ORDER BY id DESC", (vehicle_id,)).fetchall()
+    revenue = conn.execute("""
+        SELECT COALESCE(SUM(ps.sale_price),0) AS revenue
+        FROM part_sales ps JOIN parts p ON p.id=ps.part_id
+        WHERE p.vehicle_id=?
+    """, (vehicle_id,)).fetchone()["revenue"]
+    expense_total = conn.execute("SELECT COALESCE(SUM(cost_inc_gst),0) AS v FROM expenses WHERE vehicle_id=?", (vehicle_id,)).fetchone()["v"]
+    job_total = conn.execute("SELECT COALESCE(SUM(CASE WHEN actual_cost_inc_gst>0 THEN actual_cost_inc_gst ELSE estimated_cost END),0) AS v FROM job_cards WHERE vehicle_id=?", (vehicle_id,)).fetchone()["v"]
+    invested = float(vehicle["purchase_price_inc_gst"] or 0) + float(expense_total or 0) + float(job_total or 0)
+    profit = float(revenue or 0) + float(vehicle["shell_sale_price"] or 0) - invested
+    conn.close()
+    return render_template("dismantling.html", vehicle=vehicle, parts=parts, revenue=float(revenue or 0), invested=invested, profit=profit)
+
+
+@app.route("/parts/<int:part_id>/sell", methods=["POST"])
+@login_required
+def part_sell(part_id):
+    conn = db()
+    part = conn.execute("SELECT * FROM parts WHERE id=?", (part_id,)).fetchone()
+    if not part:
+        conn.close()
+        flash("Part not found.", "error")
+        return redirect(url_for("parts_page"))
+    qty = float(request.form.get("quantity") or 1)
+    if qty <= 0 or qty > float(part["quantity_on_hand"] or 0):
+        conn.close()
+        flash("Sale quantity is invalid.", "error")
+        return redirect(request.referrer or url_for("parts_page"))
+    sale_price = float(request.form.get("sale_price") or part["selling_price"] or 0)
+    remaining = max(0, float(part["quantity_on_hand"] or 0) - qty)
+    conn.execute("""
+        INSERT INTO part_sales(part_id,quantity,customer_name,customer_phone,customer_email,sale_price,payment_method,notes)
+        VALUES(?,?,?,?,?,?,?,?)
+    """, (part_id, qty, request.form.get("customer_name"), request.form.get("customer_phone"), request.form.get("customer_email"), sale_price, request.form.get("payment_method"), request.form.get("notes")))
+    conn.execute("UPDATE parts SET quantity_on_hand=?, status=? WHERE id=?", (remaining, "Sold" if remaining <= 0 else "In Stock", part_id))
+    conn.commit()
+    vehicle_id = part["vehicle_id"]
+    conn.close()
+    flash("Part sale recorded.", "success")
+    if vehicle_id:
+        return redirect(url_for("vehicle_dismantling", vehicle_id=vehicle_id))
+    return redirect(url_for("parts_page"))
+
+
 @app.route("/parts", methods=["GET", "POST"])
 @login_required
 def parts_page():
@@ -2179,8 +2323,19 @@ def parts_page():
           SUM(CASE WHEN quantity_on_hand <= reorder_level THEN 1 ELSE 0 END) AS low_stock
         FROM parts
     """).fetchone()
+    donor_vehicles = conn.execute("""
+        SELECT v.*,
+               COUNT(p.id) AS part_lines,
+               COALESCE(SUM(p.quantity_on_hand),0) AS units_remaining,
+               COALESCE(SUM(p.quantity_on_hand * p.selling_price),0) AS remaining_retail
+        FROM vehicles v
+        LEFT JOIN parts p ON p.vehicle_id=v.id
+        WHERE COALESCE(v.vehicle_purpose,'Retail Sale')='Parts Vehicle' OR v.status='BER'
+        GROUP BY v.id
+        ORDER BY CASE WHEN COALESCE(v.dismantling_status,'Not Started')='Complete' THEN 1 ELSE 0 END, v.id DESC
+    """).fetchall()
     conn.close()
-    return render_template("parts.html", parts=rows, q=q, part_metrics=part_metrics)
+    return render_template("parts.html", parts=rows, q=q, part_metrics=part_metrics, donor_vehicles=donor_vehicles)
 
 
 @app.route("/vehicles/<int:vehicle_id>/use-part", methods=["POST"])

@@ -5,6 +5,8 @@
 <label>Asset Type<select name="asset_type" id="asset-type" onchange="toggleAssetFields()">{% for t in ["Car","Caravan","Boat","Motorcycle","Trailer","Other"] %}<option>{{ t }}</option>{% endfor %}</select></label>
 <label>Stock Number<input name="stock_no" value="{{ suggested_stock }}" readonly></label>
 <label>Status<select name="status">{% for s in ["In Stock","Being Repaired","Ready for Sale","Advertised","Sold","BER"] %}<option>{{ s }}</option>{% endfor %}</select></label>
+<label>Vehicle Purpose<select name="vehicle_purpose"><option>Retail Sale</option><option>Parts Vehicle</option><option>Workshop</option><option>Wholesale</option></select><small>Choose Parts Vehicle for donor/dismantling stock.</small></label>
+<label>Dismantling Status<select name="dismantling_status"><option>Not Started</option><option>Dismantling</option><option>Paused</option><option>Complete</option></select></label>
 <label>Purchase Date<input type="date" name="purchase_date"></label>
 <label>Make / Manufacturer<input name="make" required></label>
 <label>Model<input name="model" required></label>

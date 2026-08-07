@@ -5,6 +5,8 @@
 <label>Asset Type<select name="asset_type" id="asset-type" onchange="toggleAssetFields()">{% for t in ["Car","Caravan","Boat","Motorcycle","Trailer","Other"] %}<option {% if (vehicle.asset_type or 'Car')==t %}selected{% endif %}>{{ t }}</option>{% endfor %}</select></label>
 <label>Stock Number<input name="stock_no" value="{{ vehicle.stock_no or '' }}" required></label>
 <label>Status<select name="status">{% for s in ["In Stock","Being Repaired","Ready for Sale","Advertised","Sold","BER"] %}<option {% if vehicle.status==s %}selected{% endif %}>{{ s }}</option>{% endfor %}</select></label>
+<label>Vehicle Purpose<select name="vehicle_purpose">{% for purpose in ["Retail Sale","Parts Vehicle","Workshop","Wholesale"] %}<option {% if (vehicle.vehicle_purpose or "Retail Sale")==purpose %}selected{% endif %}>{{ purpose }}</option>{% endfor %}</select><small>Use Parts Vehicle to link dismantled parts to this donor.</small></label>
+<label>Dismantling Status<select name="dismantling_status">{% for ds in ["Not Started","Dismantling","Paused","Complete"] %}<option {% if (vehicle.dismantling_status or "Not Started")==ds %}selected{% endif %}>{{ ds }}</option>{% endfor %}</select></label>
 <label>Purchase Date<input type="date" name="purchase_date" value="{{ vehicle.purchase_date or '' }}"></label>
 <label>Make / Manufacturer<input name="make" value="{{ vehicle.make or '' }}" required></label><label>Model<input name="model" value="{{ vehicle.model or '' }}" required></label>
 <label>Variant / Series<input name="variant" value="{{ vehicle.variant or '' }}"></label><label>Year<input type="number" name="year" value="{{ vehicle.year or '' }}"></label>
@@ -19,7 +21,7 @@
 <div class="pricing-summary"><span>Asking margin over purchase</span><strong id="asking-margin">$0.00</strong></div>
 </div></div>
 <label>Barry Contribution<input type="number" step="0.01" name="barry_contribution" value="{{ vehicle.barry_contribution or 0 }}"></label><label>Matt Contribution<input type="number" step="0.01" name="matt_contribution" value="{{ vehicle.matt_contribution or 0 }}"></label>
-<label>Registration Expiry<input type="date" name="rego_expiry" value="{{ vehicle.rego_expiry or '' }}"></label><label class="car-fields">PPSR Number<input name="ppsr_number" value="{{ vehicle.ppsr_number or '' }}"></label>
+<label>Registration Expiry<input type="date" name="rego_expiry" value="{{ vehicle.rego_expiry or '' }}"></label><label>Shell / Scrap Sale<input type="number" step="0.01" min="0" name="shell_sale_price" value="{{ vehicle.shell_sale_price or 0 }}"></label><label>Shell Sale Date<input type="date" name="shell_sale_date" value="{{ vehicle.shell_sale_date or '' }}"></label><label class="car-fields">PPSR Number<input name="ppsr_number" value="{{ vehicle.ppsr_number or '' }}"></label>
 <label>Condition / Roadworthy<select name="roadworthy_status">{% for r in ["Not Checked","Required","Booked","Passed","Failed"] %}<option {% if vehicle.roadworthy_status==r %}selected{% endif %}>{{ r }}</option>{% endfor %}</select></label><label>Service Due Date<input type="date" name="service_due_date" value="{{ vehicle.service_due_date or '' }}"></label>
 <div class="wide asset-section caravan-fields"><h2>Caravan Details</h2><div class="grid-form nested-grid">
 <label>Length (m)<input type="number" step="0.01" name="length_m" value="{{ vehicle.length_m or '' }}"></label><label>Tare Weight (kg)<input type="number" step="0.1" name="tare_weight_kg" value="{{ vehicle.tare_weight_kg or '' }}"></label>
