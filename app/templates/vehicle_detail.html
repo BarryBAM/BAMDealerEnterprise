@@ -9,6 +9,7 @@
   </div>
   <div class="page-actions"><a class="button secondary" href="{{ url_for('vehicle_timeline', vehicle_id=vehicle.id) }}">Timeline</a>
     <a class="button secondary" href="{{ url_for('dealer_intelligence', vehicle_id=vehicle.id) }}">🧠 Dealer Intelligence</a>
+    <a class="button secondary" href="{{ url_for('workshop_intelligence', vehicle_id=vehicle.id) }}">🛠 Workshop Intelligence</a>
     <span class="status">{{ vehicle.status }}</span>
     <a class="button" href="{{ url_for('vehicle_edit', vehicle_id=vehicle.id) }}">Edit Asset</a>
     {% if (vehicle.vehicle_purpose or 'Retail Sale') == 'Parts Vehicle' or vehicle.status == 'BER' %}<a class="button" href="{{ url_for('vehicle_dismantling', vehicle_id=vehicle.id) }}">🔧 Dismantling</a>{% endif %}
@@ -149,13 +150,13 @@
   </form>
   <table><tr><th>Date</th><th>Description</th><th>Cost</th></tr>{% for e in expenses %}<tr><td>{{ e.expense_date or '' }}</td><td>{{ e.description }}</td><td>{{ e.cost_inc_gst|money }}</td></tr>{% else %}<tr><td colspan="3">No expenses yet.</td></tr>{% endfor %}</table>
 </section>
-<section id="workshop" class="panel"><h2>Workshop</h2>
+<section id="workshop" class="panel"><div class="section-head"><div><h2>Workshop</h2><p>Job cards and labour estimates.</p></div><a class="button" href="{{ url_for('workshop_intelligence', vehicle_id=vehicle.id) }}">Open Workshop Intelligence</a></div>
   <form method="post" action="{{ url_for('job_card_add', vehicle_id=vehicle.id) }}" class="stack">
     <input type="date" name="job_date"><select name="category"><option>Mechanical</option><option>Electrical</option><option>Bodywork</option><option>Detailing</option><option>Roadworthy</option><option>Other</option></select>
     <input name="description" placeholder="Work required" required><input name="supplier" placeholder="Supplier / repairer"><select name="paid_by"><option>Barry</option><option>Matt</option><option>Shared</option><option>Business</option></select>
     <input type="number" step="0.01" name="estimated_cost" placeholder="Estimated cost"><input type="number" step="0.01" name="actual_cost_inc_gst" placeholder="Actual cost inc GST"><select name="status"><option>Open</option><option>In Progress</option><option>Waiting Parts</option><option>Completed</option><option>Cancelled</option></select><textarea name="notes" placeholder="Job notes"></textarea><button>Add Job Card</button>
   </form>
-  <table><tr><th>Job</th><th>Status</th><th>Cost</th></tr>{% for j in job_cards %}<tr><td><a href="{{ url_for('job_card_edit', job_id=j.id) }}">{{ j.description }}</a></td><td>{{ j.status }}</td><td>{{ (j.actual_cost_inc_gst if j.actual_cost_inc_gst else j.estimated_cost)|money }}</td></tr>{% else %}<tr><td colspan="3">No job cards yet.</td></tr>{% endfor %}</table>
+  <table><tr><th>Job</th><th>Labour</th><th>Status</th><th>Cost</th></tr>{% for j in job_cards %}<tr><td><a href="{{ url_for('job_card_edit', job_id=j.id) }}">{{ j.description }}</a>{% if j.labour_source %}<br><small>{{ j.labour_source }}{% if j.labour_code %} • {{ j.labour_code }}{% endif %}</small>{% endif %}</td><td>{% if j.labour_hours %}{{ '%.2f'|format(j.labour_hours) }} h{% else %}—{% endif %}</td><td>{{ j.status }}</td><td>{{ (j.actual_cost_inc_gst if j.actual_cost_inc_gst else j.estimated_cost)|money }}</td></tr>{% else %}<tr><td colspan="4">No job cards yet.</td></tr>{% endfor %}</table>
 </section>
 </div>
 

@@ -1,0 +1,10 @@
+BAM Dealer Enterprise Cloud v23.0 - Workshop Intelligence
+
+Adds VIN-led Workshop Intelligence, a labour-time library, configurable licensed workshop-data portal links, technical reference links, CSV labour-time import, quick labour quoting, and one-click conversion of labour operations into job cards.
+
+Important: proprietary workshop manuals and authoritative labour times are not bundled. Use licensed provider links or data you are permitted to import.
+
+Azure settings:
+- BAM_WORKSHOP_PROVIDER_NAME
+- BAM_WORKSHOP_PORTAL_URL (supports {vin}, {make}, {model}, {year}, {stock_no})
+- BAM_LABOUR_RATE (default 145)

@@ -28,6 +28,11 @@
 {% endfor %}
 </select>
 </label>
+<label>Labour Hours<input type="number" step="0.01" min="0" name="labour_hours" value="{{ job.labour_hours or 0 }}"></label>
+<label>Labour Rate<input type="number" step="0.01" min="0" name="labour_rate" value="{{ job.labour_rate or 0 }}"></label>
+<label>Labour Code<input name="labour_code" value="{{ job.labour_code or '' }}"></label>
+<label>Labour Source<input name="labour_source" value="{{ job.labour_source or '' }}" placeholder="Licensed provider / OEM / local"></label>
+<label class="wide">Procedure / Manual URL<input type="url" name="procedure_url" value="{{ job.procedure_url or '' }}"></label>
 <label>Estimated Cost<input type="number" step="0.01" name="estimated_cost" value="{{ job.estimated_cost }}"></label>
 <label>Actual Cost Inc GST<input type="number" step="0.01" name="actual_cost_inc_gst" value="{{ job.actual_cost_inc_gst }}"></label>
 <label>Status

@@ -50,11 +50,14 @@ app.config.update(
     PERMANENT_SESSION_LIFETIME=timedelta(hours=int(os.environ.get("BAM_SESSION_HOURS", "12"))),
 )
 
-APP_VERSION = "22.0"
+APP_VERSION = "23.0"
 APP_NAME = "BAM Dealer Enterprise Cloud"
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "").strip()
 OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-5").strip() or "gpt-5"
 VIN_DECODER_URL = os.environ.get("BAM_VIN_DECODER_URL", "https://vpic.nhtsa.dot.gov/api/vehicles/DecodeVinValuesExtended/{vin}?format=json")
+WORKSHOP_PROVIDER_NAME = os.environ.get("BAM_WORKSHOP_PROVIDER_NAME", "Licensed workshop data provider").strip() or "Licensed workshop data provider"
+WORKSHOP_PORTAL_URL = os.environ.get("BAM_WORKSHOP_PORTAL_URL", "").strip()
+DEFAULT_LABOUR_RATE = float(os.environ.get("BAM_LABOUR_RATE", "145") or 145)
 
 ALLOWED_EXTENSIONS = {"png", "jpg", "jpeg", "webp", "pdf"}
 BACKUP_EXTENSIONS = {"zip"}
@@ -528,6 +531,52 @@ def init_db():
             FOREIGN KEY(equipment_id) REFERENCES equipment(id) ON DELETE CASCADE
         );
     """)
+
+    # Version 23 - Workshop Intelligence
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS workshop_operations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            vehicle_id INTEGER,
+            part_id INTEGER,
+            operation_code TEXT,
+            system_name TEXT,
+            operation_name TEXT NOT NULL,
+            labour_hours REAL NOT NULL DEFAULT 0,
+            labour_rate REAL NOT NULL DEFAULT 0,
+            source_name TEXT,
+            source_reference TEXT,
+            procedure_url TEXT,
+            notes TEXT,
+            make TEXT,
+            model TEXT,
+            year INTEGER,
+            engine_hint TEXT,
+            created_by TEXT,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(vehicle_id) REFERENCES vehicles(id) ON DELETE CASCADE,
+            FOREIGN KEY(part_id) REFERENCES parts(id) ON DELETE SET NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS workshop_references (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            vehicle_id INTEGER NOT NULL,
+            reference_type TEXT NOT NULL,
+            title TEXT NOT NULL,
+            provider_name TEXT,
+            reference_url TEXT,
+            reference_code TEXT,
+            notes TEXT,
+            created_by TEXT,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(vehicle_id) REFERENCES vehicles(id) ON DELETE CASCADE
+        );
+    """)
+    ensure_column(conn, "job_cards", "labour_operation_id", "INTEGER")
+    ensure_column(conn, "job_cards", "labour_hours", "REAL DEFAULT 0")
+    ensure_column(conn, "job_cards", "labour_rate", "REAL DEFAULT 0")
+    ensure_column(conn, "job_cards", "labour_source", "TEXT")
+    ensure_column(conn, "job_cards", "labour_code", "TEXT")
+    ensure_column(conn, "job_cards", "procedure_url", "TEXT")
 
     count = conn.execute(
         "SELECT COUNT(*) AS c FROM users"
@@ -1816,8 +1865,9 @@ def job_card_add(vehicle_id):
     cursor = conn.execute("""
         INSERT INTO job_cards(
             vehicle_id,job_date,category,description,supplier,paid_by,
-            estimated_cost,actual_cost_inc_gst,gst_amount,status,notes
-        ) VALUES(?,?,?,?,?,?,?,?,?,?,?)
+            estimated_cost,actual_cost_inc_gst,gst_amount,status,notes,
+            labour_operation_id,labour_hours,labour_rate,labour_source,labour_code,procedure_url
+        ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     """, (
         vehicle_id,
         request.form.get("job_date"),
@@ -1830,6 +1880,12 @@ def job_card_add(vehicle_id):
         gst,
         request.form.get("status") or "Open",
         request.form.get("notes"),
+        int(request.form.get("labour_operation_id")) if request.form.get("labour_operation_id") else None,
+        float(request.form.get("labour_hours") or 0),
+        float(request.form.get("labour_rate") or 0),
+        request.form.get("labour_source"),
+        request.form.get("labour_code"),
+        request.form.get("procedure_url"),
     ))
     job_id = cursor.lastrowid
     conn.execute("""
@@ -1864,7 +1920,8 @@ def job_card_edit(job_id):
         conn.execute("""
             UPDATE job_cards
             SET job_date=?, category=?, description=?, supplier=?, paid_by=?,
-                estimated_cost=?, actual_cost_inc_gst=?, gst_amount=?, status=?, notes=?
+                estimated_cost=?, actual_cost_inc_gst=?, gst_amount=?, status=?, notes=?,
+                labour_hours=?,labour_rate=?,labour_source=?,labour_code=?,procedure_url=?
             WHERE id=?
         """, (
             request.form.get("job_date"),
@@ -1877,6 +1934,11 @@ def job_card_edit(job_id):
             gst,
             new_status,
             request.form.get("notes"),
+            float(request.form.get("labour_hours") or 0),
+            float(request.form.get("labour_rate") or 0),
+            request.form.get("labour_source"),
+            request.form.get("labour_code"),
+            request.form.get("procedure_url"),
             job_id,
         ))
 
@@ -4193,6 +4255,224 @@ def user_edit(user_id):
             conn.close(); flash(str(exc),"error")
     else: conn.close()
     return render_template("user_form.html", user=user)
+
+
+def _workshop_provider_vehicle_url(vehicle):
+    if not WORKSHOP_PORTAL_URL:
+        return ""
+    replacements = {
+        "vin": urllib.parse.quote(str(vehicle["vin"] or "")),
+        "make": urllib.parse.quote(str(vehicle["make"] or "")),
+        "model": urllib.parse.quote(str(vehicle["model"] or "")),
+        "year": urllib.parse.quote(str(vehicle["year"] or "")),
+        "stock_no": urllib.parse.quote(str(vehicle["stock_no"] or "")),
+    }
+    url = WORKSHOP_PORTAL_URL
+    for key, value in replacements.items():
+        url = url.replace("{" + key + "}", value)
+    return url
+
+
+@app.route("/workshop-intelligence")
+@login_required
+def workshop_centre():
+    q = (request.args.get("q") or "").strip()
+    conn = db()
+    params = []
+    where = ""
+    if q:
+        like = f"%{q}%"
+        where = "WHERE stock_no LIKE ? OR vin LIKE ? OR registration LIKE ? OR make LIKE ? OR model LIKE ?"
+        params = [like] * 5
+    vehicles = conn.execute(f"""
+        SELECT id,stock_no,year,make,model,variant,vin,registration,status
+        FROM vehicles {where}
+        ORDER BY id DESC LIMIT 50
+    """, params).fetchall()
+    recent_jobs = conn.execute("""
+        SELECT j.*,v.stock_no,v.make,v.model
+        FROM job_cards j JOIN vehicles v ON v.id=j.vehicle_id
+        ORDER BY j.id DESC LIMIT 12
+    """).fetchall()
+    conn.close()
+    return render_template("workshop_centre.html", vehicles=vehicles, q=q, recent_jobs=recent_jobs,
+                           default_labour_rate=DEFAULT_LABOUR_RATE)
+
+
+@app.route("/vehicles/<int:vehicle_id>/workshop-intelligence")
+@login_required
+def workshop_intelligence(vehicle_id):
+    conn = db()
+    vehicle = conn.execute("SELECT * FROM vehicles WHERE id=?", (vehicle_id,)).fetchone()
+    if not vehicle:
+        conn.close(); return "Vehicle not found", 404
+    operations = conn.execute("""
+        SELECT o.*,p.part_number,p.part_name
+        FROM workshop_operations o
+        LEFT JOIN parts p ON p.id=o.part_id
+        WHERE o.vehicle_id=? OR (
+            o.vehicle_id IS NULL AND LOWER(COALESCE(o.make,''))=LOWER(COALESCE(?,''))
+            AND LOWER(COALESCE(o.model,''))=LOWER(COALESCE(?,''))
+            AND (o.year IS NULL OR o.year=0 OR o.year=?)
+        )
+        ORDER BY o.system_name,o.operation_name,o.id DESC
+    """, (vehicle_id, vehicle["make"], vehicle["model"], vehicle["year"] or 0)).fetchall()
+    refs = conn.execute("SELECT * FROM workshop_references WHERE vehicle_id=? ORDER BY reference_type,title", (vehicle_id,)).fetchall()
+    parts = conn.execute("SELECT id,part_number,part_name,manufacturer_part_no,quantity_on_hand FROM parts WHERE quantity_on_hand>0 ORDER BY part_name").fetchall()
+    jobs = conn.execute("SELECT * FROM job_cards WHERE vehicle_id=? ORDER BY id DESC LIMIT 20", (vehicle_id,)).fetchall()
+    conn.close()
+    specs = {}
+    try:
+        specs = json.loads(vehicle["vin_decode_json"] or "{}") if vehicle["vin_decode_json"] else {}
+    except Exception:
+        specs = {}
+    return render_template("workshop_intelligence.html", vehicle=vehicle, operations=operations, references=refs,
+                           parts=parts, jobs=jobs, provider_name=WORKSHOP_PROVIDER_NAME,
+                           provider_url=_workshop_provider_vehicle_url(vehicle), default_labour_rate=DEFAULT_LABOUR_RATE,
+                           decoded_specs=specs)
+
+
+@app.route("/vehicles/<int:vehicle_id>/workshop-operation", methods=["POST"])
+@login_required
+def workshop_operation_add(vehicle_id):
+    conn = db()
+    vehicle = conn.execute("SELECT * FROM vehicles WHERE id=?", (vehicle_id,)).fetchone()
+    if not vehicle:
+        conn.close(); return "Vehicle not found", 404
+    try:
+        hours = float(request.form.get("labour_hours") or 0)
+        rate = float(request.form.get("labour_rate") or DEFAULT_LABOUR_RATE)
+        if hours < 0 or rate < 0:
+            raise ValueError("Labour hours and labour rate cannot be negative.")
+        part_id = int(request.form.get("part_id")) if request.form.get("part_id") else None
+        operation_name = (request.form.get("operation_name") or "").strip()
+        if not operation_name and part_id:
+            part = conn.execute("SELECT part_name FROM parts WHERE id=?", (part_id,)).fetchone()
+            operation_name = f"Fit {part['part_name']}" if part else "Fit part"
+        if not operation_name:
+            raise ValueError("Enter an operation name.")
+        reusable = request.form.get("scope") == "library"
+        conn.execute("""
+            INSERT INTO workshop_operations(vehicle_id,part_id,operation_code,system_name,operation_name,labour_hours,labour_rate,
+                source_name,source_reference,procedure_url,notes,make,model,year,engine_hint,created_by)
+            VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        """, (None if reusable else vehicle_id, part_id, request.form.get("operation_code"), request.form.get("system_name"), operation_name,
+              hours, rate, request.form.get("source_name"), request.form.get("source_reference"), request.form.get("procedure_url"),
+              request.form.get("notes"), vehicle["make"], vehicle["model"], vehicle["year"],
+              vehicle["engine_model"] or vehicle["engine_make"] or vehicle["engine_displacement_l"], session.get("display_name")))
+        conn.commit()
+        log_action("Workshop labour operation added", "vehicle", vehicle_id, f"{operation_name} — {hours:.2f} h")
+        flash("Workshop labour operation saved.", "success")
+    except (ValueError, sqlite3.Error) as exc:
+        conn.rollback(); flash(str(exc), "error")
+    finally:
+        conn.close()
+    return redirect(url_for("workshop_intelligence", vehicle_id=vehicle_id))
+
+
+@app.route("/vehicles/<int:vehicle_id>/workshop-operation/<int:operation_id>/job", methods=["POST"])
+@login_required
+def workshop_operation_to_job(vehicle_id, operation_id):
+    conn = db()
+    op = conn.execute("SELECT * FROM workshop_operations WHERE id=?", (operation_id,)).fetchone()
+    vehicle = conn.execute("SELECT * FROM vehicles WHERE id=?", (vehicle_id,)).fetchone()
+    if not op or not vehicle:
+        conn.close(); return "Workshop operation or vehicle not found", 404
+    hours = float(op["labour_hours"] or 0)
+    rate = float(op["labour_rate"] or DEFAULT_LABOUR_RATE)
+    estimate = round(hours * rate, 2)
+    notes = "\n".join(x for x in [
+        f"Labour source: {op['source_name']}" if op["source_name"] else "",
+        f"Reference: {op['source_reference']}" if op["source_reference"] else "",
+        op["notes"] or "",
+    ] if x)
+    cur = conn.execute("""
+        INSERT INTO job_cards(vehicle_id,job_date,category,description,supplier,paid_by,estimated_cost,actual_cost_inc_gst,
+            gst_amount,status,notes,labour_operation_id,labour_hours,labour_rate,labour_source,labour_code,procedure_url)
+        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    """, (vehicle_id, date.today().isoformat(), op["system_name"] or "Mechanical", op["operation_name"], "", "Business", estimate, 0, 0,
+          "Open", notes, op["id"], hours, rate, op["source_name"], op["operation_code"], op["procedure_url"]))
+    job_id = cur.lastrowid
+    conn.execute("INSERT INTO job_card_history(job_card_id,old_status,new_status,changed_by,note) VALUES(?,?,?,?,?)",
+                 (job_id, None, "Open", session.get("display_name"), "Created from Workshop Intelligence labour operation"))
+    conn.commit(); conn.close()
+    log_action("Workshop operation added to job card", "vehicle", vehicle_id, f"Job #{job_id}; {hours:.2f} h @ ${rate:.2f}")
+    flash(f"Job card #{job_id} created with {hours:.2f} labour hours.", "success")
+    return redirect(url_for("vehicle_detail", vehicle_id=vehicle_id))
+
+
+@app.route("/vehicles/<int:vehicle_id>/workshop-operation/<int:operation_id>/delete", methods=["POST"])
+@login_required
+def workshop_operation_delete(vehicle_id, operation_id):
+    conn = db()
+    conn.execute("DELETE FROM workshop_operations WHERE id=? AND (vehicle_id=? OR vehicle_id IS NULL)", (operation_id, vehicle_id))
+    conn.commit(); conn.close()
+    flash("Workshop labour operation removed.", "success")
+    return redirect(url_for("workshop_intelligence", vehicle_id=vehicle_id))
+
+
+@app.route("/vehicles/<int:vehicle_id>/workshop-reference", methods=["POST"])
+@login_required
+def workshop_reference_add(vehicle_id):
+    title = (request.form.get("title") or "").strip()
+    if not title:
+        flash("Reference title is required.", "error")
+        return redirect(url_for("workshop_intelligence", vehicle_id=vehicle_id))
+    conn = db()
+    conn.execute("""
+        INSERT INTO workshop_references(vehicle_id,reference_type,title,provider_name,reference_url,reference_code,notes,created_by)
+        VALUES(?,?,?,?,?,?,?,?)
+    """, (vehicle_id, request.form.get("reference_type") or "Workshop Manual", title, request.form.get("provider_name"),
+          request.form.get("reference_url"), request.form.get("reference_code"), request.form.get("notes"), session.get("display_name")))
+    conn.commit(); conn.close()
+    flash("Workshop technical reference saved.", "success")
+    return redirect(url_for("workshop_intelligence", vehicle_id=vehicle_id))
+
+
+@app.route("/vehicles/<int:vehicle_id>/workshop-reference/<int:reference_id>/delete", methods=["POST"])
+@login_required
+def workshop_reference_delete(vehicle_id, reference_id):
+    conn = db(); conn.execute("DELETE FROM workshop_references WHERE id=? AND vehicle_id=?", (reference_id, vehicle_id)); conn.commit(); conn.close()
+    flash("Workshop reference removed.", "success")
+    return redirect(url_for("workshop_intelligence", vehicle_id=vehicle_id))
+
+
+@app.route("/vehicles/<int:vehicle_id>/workshop-labour-import", methods=["POST"])
+@login_required
+def workshop_labour_import(vehicle_id):
+    upload = request.files.get("labour_csv")
+    if not upload or not upload.filename:
+        flash("Choose a CSV file first.", "error")
+        return redirect(url_for("workshop_intelligence", vehicle_id=vehicle_id))
+    conn = db(); vehicle = conn.execute("SELECT * FROM vehicles WHERE id=?", (vehicle_id,)).fetchone()
+    if not vehicle:
+        conn.close(); return "Vehicle not found", 404
+    try:
+        raw = upload.read().decode("utf-8-sig")
+        reader = csv.DictReader(io.StringIO(raw))
+        required = {"operation_name", "labour_hours"}
+        if not reader.fieldnames or not required.issubset({x.strip() for x in reader.fieldnames}):
+            raise ValueError("CSV must include operation_name and labour_hours columns.")
+        imported = 0
+        for row in reader:
+            name = (row.get("operation_name") or "").strip()
+            if not name: continue
+            hours = float(row.get("labour_hours") or 0)
+            rate = float(row.get("labour_rate") or DEFAULT_LABOUR_RATE)
+            conn.execute("""
+                INSERT INTO workshop_operations(vehicle_id,operation_code,system_name,operation_name,labour_hours,labour_rate,
+                    source_name,source_reference,procedure_url,notes,make,model,year,engine_hint,created_by)
+                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            """, (vehicle_id, row.get("operation_code"), row.get("system_name"), name, hours, rate, row.get("source_name"),
+                  row.get("source_reference"), row.get("procedure_url"), row.get("notes"), vehicle["make"], vehicle["model"],
+                  vehicle["year"], vehicle["engine_model"] or vehicle["engine_make"] or vehicle["engine_displacement_l"], session.get("display_name")))
+            imported += 1
+        conn.commit(); flash(f"Imported {imported} workshop labour operation(s).", "success")
+    except (UnicodeDecodeError, ValueError, sqlite3.Error) as exc:
+        conn.rollback(); flash(f"Labour import failed: {exc}", "error")
+    finally:
+        conn.close()
+    return redirect(url_for("workshop_intelligence", vehicle_id=vehicle_id))
 
 
 @app.route("/parts/<int:part_id>/label")
