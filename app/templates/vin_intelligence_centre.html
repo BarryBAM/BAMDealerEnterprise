@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block title %}VIN Intelligence | BAM Dealer Enterprise{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div><p class="eyebrow">Version 24.2 • VIN Intelligence</p><h1>VIN Intelligence Centre</h1><p>Vehicle identification, decoded specifications and workshop-data shortcuts in one place.</p></div>
+  <div class="page-actions"><a class="button secondary" href="{{ url_for('workshop_centre') }}">Workshop Intelligence</a><a class="button" href="{{ url_for('vehicle_new') }}">Add Vehicle</a></div>
+</div>
+<div class="workspace-two-column">
+<section class="panel"><h2>Find Vehicle</h2><form method="get" class="search-row"><input name="q" value="{{ q }}" placeholder="VIN, stock number, registration, make or model"><button>Search</button>{% if q %}<a class="button secondary" href="{{ url_for('vin_intelligence_centre') }}">Clear</a>{% endif %}</form><p class="muted">VIN decoding provider: {{ vin_provider }}. Workshop provider: {{ provider_name }}.</p></section>
+<section class="panel"><h2>How v24.2 Works</h2><p>Decode the VIN, review the returned specifications, record verified workshop-specific codes, then jump directly to your licensed workshop manual and labour library.</p><div class="notice">Decoded data is a reference source only. Workshop procedures, torque settings and repair instructions must be verified against your licensed manual/provider.</div></section>
+</div>
+<section class="panel"><div class="section-head"><div><h2>Vehicles</h2><p>{{ vehicles|length }} result(s)</p></div></div><div class="table-wrap"><table><tr><th>Stock</th><th>Vehicle</th><th>VIN / Rego</th><th>Decode</th><th>Verified Codes</th><th></th></tr>{% for v in vehicles %}<tr><td><strong>{{ v.stock_no }}</strong></td><td>{{ v.year or '' }} {{ v.make }} {{ v.model }} {{ v.variant or '' }}</td><td>{{ v.vin or '—' }}<br><small>{{ v.registration or 'No rego' }}</small></td><td>{% if v.decoded_at %}<span class="status-pill">Decoded</span><br><small>{{ v.manufacturer_name or '' }}</small>{% else %}<span class="status-pill warning">Not decoded</span>{% endif %}</td><td>{% if v.engine_code %}Engine {{ v.engine_code }}{% endif %}{% if v.transmission_code %}<br>Trans {{ v.transmission_code }}{% endif %}{% if v.paint_code %}<br>Paint {{ v.paint_code }}{% endif %}{% if not v.engine_code and not v.transmission_code and not v.paint_code %}—{% endif %}</td><td><a class="small-button" href="{{ url_for('vin_intelligence', vehicle_id=v.id) }}">Open VIN Intelligence</a></td></tr>{% else %}<tr><td colspan="6">No vehicles found.</td></tr>{% endfor %}</table></div></section>
+{% endblock %}

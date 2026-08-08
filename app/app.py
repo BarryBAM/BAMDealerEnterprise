@@ -50,11 +50,12 @@ app.config.update(
     PERMANENT_SESSION_LIFETIME=timedelta(hours=int(os.environ.get("BAM_SESSION_HOURS", "12"))),
 )
 
-APP_VERSION = "24.1"
+APP_VERSION = "24.2"
 APP_NAME = "BAM Dealer Enterprise Cloud"
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "").strip()
 OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-5").strip() or "gpt-5"
 VIN_DECODER_URL = os.environ.get("BAM_VIN_DECODER_URL", "https://vpic.nhtsa.dot.gov/api/vehicles/DecodeVinValuesExtended/{vin}?format=json")
+VIN_DATA_PROVIDER_NAME = os.environ.get("BAM_VIN_DATA_PROVIDER_NAME", "NHTSA vPIC").strip() or "NHTSA vPIC"
 WORKSHOP_PROVIDER_NAME = os.environ.get("BAM_WORKSHOP_PROVIDER_NAME", "eManualOnline").strip() or "eManualOnline"
 WORKSHOP_PORTAL_URL = os.environ.get("BAM_WORKSHOP_PORTAL_URL", "https://www.emanualonline.com/cars/").strip() or "https://www.emanualonline.com/cars/"
 DEFAULT_LABOUR_RATE = float(os.environ.get("BAM_LABOUR_RATE", "145") or 145)
@@ -356,6 +357,23 @@ def init_db():
     ensure_column(conn, "vehicles", "decoded_model_year", "TEXT")
     ensure_column(conn, "vehicles", "decoded_series", "TEXT")
     ensure_column(conn, "vehicles", "decoded_trim", "TEXT")
+    # Version 24.2 - VIN Intelligence & verified workshop specifications
+    ensure_column(conn, "vehicles", "vehicle_type_decoded", "TEXT")
+    ensure_column(conn, "vehicles", "doors_decoded", "TEXT")
+    ensure_column(conn, "vehicles", "engine_model_decoded", "TEXT")
+    ensure_column(conn, "vehicles", "engine_power_kw_decoded", "TEXT")
+    ensure_column(conn, "vehicles", "plant_country_decoded", "TEXT")
+    ensure_column(conn, "vehicles", "brake_system_decoded", "TEXT")
+    ensure_column(conn, "vehicles", "turbo_decoded", "TEXT")
+    ensure_column(conn, "vehicles", "electrification_level_decoded", "TEXT")
+    ensure_column(conn, "vehicles", "paint_code", "TEXT")
+    ensure_column(conn, "vehicles", "engine_code", "TEXT")
+    ensure_column(conn, "vehicles", "transmission_code", "TEXT")
+    ensure_column(conn, "vehicles", "option_codes", "TEXT")
+    ensure_column(conn, "vehicles", "service_interval_km", "INTEGER")
+    ensure_column(conn, "vehicles", "service_interval_months", "INTEGER")
+    ensure_column(conn, "vehicles", "technical_data_source", "TEXT")
+    ensure_column(conn, "vehicles", "technical_notes", "TEXT")
     ensure_column(conn, "vehicles", "market_price_low", "REAL DEFAULT 0")
     ensure_column(conn, "vehicles", "market_price_mid", "REAL DEFAULT 0")
     ensure_column(conn, "vehicles", "market_price_high", "REAL DEFAULT 0")
@@ -816,6 +834,14 @@ def decode_vin(vin):
             "fuel_type_primary": _clean_text(result.get("FuelTypePrimary")),
             "series": _clean_text(result.get("Series")),
             "trim": _clean_text(result.get("Trim")),
+            "vehicle_type": _clean_text(result.get("VehicleType")),
+            "doors": _clean_text(result.get("Doors")),
+            "engine_model": _clean_text(result.get("EngineModel")),
+            "engine_power_kw": _clean_text(result.get("EngineKW")),
+            "plant_country": _clean_text(result.get("PlantCountry")),
+            "brake_system": _clean_text(result.get("BrakeSystemType")),
+            "turbo": _clean_text(result.get("Turbo")),
+            "electrification_level": _clean_text(result.get("ElectrificationLevel")),
             "raw": result,
         }
         error_text = _clean_text(result.get("ErrorText"))
@@ -1648,6 +1674,24 @@ def vehicle_duplicate_check():
     return jsonify({"matches": [dict(r) for r in rows]})
 
 
+
+@app.route("/vin-intelligence")
+@login_required
+def vin_intelligence_centre():
+    q = (request.args.get("q") or "").strip()
+    conn = db()
+    params = []
+    where = ""
+    if q:
+        like = f"%{q}%"
+        where = "WHERE stock_no LIKE ? OR vin LIKE ? OR registration LIKE ? OR make LIKE ? OR model LIKE ?"
+        params = [like] * 5
+    vehicles = conn.execute(f"""SELECT id,stock_no,year,make,model,variant,vin,registration,status,decoded_at,
+        manufacturer_name,engine_code,transmission_code,paint_code FROM vehicles {where} ORDER BY id DESC LIMIT 80""", params).fetchall()
+    conn.close()
+    return render_template("vin_intelligence_centre.html", vehicles=vehicles, q=q, vin_provider=VIN_DATA_PROVIDER_NAME, provider_name=WORKSHOP_PROVIDER_NAME)
+
+
 @app.route("/vehicles/<int:vehicle_id>/intelligence")
 @login_required
 def dealer_intelligence(vehicle_id):
@@ -1682,20 +1726,81 @@ def vehicle_decode_vin(vehicle_id):
         conn.execute("""
             UPDATE vehicles SET vin_decode_json=?,decoded_at=CURRENT_TIMESTAMP,manufacturer_name=?,body_class=?,drive_type=?,
                 transmission_style=?,engine_cylinders=?,engine_displacement_l=?,fuel_type_primary=?,decoded_model_year=?,decoded_series=?,decoded_trim=?,
+                vehicle_type_decoded=?,doors_decoded=?,engine_model_decoded=?,engine_power_kw_decoded=?,plant_country_decoded=?,
+                brake_system_decoded=?,turbo_decoded=?,electrification_level_decoded=?,
                 make=CASE WHEN COALESCE(make,'')='' THEN ? ELSE make END,
                 model=CASE WHEN COALESCE(model,'')='' THEN ? ELSE model END,
                 year=CASE WHEN year IS NULL OR year=0 THEN ? ELSE year END
             WHERE id=?
         """, (json.dumps(specs.get("raw", {})), specs.get("manufacturer_name"), specs.get("body_class"), specs.get("drive_type"),
               specs.get("transmission_style"), specs.get("engine_cylinders"), specs.get("engine_displacement_l"), specs.get("fuel_type_primary"),
-              specs.get("year"), specs.get("series"), specs.get("trim"), specs.get("make"), specs.get("model"), specs.get("year") or None, vehicle_id))
+              specs.get("year"), specs.get("series"), specs.get("trim"), specs.get("vehicle_type"), specs.get("doors"),
+              specs.get("engine_model"), specs.get("engine_power_kw"), specs.get("plant_country"), specs.get("brake_system"),
+              specs.get("turbo"), specs.get("electrification_level"), specs.get("make"), specs.get("model"), specs.get("year") or None, vehicle_id))
         conn.commit()
         log_action("VIN decoded", "vehicle", vehicle_id, f"VIN {vehicle['vin']}; provider specs saved")
         flash("VIN decoded and available specifications were saved." + (f" Note: {error}" if error else ""), "success")
     else:
         flash(error or "VIN could not be decoded.", "error")
     conn.close()
-    return redirect(url_for("dealer_intelligence", vehicle_id=vehicle_id))
+    target = request.form.get("return_to") or request.referrer or url_for("dealer_intelligence", vehicle_id=vehicle_id)
+    return redirect(target)
+
+
+@app.route("/vehicles/<int:vehicle_id>/vin-intelligence")
+@login_required
+def vin_intelligence(vehicle_id):
+    conn = db()
+    vehicle = conn.execute("SELECT * FROM vehicles WHERE id=?", (vehicle_id,)).fetchone()
+    if not vehicle:
+        conn.close(); return "Vehicle not found", 404
+    refs = conn.execute("SELECT * FROM workshop_references WHERE vehicle_id=? ORDER BY reference_type,title", (vehicle_id,)).fetchall()
+    operations = conn.execute("SELECT * FROM workshop_operations WHERE vehicle_id=? ORDER BY system_name,operation_name LIMIT 30", (vehicle_id,)).fetchall()
+    duplicates = duplicate_vehicle_matches(conn, vehicle["vin"], vehicle["registration"], vehicle["stock_no"], exclude_id=vehicle_id)
+    conn.close()
+    fields = [
+        vehicle["vin"], vehicle["make"], vehicle["model"], vehicle["year"], vehicle["manufacturer_name"],
+        vehicle["body_class"], vehicle["drive_type"], vehicle["transmission_style"], vehicle["engine_displacement_l"],
+        vehicle["fuel_type_primary"], vehicle["engine_code"], vehicle["transmission_code"], vehicle["paint_code"]
+    ]
+    completeness = round(sum(1 for x in fields if str(x or '').strip()) / len(fields) * 100)
+    manual_search_phrase = " ".join(str(x).strip() for x in [vehicle["year"], vehicle["make"], vehicle["model"], vehicle["variant"], vehicle["vin"], "workshop service repair manual"] if x)
+    return render_template("vin_intelligence.html", vehicle=vehicle, references=refs, operations=operations,
+                           duplicates=duplicates, completeness=completeness, provider_name=WORKSHOP_PROVIDER_NAME,
+                           provider_url=_workshop_provider_vehicle_url(vehicle), vin_provider=VIN_DATA_PROVIDER_NAME,
+                           manual_search_phrase=manual_search_phrase)
+
+
+@app.route("/vehicles/<int:vehicle_id>/vin-intelligence/specifications", methods=["POST"])
+@login_required
+def vin_intelligence_specifications_save(vehicle_id):
+    conn = db()
+    vehicle = conn.execute("SELECT * FROM vehicles WHERE id=?", (vehicle_id,)).fetchone()
+    if not vehicle:
+        conn.close(); return "Vehicle not found", 404
+    def optional_int(name):
+        raw = (request.form.get(name) or "").strip()
+        if not raw: return None
+        value = int(raw)
+        if value < 0: raise ValueError(f"{name} cannot be negative.")
+        return value
+    try:
+        conn.execute("""UPDATE vehicles SET paint_code=?,engine_code=?,transmission_code=?,option_codes=?,
+            service_interval_km=?,service_interval_months=?,technical_data_source=?,technical_notes=? WHERE id=?""", (
+            (request.form.get("paint_code") or "").strip() or None,
+            (request.form.get("engine_code") or "").strip() or None,
+            (request.form.get("transmission_code") or "").strip() or None,
+            (request.form.get("option_codes") or "").strip() or None,
+            optional_int("service_interval_km"), optional_int("service_interval_months"),
+            (request.form.get("technical_data_source") or "").strip() or None,
+            (request.form.get("technical_notes") or "").strip() or None, vehicle_id
+        ))
+        conn.commit(); conn.close()
+        log_action("Verified workshop specifications updated", "vehicle", vehicle_id, vehicle["stock_no"])
+        flash("Verified workshop specifications saved.", "success")
+    except (ValueError, sqlite3.Error) as exc:
+        conn.rollback(); conn.close(); flash(str(exc), "error")
+    return redirect(url_for("vin_intelligence", vehicle_id=vehicle_id))
 
 
 @app.route("/vehicles/<int:vehicle_id>/market-suggestion", methods=["POST"])

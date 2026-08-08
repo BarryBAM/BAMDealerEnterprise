@@ -1,0 +1,15 @@
+BAM Dealer Enterprise Cloud v24.2
+VIN Intelligence & Workshop Data Bridge
+
+Highlights
+- Dedicated VIN Intelligence Centre and per-vehicle VIN profile.
+- Expanded decoded specifications including vehicle type, doors, engine model/power, plant country, brake system, turbo and electrification level when returned by the configured decoder.
+- Workshop-verified fields for engine code, transmission code, paint code, build/option codes and service intervals.
+- Technical data source and technical notes tracking.
+- eManualOnline workshop-manual bridge retained with vehicle-specific search phrase and saved purchased manual links.
+- Links VIN identification, technical references and labour operations in one workspace.
+- Duplicate stock warning and specification completeness indicator.
+- Additive database migration only; existing v24.1 data is preserved.
+
+Safety / licensing
+VIN decoder results are reference information and may be incomplete for Australian or imported vehicles. BAM does not invent missing workshop specifications. Repair procedures, torque settings, wiring diagrams and labour data must be verified with your licensed provider or manufacturer information.

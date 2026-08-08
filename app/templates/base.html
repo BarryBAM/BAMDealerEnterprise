@@ -37,6 +37,7 @@
     <a href="{{ url_for('equipment_list') }}" class="tooling-nav {% if request.endpoint in ['equipment_list','equipment_new','equipment_detail','equipment_edit'] %}active{% endif %}">🔧 Tooling & Equipment</a>
     <a href="{{ url_for('vehicle_list') }}" class="{% if request.endpoint in ['vehicle_list','vehicle_detail'] %}active{% endif %}">🚗 Vehicle Inventory</a>
     <a href="{{ url_for('vehicle_new') }}" class="{% if request.endpoint=='vehicle_new' %}active{% endif %}">＋ Add New Vehicle</a>
+    <a href="{{ url_for('vin_intelligence_centre') }}" class="v242-vin-nav {% if request.endpoint in ['vin_intelligence_centre','vin_intelligence'] %}active{% endif %}">🔎 VIN Intelligence</a>
     <a href="{{ url_for('parts_page') }}" class="{% if request.endpoint in ['parts_page','part_detail','part_edit'] %}active{% endif %}">⚙ Parts Centre</a>
     <a href="{{ url_for('workshop_centre') }}" class="{% if request.endpoint in ['workshop_centre','workshop_intelligence'] %}active{% endif %}">🛠 Workshop Intelligence</a>
     <a href="{{ url_for('workshop_scheduler') }}" class="v241-scheduler-nav {% if request.endpoint in ['workshop_scheduler','workshop_booking_detail'] %}active{% endif %}">📅 Workshop Scheduler</a>

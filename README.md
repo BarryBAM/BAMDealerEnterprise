@@ -1,3 +1,7 @@
+# BAM Dealer Enterprise Cloud v24.2
+
+Version 24.2 adds the VIN Intelligence & Workshop Data Bridge, connecting decoded vehicle identity, verified workshop specifications, eManualOnline links, technical references and labour operations in one vehicle workspace.
+
 # BAM Dealer Enterprise v16.0
 
 One system for assets, parts, workshop, shipping, sales, tooling and business records.

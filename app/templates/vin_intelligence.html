@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}VIN Intelligence | {{ vehicle.stock_no }}{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div><p class="eyebrow">Version 24.2 • VIN Intelligence</p><h1>{{ vehicle.stock_no }} — {{ vehicle.year or vehicle.decoded_model_year or '' }} {{ vehicle.make }} {{ vehicle.model }}</h1><p>{{ vehicle.variant or '' }} • VIN {{ vehicle.vin or 'Not recorded' }}</p></div>
+  <div class="page-actions"><a class="button secondary" href="{{ url_for('vehicle_detail', vehicle_id=vehicle.id) }}">Back to Vehicle</a><a class="button secondary" href="{{ url_for('dealer_intelligence', vehicle_id=vehicle.id) }}">Dealer Intelligence</a><a class="button" href="{{ url_for('workshop_intelligence', vehicle_id=vehicle.id) }}">Workshop Intelligence</a></div>
+</div>
+<div class="kpi-grid command-primary-kpis">
+  <article class="kpi-card navy"><span>Specification Profile</span><strong>{{ completeness }}%</strong><small>Decoded + verified identity fields</small></article>
+  <article class="kpi-card teal"><span>VIN Decode</span><strong>{% if vehicle.decoded_at %}✓ Saved{% else %}Not Run{% endif %}</strong><small>{{ vin_provider }}</small></article>
+  <article class="kpi-card orange"><span>Duplicate Check</span><strong>{% if duplicates %}⚠ {{ duplicates|length }}{% else %}✓ Clear{% endif %}</strong><small>VIN / rego / stock</small></article>
+  <article class="kpi-card purple"><span>Workshop Provider</span><strong>{{ provider_name }}</strong><small>Licensed manual shortcut</small></article>
+</div>
+<div class="workspace-two-column">
+<section class="panel">
+  <div class="panel-title"><div><h2>Decoded Vehicle Specifications</h2><p>Automatically returned by {{ vin_provider }}.</p></div></div>
+  <table class="summary-table">
+    <tr><th>VIN</th><td>{{ vehicle.vin or '—' }}</td></tr><tr><th>Decoded</th><td>{{ vehicle.decoded_at or 'Not yet' }}</td></tr>
+    <tr><th>Manufacturer</th><td>{{ vehicle.manufacturer_name or '—' }}</td></tr><tr><th>Vehicle / Body</th><td>{{ vehicle.vehicle_type_decoded or '—' }} / {{ vehicle.body_class or '—' }}</td></tr>
+    <tr><th>Series / Trim</th><td>{{ vehicle.decoded_series or '—' }} {{ vehicle.decoded_trim or '' }}</td></tr><tr><th>Doors</th><td>{{ vehicle.doors_decoded or '—' }}</td></tr>
+    <tr><th>Drive</th><td>{{ vehicle.drive_type or '—' }}</td></tr><tr><th>Transmission</th><td>{{ vehicle.transmission_style or '—' }}</td></tr>
+    <tr><th>Engine</th><td>{{ vehicle.engine_model_decoded or vehicle.engine_model or '—' }}{% if vehicle.engine_displacement_l %} • {{ vehicle.engine_displacement_l }} L{% endif %}{% if vehicle.engine_cylinders %} • {{ vehicle.engine_cylinders }} cyl{% endif %}</td></tr>
+    <tr><th>Engine Power</th><td>{% if vehicle.engine_power_kw_decoded %}{{ vehicle.engine_power_kw_decoded }} kW{% else %}—{% endif %}</td></tr><tr><th>Fuel</th><td>{{ vehicle.fuel_type_primary or vehicle.fuel_type or '—' }}</td></tr>
+    <tr><th>Brake System</th><td>{{ vehicle.brake_system_decoded or '—' }}</td></tr><tr><th>Turbo / Electrification</th><td>{{ vehicle.turbo_decoded or '—' }} / {{ vehicle.electrification_level_decoded or '—' }}</td></tr>
+    <tr><th>Plant Country</th><td>{{ vehicle.plant_country_decoded or '—' }}</td></tr>
+  </table>
+  <form method="post" action="{{ url_for('vehicle_decode_vin', vehicle_id=vehicle.id) }}"><input type="hidden" name="return_to" value="{{ url_for('vin_intelligence', vehicle_id=vehicle.id) }}"><button {% if not vehicle.vin %}disabled{% endif %}>Decode / Refresh VIN Specifications</button></form>
+  <p class="muted">Some Australian, imported or older vehicles can return limited information from a VIN decoder. Record workshop-verified codes below rather than guessing missing values.</p>
+</section>
+<section class="panel emanual-panel">
+  <div class="section-head"><div><span class="eyebrow">Workshop Manual Bridge</span><h2>{{ provider_name }}</h2></div></div>
+  <p>Use your licensed manual for authoritative repair procedures, torque specifications, wiring information and any published labour information.</p>
+  <label>Vehicle manual search<input id="manualSearchPhrase" value="{{ manual_search_phrase }}" readonly></label>
+  <div class="page-actions"><a class="button" target="_blank" rel="noopener" href="{{ provider_url }}">Open {{ provider_name }}</a><button class="button secondary" type="button" onclick="navigator.clipboard.writeText(document.getElementById('manualSearchPhrase').value)">Copy Vehicle Search</button></div>
+  <form method="post" action="{{ url_for('emanual_link_add', vehicle_id=vehicle.id) }}" class="stack"><input name="title" value="{{ vehicle.year or '' }} {{ vehicle.make }} {{ vehicle.model }} Workshop Manual"><input type="url" name="reference_url" placeholder="Paste your purchased manual link" required><button>Save Manual Link to Vehicle</button></form>
+  <div class="notice"><strong>Important:</strong> BAM stores links and your own verified notes. It does not copy or redistribute licensed workshop-manual content.</div>
+</section>
+</div>
+<section class="panel">
+  <div class="panel-title"><div><h2>Verified Workshop Specifications</h2><p>Store codes and service information you have confirmed from the vehicle, manufacturer information or your licensed manual.</p></div></div>
+  <form method="post" action="{{ url_for('vin_intelligence_specifications_save', vehicle_id=vehicle.id) }}" class="grid-form">
+    <label>Engine Code<input name="engine_code" value="{{ vehicle.engine_code or '' }}" placeholder="Example: N14B16A"></label>
+    <label>Transmission Code<input name="transmission_code" value="{{ vehicle.transmission_code or '' }}"></label>
+    <label>Paint Code<input name="paint_code" value="{{ vehicle.paint_code or '' }}"></label>
+    <label>Data Source<input name="technical_data_source" value="{{ vehicle.technical_data_source or '' }}" placeholder="eManualOnline / manufacturer / vehicle label"></label>
+    <label>Service Interval (km)<input type="number" min="0" name="service_interval_km" value="{{ vehicle.service_interval_km or '' }}"></label>
+    <label>Service Interval (months)<input type="number" min="0" name="service_interval_months" value="{{ vehicle.service_interval_months or '' }}"></label>
+    <label class="wide">Option / Build Codes<textarea name="option_codes" placeholder="Factory option or build codes">{{ vehicle.option_codes or '' }}</textarea></label>
+    <label class="wide">Technical Notes<textarea name="technical_notes" placeholder="Verified specifications, fluids, known configuration notes or workshop references">{{ vehicle.technical_notes or '' }}</textarea></label>
+    <button class="wide">Save Verified Specifications</button>
+  </form>
+</section>
+<div class="workspace-two-column">
+<section class="panel"><h2>Technical References</h2><div class="table-wrap"><table><tr><th>Type</th><th>Reference</th><th>Provider</th></tr>{% for r in references %}<tr><td>{{ r.reference_type }}</td><td>{% if r.reference_url %}<a target="_blank" rel="noopener" href="{{ r.reference_url }}">{{ r.title }}</a>{% else %}{{ r.title }}{% endif %}</td><td>{{ r.provider_name or '—' }}</td></tr>{% else %}<tr><td colspan="3">No technical references saved yet. Add them in Workshop Intelligence.</td></tr>{% endfor %}</table></div><a class="button secondary" href="{{ url_for('workshop_intelligence', vehicle_id=vehicle.id) }}">Manage Technical References</a></section>
+<section class="panel"><h2>Labour Operations</h2><div class="table-wrap"><table><tr><th>System</th><th>Operation</th><th>Time</th></tr>{% for o in operations %}<tr><td>{{ o.system_name or '—' }}</td><td>{{ o.operation_name }}</td><td>{{ '%.2f'|format(o.labour_hours or 0) }} h</td></tr>{% else %}<tr><td colspan="3">No vehicle-specific labour operations recorded yet.</td></tr>{% endfor %}</table></div><a class="button" href="{{ url_for('workshop_intelligence', vehicle_id=vehicle.id) }}">Open Labour Library</a></section>
+</div>
+{% if duplicates %}<section class="panel"><h2>Possible Duplicate Stock</h2><div class="warning-box">{% for d in duplicates %}<p><a href="{{ url_for('vehicle_detail', vehicle_id=d.id) }}">{{ d.stock_no }} — {{ d.year or '' }} {{ d.make }} {{ d.model }}</a><br>VIN {{ d.vin or '—' }} • Rego {{ d.registration or '—' }}</p>{% endfor %}</div></section>{% endif %}
+{% endblock %}

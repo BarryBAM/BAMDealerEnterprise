@@ -9,6 +9,7 @@
   </div>
   <div class="page-actions"><a class="button secondary" href="{{ url_for('vehicle_timeline', vehicle_id=vehicle.id) }}">Timeline</a>
     <a class="button secondary" href="{{ url_for('dealer_intelligence', vehicle_id=vehicle.id) }}">🧠 Dealer Intelligence</a>
+    <a class="button secondary" href="{{ url_for('vin_intelligence', vehicle_id=vehicle.id) }}">🔎 VIN Intelligence</a>
     <a class="button secondary" href="{{ url_for('workshop_intelligence', vehicle_id=vehicle.id) }}">🛠 Workshop Intelligence</a>
     <span class="status">{{ vehicle.status }}</span>
     <a class="button" href="{{ url_for('vehicle_edit', vehicle_id=vehicle.id) }}">Edit Asset</a>
