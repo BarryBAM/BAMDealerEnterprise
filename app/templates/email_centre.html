@@ -2,7 +2,7 @@
 {% block title %}Email Centre | BAM Motor Group{% endblock %}
 {% block content %}
 <div class="page-head">
-  <div><p class="eyebrow">Version 24.4 • CRM Communications</p><h1>Email Centre</h1><p>Keep customer, supplier and workshop correspondence linked to BAM records.</p></div>
+  <div><p class="eyebrow">Version 24.6 • BAM Communications Centre</p><h1>Email Centre</h1>></div>
   <div class="page-actions"><a class="button secondary" href="{{ url_for('crm_centre') }}">CRM Centre</a>
     {% if email_webmail_url %}<a class="button" target="_blank" rel="noopener" href="{{ email_webmail_url }}">Open Webmail</a>{% endif %}
     {% if email_address %}<a class="button secondary" href="mailto:{{ email_address }}">Compose Email</a>{% endif %}
