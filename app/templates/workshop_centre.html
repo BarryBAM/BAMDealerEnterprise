@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Workshop Intelligence | BAM Motor Group{% endblock %}
 {% block content %}
-<div class="page-head"><div><p class="eyebrow">Version 23</p><h1>Workshop Intelligence</h1><p>VIN-led workshop workspace, labour-time library and job-card quoting.</p></div></div>
+<div class="page-head"><div><p class="eyebrow">Version 24.1</p><h1>Workshop Intelligence</h1><p>VIN-led workshop workspace, labour-time library and job-card quoting.</p></div><div class="page-actions"><a class="button" href="{{ url_for('workshop_scheduler') }}">📅 Open Workshop Scheduler</a></div></div>
 <section class="panel">
   <h2>Find a Vehicle</h2>
   <form method="get" class="search-row"><input name="q" value="{{ q }}" placeholder="VIN, stock number, registration, make or model"><button>Search</button></form>

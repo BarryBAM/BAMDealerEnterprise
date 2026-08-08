@@ -50,7 +50,7 @@ app.config.update(
     PERMANENT_SESSION_LIFETIME=timedelta(hours=int(os.environ.get("BAM_SESSION_HOURS", "12"))),
 )
 
-APP_VERSION = "24.0"
+APP_VERSION = "24.1"
 APP_NAME = "BAM Dealer Enterprise Cloud"
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "").strip()
 OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-5").strip() or "gpt-5"
@@ -600,6 +600,51 @@ def init_db():
             FOREIGN KEY(vehicle_id) REFERENCES vehicles(id) ON DELETE SET NULL,
             FOREIGN KEY(contact_id) REFERENCES contacts(id) ON DELETE SET NULL
         );
+    """)
+
+    # Version 24.1 - Professional Workshop Scheduler
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS workshop_bookings (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            vehicle_id INTEGER,
+            contact_id INTEGER,
+            booking_date TEXT NOT NULL,
+            start_time TEXT,
+            end_time TEXT,
+            technician TEXT,
+            bay TEXT,
+            job_type TEXT,
+            description TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'Booked',
+            quoted_hours REAL NOT NULL DEFAULT 0,
+            labour_rate REAL NOT NULL DEFAULT 0,
+            customer_name TEXT,
+            customer_phone TEXT,
+            notes TEXT,
+            job_card_id INTEGER,
+            created_by TEXT,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT,
+            FOREIGN KEY(vehicle_id) REFERENCES vehicles(id) ON DELETE SET NULL,
+            FOREIGN KEY(contact_id) REFERENCES contacts(id) ON DELETE SET NULL,
+            FOREIGN KEY(job_card_id) REFERENCES job_cards(id) ON DELETE SET NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS workshop_time_entries (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            booking_id INTEGER NOT NULL,
+            technician TEXT,
+            clock_in TEXT NOT NULL,
+            clock_out TEXT,
+            minutes INTEGER NOT NULL DEFAULT 0,
+            notes TEXT,
+            created_by TEXT,
+            FOREIGN KEY(booking_id) REFERENCES workshop_bookings(id) ON DELETE CASCADE
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_workshop_bookings_date ON workshop_bookings(booking_date);
+        CREATE INDEX IF NOT EXISTS idx_workshop_bookings_vehicle ON workshop_bookings(vehicle_id);
+        CREATE INDEX IF NOT EXISTS idx_workshop_time_booking ON workshop_time_entries(booking_id);
     """)
 
     count = conn.execute(
@@ -4834,6 +4879,234 @@ def executive_dashboard():
           "open_reminders":open_reminders,"draft_invoices":draft_invoices['c'],"draft_invoice_value":draft_invoices['value'],"unread_emails":unread_emails,"donor_count":donor_count}
     return render_template("executive_dashboard.html",kpis=kpis,top_donors=top_donors,aged_stock=aged_stock,
                            month_labels=[r['m'] for r in monthly],month_values=[float(r['vehicle_sales'] or 0)+float(r['parts_sales'] or 0) for r in monthly])
+
+
+# -----------------------------------------------------------------------------
+# Version 24.1 - Professional Workshop Scheduler
+# -----------------------------------------------------------------------------
+
+def _parse_iso_day(value, fallback=None):
+    try:
+        return datetime.strptime(value or "", "%Y-%m-%d").date()
+    except (TypeError, ValueError):
+        return fallback or date.today()
+
+
+def _workshop_bays():
+    raw = os.environ.get("BAM_WORKSHOP_BAYS", "Bay 1,Bay 2,Bay 3")
+    return [item.strip() for item in raw.split(",") if item.strip()]
+
+
+@app.route("/workshop-scheduler", methods=["GET", "POST"])
+@login_required
+def workshop_scheduler():
+    if request.method == "POST":
+        conn = db()
+        try:
+            booking_date = (request.form.get("booking_date") or "").strip()
+            description = (request.form.get("description") or "").strip()
+            if not booking_date:
+                raise ValueError("Booking date is required.")
+            _parse_iso_day(booking_date)
+            if not description:
+                raise ValueError("Enter the workshop work required.")
+            vehicle_id = int(request.form.get("vehicle_id")) if request.form.get("vehicle_id") else None
+            contact_id = int(request.form.get("contact_id")) if request.form.get("contact_id") else None
+            quoted_hours = max(0.0, float(request.form.get("quoted_hours") or 0))
+            labour_rate = max(0.0, float(request.form.get("labour_rate") or DEFAULT_LABOUR_RATE))
+            cur = conn.execute("""
+                INSERT INTO workshop_bookings(
+                    vehicle_id,contact_id,booking_date,start_time,end_time,technician,bay,job_type,description,
+                    status,quoted_hours,labour_rate,customer_name,customer_phone,notes,created_by,updated_at
+                ) VALUES(?,?,?,?,?,?,?,?,?,'Booked',?,?,?,?,?,?,?,?)
+            """, (
+                vehicle_id, contact_id, booking_date, request.form.get("start_time") or None,
+                request.form.get("end_time") or None, (request.form.get("technician") or "").strip() or None,
+                (request.form.get("bay") or "").strip() or None, (request.form.get("job_type") or "General").strip(),
+                description, quoted_hours, labour_rate, (request.form.get("customer_name") or "").strip() or None,
+                (request.form.get("customer_phone") or "").strip() or None, (request.form.get("notes") or "").strip() or None,
+                session.get("display_name"), datetime.now().isoformat(timespec="seconds")
+            ))
+            booking_id = cur.lastrowid
+            conn.commit()
+            log_action("Workshop booking created", "workshop_booking", booking_id, f"{booking_date} — {description}")
+            flash("Workshop booking created.", "success")
+            return redirect(url_for("workshop_booking_detail", booking_id=booking_id))
+        except (ValueError, sqlite3.Error) as exc:
+            conn.rollback(); flash(str(exc), "error")
+        finally:
+            conn.close()
+
+    selected = _parse_iso_day(request.args.get("date"), date.today())
+    week_start = selected - timedelta(days=selected.weekday())
+    week_days = [week_start + timedelta(days=i) for i in range(7)]
+    start_iso, end_iso = week_days[0].isoformat(), week_days[-1].isoformat()
+    conn = db()
+    rows = conn.execute("""
+        SELECT b.*,v.stock_no,v.year,v.make,v.model,v.registration,c.name AS contact_name
+        FROM workshop_bookings b
+        LEFT JOIN vehicles v ON v.id=b.vehicle_id
+        LEFT JOIN contacts c ON c.id=b.contact_id
+        WHERE b.booking_date BETWEEN ? AND ?
+        ORDER BY b.booking_date,COALESCE(b.start_time,'99:99'),b.id
+    """, (start_iso, end_iso)).fetchall()
+    vehicles = conn.execute("""
+        SELECT id,stock_no,year,make,model,registration FROM vehicles
+        WHERE status NOT IN ('Sold') ORDER BY stock_no
+    """).fetchall()
+    contacts = conn.execute("SELECT id,name,phone FROM contacts ORDER BY name").fetchall()
+    users = conn.execute("SELECT display_name FROM users WHERE is_active=1 ORDER BY display_name").fetchall()
+    today_iso = date.today().isoformat()
+    today_stats = conn.execute("""
+        SELECT COUNT(*) AS bookings,
+               COALESCE(SUM(quoted_hours),0) AS quoted_hours,
+               SUM(CASE WHEN status='Completed' THEN 1 ELSE 0 END) AS completed,
+               SUM(CASE WHEN status='In Progress' THEN 1 ELSE 0 END) AS in_progress
+        FROM workshop_bookings WHERE booking_date=?
+    """, (today_iso,)).fetchone()
+    open_timers = conn.execute("""
+        SELECT t.*,b.description,b.technician,b.bay,v.stock_no,v.make,v.model
+        FROM workshop_time_entries t
+        JOIN workshop_bookings b ON b.id=t.booking_id
+        LEFT JOIN vehicles v ON v.id=b.vehicle_id
+        WHERE t.clock_out IS NULL ORDER BY t.clock_in
+    """).fetchall()
+    conn.close()
+    by_day = {d.isoformat(): [] for d in week_days}
+    for row in rows:
+        by_day.setdefault(row["booking_date"], []).append(row)
+    prev_week=(week_start-timedelta(days=7)).isoformat(); next_week=(week_start+timedelta(days=7)).isoformat()
+    return render_template("workshop_scheduler.html", week_days=week_days, by_day=by_day, selected=selected,
+                           prev_week=prev_week, next_week=next_week, vehicles=vehicles, contacts=contacts,
+                           technicians=[r["display_name"] for r in users if r["display_name"]], bays=_workshop_bays(),
+                           default_labour_rate=DEFAULT_LABOUR_RATE, today_stats=today_stats, open_timers=open_timers,
+                           today_iso=today_iso)
+
+
+@app.route("/workshop-bookings/<int:booking_id>", methods=["GET", "POST"])
+@login_required
+def workshop_booking_detail(booking_id):
+    conn = db()
+    booking = conn.execute("""
+        SELECT b.*,v.stock_no,v.year,v.make,v.model,v.registration,v.vin,c.name AS contact_name
+        FROM workshop_bookings b
+        LEFT JOIN vehicles v ON v.id=b.vehicle_id
+        LEFT JOIN contacts c ON c.id=b.contact_id
+        WHERE b.id=?
+    """, (booking_id,)).fetchone()
+    if not booking:
+        conn.close(); return "Workshop booking not found", 404
+    if request.method == "POST":
+        try:
+            quoted_hours=max(0.0,float(request.form.get("quoted_hours") or 0))
+            labour_rate=max(0.0,float(request.form.get("labour_rate") or DEFAULT_LABOUR_RATE))
+            status=request.form.get("status") or "Booked"
+            allowed={"Booked","Checked In","In Progress","Waiting Parts","Ready","Completed","Cancelled"}
+            if status not in allowed: raise ValueError("Invalid workshop status.")
+            conn.execute("""
+                UPDATE workshop_bookings SET booking_date=?,start_time=?,end_time=?,technician=?,bay=?,job_type=?,description=?,
+                    status=?,quoted_hours=?,labour_rate=?,customer_name=?,customer_phone=?,notes=?,updated_at=? WHERE id=?
+            """, (request.form.get("booking_date") or booking["booking_date"],request.form.get("start_time") or None,
+                  request.form.get("end_time") or None,(request.form.get("technician") or "").strip() or None,
+                  (request.form.get("bay") or "").strip() or None,request.form.get("job_type") or "General",
+                  (request.form.get("description") or "").strip() or booking["description"],status,quoted_hours,labour_rate,
+                  (request.form.get("customer_name") or "").strip() or None,(request.form.get("customer_phone") or "").strip() or None,
+                  (request.form.get("notes") or "").strip() or None,datetime.now().isoformat(timespec="seconds"),booking_id))
+            conn.commit(); log_action("Workshop booking updated","workshop_booking",booking_id,status)
+            flash("Workshop booking updated.","success")
+            return redirect(url_for("workshop_booking_detail",booking_id=booking_id))
+        except (ValueError,sqlite3.Error) as exc:
+            conn.rollback(); flash(str(exc),"error")
+    time_entries=conn.execute("SELECT * FROM workshop_time_entries WHERE booking_id=? ORDER BY clock_in DESC,id DESC",(booking_id,)).fetchall()
+    total_minutes=sum(int(r["minutes"] or 0) for r in time_entries)
+    open_timer=next((r for r in time_entries if not r["clock_out"]),None)
+    conn.close()
+    return render_template("workshop_booking.html",booking=booking,time_entries=time_entries,total_minutes=total_minutes,
+                           open_timer=open_timer,bays=_workshop_bays(),default_labour_rate=DEFAULT_LABOUR_RATE)
+
+
+@app.post("/workshop-bookings/<int:booking_id>/clock-in")
+@login_required
+def workshop_booking_clock_in(booking_id):
+    conn=db()
+    try:
+        booking=conn.execute("SELECT * FROM workshop_bookings WHERE id=?",(booking_id,)).fetchone()
+        if not booking: return "Workshop booking not found",404
+        existing=conn.execute("SELECT id FROM workshop_time_entries WHERE booking_id=? AND clock_out IS NULL",(booking_id,)).fetchone()
+        if existing: raise ValueError("This booking already has an active timer.")
+        tech=(request.form.get("technician") or booking["technician"] or session.get("display_name") or "Technician").strip()
+        now=datetime.now().isoformat(timespec="seconds")
+        conn.execute("INSERT INTO workshop_time_entries(booking_id,technician,clock_in,notes,created_by) VALUES(?,?,?,?,?)",
+                     (booking_id,tech,now,request.form.get("notes"),session.get("display_name")))
+        conn.execute("UPDATE workshop_bookings SET technician=COALESCE(technician,?),status='In Progress',updated_at=? WHERE id=?",(tech,now,booking_id))
+        conn.commit(); log_action("Workshop timer started","workshop_booking",booking_id,tech); flash(f"Clocked on: {tech}.","success")
+    except (ValueError,sqlite3.Error) as exc:
+        conn.rollback(); flash(str(exc),"error")
+    finally: conn.close()
+    return redirect(request.referrer or url_for("workshop_booking_detail",booking_id=booking_id))
+
+
+@app.post("/workshop-bookings/<int:booking_id>/clock-out")
+@login_required
+def workshop_booking_clock_out(booking_id):
+    conn=db()
+    try:
+        entry=conn.execute("SELECT * FROM workshop_time_entries WHERE booking_id=? AND clock_out IS NULL ORDER BY id DESC LIMIT 1",(booking_id,)).fetchone()
+        if not entry: raise ValueError("There is no active timer for this booking.")
+        out=datetime.now(); started=datetime.fromisoformat(entry["clock_in"])
+        minutes=max(0,int(round((out-started).total_seconds()/60)))
+        conn.execute("UPDATE workshop_time_entries SET clock_out=?,minutes=? WHERE id=?",(out.isoformat(timespec="seconds"),minutes,entry["id"]))
+        if request.form.get("complete") == "1":
+            conn.execute("UPDATE workshop_bookings SET status='Completed',updated_at=? WHERE id=?",(out.isoformat(timespec="seconds"),booking_id))
+        conn.commit(); log_action("Workshop timer stopped","workshop_booking",booking_id,f"{minutes} minutes"); flash(f"Clocked off — {minutes} minutes recorded.","success")
+    except (ValueError,sqlite3.Error) as exc:
+        conn.rollback(); flash(str(exc),"error")
+    finally: conn.close()
+    return redirect(request.referrer or url_for("workshop_booking_detail",booking_id=booking_id))
+
+
+@app.post("/workshop-bookings/<int:booking_id>/create-job-card")
+@login_required
+def workshop_booking_create_job(booking_id):
+    conn=db()
+    try:
+        b=conn.execute("SELECT * FROM workshop_bookings WHERE id=?",(booking_id,)).fetchone()
+        if not b: return "Workshop booking not found",404
+        if not b["vehicle_id"]: raise ValueError("Link a vehicle to this booking before creating a job card.")
+        if b["job_card_id"]:
+            flash(f"This booking is already linked to job card #{b['job_card_id']}.","error")
+            return redirect(url_for("job_card_edit",job_id=b["job_card_id"]))
+        hours=float(b["quoted_hours"] or 0); rate=float(b["labour_rate"] or DEFAULT_LABOUR_RATE); estimate=round(hours*rate,2)
+        cur=conn.execute("""
+            INSERT INTO job_cards(vehicle_id,job_date,category,description,supplier,paid_by,estimated_cost,actual_cost_inc_gst,gst_amount,status,notes,labour_hours,labour_rate,labour_source)
+            VALUES(?,?,?,?,?,?,?,?,?,'Open',?,?,?,?)
+        """,(b["vehicle_id"],b["booking_date"],b["job_type"] or "Workshop",b["description"],"","Business",estimate,0,0,b["notes"],hours,rate,"Workshop Scheduler"))
+        job_id=cur.lastrowid
+        conn.execute("INSERT INTO job_card_history(job_card_id,old_status,new_status,changed_by,note) VALUES(?,?,?,?,?)",
+                     (job_id,None,"Open",session.get("display_name"),f"Created from workshop booking #{booking_id}"))
+        conn.execute("UPDATE workshop_bookings SET job_card_id=?,updated_at=? WHERE id=?",(job_id,datetime.now().isoformat(timespec="seconds"),booking_id))
+        conn.commit(); log_action("Workshop booking converted to job card","workshop_booking",booking_id,f"Job #{job_id}")
+        flash(f"Job card #{job_id} created.","success"); return redirect(url_for("job_card_edit",job_id=job_id))
+    except (ValueError,sqlite3.Error) as exc:
+        conn.rollback(); flash(str(exc),"error")
+    finally: conn.close()
+    return redirect(url_for("workshop_booking_detail",booking_id=booking_id))
+
+
+@app.post("/workshop-bookings/<int:booking_id>/delete")
+@login_required
+def workshop_booking_delete(booking_id):
+    conn=db()
+    try:
+        b=conn.execute("SELECT * FROM workshop_bookings WHERE id=?",(booking_id,)).fetchone()
+        if not b: return "Workshop booking not found",404
+        if b["job_card_id"]: raise ValueError("This booking is linked to a job card. Cancel it instead of deleting it.")
+        conn.execute("DELETE FROM workshop_bookings WHERE id=?",(booking_id,)); conn.commit()
+        log_action("Workshop booking deleted","workshop_booking",booking_id,b["description"]); flash("Workshop booking deleted.","success")
+    except (ValueError,sqlite3.Error) as exc:
+        conn.rollback(); flash(str(exc),"error")
+    finally: conn.close()
+    return redirect(url_for("workshop_scheduler"))
 
 @app.route("/parts/<int:part_id>/label")
 @login_required

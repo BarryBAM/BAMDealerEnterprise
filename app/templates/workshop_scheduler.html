@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}Workshop Scheduler | BAM Motor Group{% endblock %}
+{% block content %}
+<div class="page-head"><div><p class="eyebrow">Version 24.1</p><h1>Workshop Scheduler</h1><p>Bookings, workshop bays, technician allocation and live labour timers.</p></div><div class="page-actions"><a class="button secondary" href="{{ url_for('workshop_centre') }}">Workshop Intelligence</a></div></div>
+
+<div class="scheduler-kpis">
+  <article><span>Today's Bookings</span><strong>{{ today_stats.bookings or 0 }}</strong></article>
+  <article><span>Quoted Hours</span><strong>{{ '%.1f'|format(today_stats.quoted_hours or 0) }} h</strong></article>
+  <article><span>In Progress</span><strong>{{ today_stats.in_progress or 0 }}</strong></article>
+  <article><span>Completed Today</span><strong>{{ today_stats.completed or 0 }}</strong></article>
+</div>
+
+{% if open_timers %}<section class="panel live-timers"><div class="panel-title"><div><h2>⏱ Live Workshop Timers</h2><p>Technicians currently clocked onto work.</p></div></div><div class="timer-grid">{% for t in open_timers %}<a href="{{ url_for('workshop_booking_detail',booking_id=t.booking_id) }}"><strong>{{ t.technician or 'Technician' }}</strong><span>{{ t.stock_no or 'No vehicle' }} — {{ t.description }}</span><small>{{ t.clock_in|replace('T',' ') }} · {{ t.bay or 'No bay' }}</small></a>{% endfor %}</div></section>{% endif %}
+
+<section class="panel scheduler-new"><div class="panel-title"><div><h2>New Workshop Booking</h2><p>Book a vehicle, allocate a technician and reserve a bay.</p></div></div>
+<form method="post" class="scheduler-form">
+  <label>Date<input type="date" name="booking_date" value="{{ selected.isoformat() }}" required></label>
+  <label>Start<input type="time" name="start_time"></label><label>Finish<input type="time" name="end_time"></label>
+  <label>Vehicle<select name="vehicle_id"><option value="">Customer / unallocated</option>{% for v in vehicles %}<option value="{{ v.id }}">{{ v.stock_no }} — {{ v.year or '' }} {{ v.make }} {{ v.model }}</option>{% endfor %}</select></label>
+  <label>Technician<select name="technician"><option value="">Unallocated</option>{% for name in technicians %}<option>{{ name }}</option>{% endfor %}</select></label>
+  <label>Bay<select name="bay"><option value="">Unallocated</option>{% for bay in bays %}<option>{{ bay }}</option>{% endfor %}</select></label>
+  <label>Job Type<select name="job_type"><option>General</option><option>Service</option><option>Mechanical</option><option>Electrical</option><option>Diagnosis</option><option>Tyres / Brakes</option><option>Roadworthy</option><option>Dismantling</option></select></label>
+  <label>Quoted Hours<input type="number" step="0.1" min="0" name="quoted_hours" value="0"></label>
+  <label>Labour Rate<input type="number" step="0.01" min="0" name="labour_rate" value="{{ default_labour_rate }}"></label>
+  <label>Customer<select name="contact_id"><option value="">Not linked</option>{% for c in contacts %}<option value="{{ c.id }}">{{ c.name }}{% if c.phone %} — {{ c.phone }}{% endif %}</option>{% endfor %}</select></label>
+  <label>Customer Name<input name="customer_name"></label><label>Phone<input name="customer_phone"></label>
+  <label class="wide">Work Required<textarea name="description" rows="2" required placeholder="Service, diagnosis, repair or work requested"></textarea></label>
+  <label class="wide">Notes<textarea name="notes" rows="2"></textarea></label>
+  <div class="wide"><button type="submit">Create Booking</button></div>
+</form></section>
+
+<section class="panel"><div class="scheduler-week-head"><a class="button secondary" href="{{ url_for('workshop_scheduler',date=prev_week) }}">← Previous Week</a><div><h2>Week of {{ week_days[0].strftime('%d %b %Y') }}</h2><a href="{{ url_for('workshop_scheduler',date=today_iso) }}">Jump to today</a></div><a class="button secondary" href="{{ url_for('workshop_scheduler',date=next_week) }}">Next Week →</a></div>
+<div class="week-board">{% for day in week_days %}<div class="workshop-day {% if day.isoformat()==today_iso %}today{% endif %}"><div class="day-head"><strong>{{ day.strftime('%a') }}</strong><span>{{ day.strftime('%d %b') }}</span><em>{{ by_day[day.isoformat()]|length }} job{% if by_day[day.isoformat()]|length != 1 %}s{% endif %}</em></div><div class="day-bookings">{% for b in by_day[day.isoformat()] %}<a class="booking-card status-{{ (b.status or 'Booked')|lower|replace(' ','-') }}" href="{{ url_for('workshop_booking_detail',booking_id=b.id) }}"><div><b>{{ b.start_time or 'Any time' }}</b><span>{{ b.status }}</span></div><strong>{{ b.stock_no or b.customer_name or 'Workshop Booking' }}</strong><small>{{ b.year or '' }} {{ b.make or '' }} {{ b.model or '' }}</small><p>{{ b.description }}</p><footer>{{ b.technician or 'Unallocated' }}{% if b.bay %} · {{ b.bay }}{% endif %}{% if b.quoted_hours %} · {{ '%.1f'|format(b.quoted_hours) }} h{% endif %}</footer></a>{% else %}<p class="empty-day">No bookings</p>{% endfor %}</div></div>{% endfor %}</div></section>
+{% endblock %}

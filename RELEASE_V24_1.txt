@@ -1,0 +1,18 @@
+BAM Dealer Enterprise Cloud v24.1
+Professional Workshop Scheduler
+
+New in this release:
+- Weekly workshop scheduling board
+- Workshop bay allocation
+- Technician allocation
+- Customer and vehicle booking links
+- Quoted labour hours and labour rate
+- Live technician clock-on / clock-off timers
+- Actual labour time history
+- Booking status workflow
+- Convert workshop booking directly to job card
+- Mobile-friendly scheduler layout
+- Additive database migration; existing BAM data is preserved
+
+Optional Azure setting:
+BAM_WORKSHOP_BAYS=Bay 1,Bay 2,Bay 3
