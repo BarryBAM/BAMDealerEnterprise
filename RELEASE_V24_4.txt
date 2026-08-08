@@ -1,0 +1,18 @@
+BAM Dealer Enterprise v24.4 — CRM + Communications
+
+New in this release
+- CRM Centre for customers, leads and VIP customers
+- Customer files with purchase history, email history and activity timeline
+- Follow-up dates and due follow-up dashboard
+- Lead source, tags, company and preferred-contact fields
+- Log phone calls, emails, enquiries, quotes, visits and notes
+- Optional BAM reminder creation from CRM activities
+- Convert a saved Email Centre message directly into a CRM follow-up
+- Direct links between Email Centre and customer files
+- Existing vehicle, parts, workshop, VIN intelligence and financial data preserved
+
+Database upgrade
+- Additive contact columns only
+- New crm_activities table
+- Additive Email Centre metadata columns
+- No live SQLite database included in the release ZIP

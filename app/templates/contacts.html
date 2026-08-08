@@ -2,17 +2,23 @@
 {% extends "base.html" %}
 {% block title %}Contacts | BAM Motor Group{% endblock %}
 {% block content %}
-<h1>Customers, Sellers and Suppliers</h1>
+<div class="page-head"><div><p class="eyebrow">Version 24.4 • CRM</p><h1>Customers, Sellers and Suppliers</h1><p>Create contacts here, then manage follow-ups and purchase history in CRM Centre.</p></div><div class="page-actions"><a class="button" href="{{ url_for('crm_centre') }}">Open CRM Centre</a></div></div>
 <div class="dashboard-grid">
 <section>
 <h2>Add Contact</h2>
 <form method="post" class="stack">
 <select name="contact_type"><option>Buyer</option><option>Seller</option><option>Supplier</option><option>Repairer</option><option>Both</option></select>
-<input name="name" placeholder="Name or business" required>
+<input name="name" placeholder="Name" required>
+<input name="company" placeholder="Company / business">
 <input name="phone" placeholder="Phone">
 <input type="email" name="email" placeholder="Email">
 <textarea name="address" placeholder="Address"></textarea>
 <input name="licence_no" placeholder="Licence number">
+<select name="crm_status"><option>Active</option><option>Lead</option><option>VIP</option><option>Inactive</option></select>
+<input name="source" placeholder="Lead source (Facebook, Referral, Website...)">
+<input name="tags" placeholder="Tags (MINI, Parts Buyer, Workshop...)">
+<select name="preferred_contact"><option value="">Preferred contact</option><option>Phone</option><option>Email</option><option>SMS</option></select>
+<input type="date" name="next_follow_up_date" title="Next follow-up">
 <textarea name="notes" placeholder="Notes"></textarea>
 <button>Save Contact</button>
 </form>
@@ -21,10 +27,10 @@
 <h2>Contact Register</h2>
 <form class="search" method="get"><input name="q" value="{{ q }}" placeholder="Search name, phone, email or type"><button>Search</button></form>
 <table>
-<tr><th>Type</th><th>Name</th><th>Phone</th><th>Email</th><th>Address</th></tr>
+<tr><th>Type</th><th>Name</th><th>CRM</th><th>Phone</th><th>Email</th><th>Follow-up</th><th></th></tr>
 {% for c in contacts %}
-<tr><td>{{ c.contact_type or '' }}</td><td>{{ c.name }}</td><td>{{ c.phone or '' }}</td><td>{{ c.email or '' }}</td><td>{{ c.address or '' }}</td></tr>
-{% else %}<tr><td colspan="5">No contacts yet.</td></tr>{% endfor %}
+<tr><td>{{ c.contact_type or '' }}</td><td><strong>{{ c.name }}</strong>{% if c.company %}<small>{{ c.company }}</small>{% endif %}</td><td><span class="status-pill">{{ c.crm_status or 'Active' }}</span></td><td>{{ c.phone or '' }}</td><td>{{ c.email or '' }}</td><td>{{ c.next_follow_up_date or '—' }}</td><td><a class="small-button" href="{{ url_for('crm_contact_detail', contact_id=c.id) }}">Open CRM</a></td></tr>
+{% else %}<tr><td colspan="7">No contacts yet.</td></tr>{% endfor %}
 </table>
 </section>
 </div>

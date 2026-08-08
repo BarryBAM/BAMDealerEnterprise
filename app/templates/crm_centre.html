@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}CRM Centre | BAM Motor Group{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div><p class="eyebrow">Version 24.4 • Customer Relationship Management</p><h1>CRM Centre</h1><p>Customers, leads, purchase history, email follow-ups and next actions in one place.</p></div>
+  <div class="page-actions"><a class="button" href="{{ url_for('contacts_page') }}">+ Add Contact</a><a class="button secondary" href="{{ url_for('email_centre') }}">Email Centre</a></div>
+</div>
+<div class="mini-kpi-grid">
+  <article><span>Total Contacts</span><strong>{{ metrics.total or 0 }}</strong></article>
+  <article><span>Leads</span><strong>{{ metrics.leads or 0 }}</strong></article>
+  <article><span>Follow-ups Due</span><strong>{{ metrics.due or 0 }}</strong></article>
+  <article><span>VIP Customers</span><strong>{{ metrics.vip or 0 }}</strong></article>
+</div>
+{% if due %}<section class="panel"><div class="panel-title"><div><h2>Follow-ups Due</h2><p>Customers needing attention today or earlier.</p></div></div><div class="table-wrap"><table><tr><th>Due</th><th>Customer</th><th>Phone</th><th>Email</th><th>Status</th><th></th></tr>{% for c in due %}<tr><td>{{ c.next_follow_up_date }}</td><td><strong>{{ c.name }}</strong>{% if c.company %}<small>{{ c.company }}</small>{% endif %}</td><td>{{ c.phone or '—' }}</td><td>{{ c.email or '—' }}</td><td><span class="status-pill">{{ c.crm_status or 'Active' }}</span></td><td><a class="small-button" href="{{ url_for('crm_contact_detail', contact_id=c.id) }}">Open</a></td></tr>{% endfor %}</table></div></section>{% endif %}
+<section class="panel">
+  <div class="panel-title"><div><h2>Customer & Lead Register</h2><p>Search by customer, company, phone, email or tag.</p></div></div>
+  <form method="get" class="filter-row"><input name="q" value="{{ q }}" placeholder="Search customers, companies, phone, email, tags..."><select name="status"><option value="">All CRM statuses</option>{% for st in ['Lead','Active','VIP','Inactive'] %}<option value="{{ st }}" {% if status_filter==st %}selected{% endif %}>{{ st }}</option>{% endfor %}</select><button>Search</button></form>
+  <div class="table-wrap"><table><tr><th>Customer</th><th>Status</th><th>Contact</th><th>Purchases</th><th>Total Spend</th><th>Emails</th><th>Next Follow-up</th><th></th></tr>
+    {% for c in contacts %}<tr><td><strong>{{ c.name }}</strong>{% if c.company %}<small>{{ c.company }}</small>{% endif %}{% if c.tags %}<small>{{ c.tags }}</small>{% endif %}</td><td><span class="status-pill">{{ c.crm_status or 'Active' }}</span></td><td>{{ c.phone or '' }}<br>{{ c.email or '' }}</td><td>{{ c.purchase_count }}</td><td>{{ c.total_spend|money }}</td><td>{{ c.email_count }}</td><td>{{ c.next_follow_up_date or '—' }}</td><td><a class="small-button" href="{{ url_for('crm_contact_detail', contact_id=c.id) }}">Customer File</a></td></tr>{% else %}<tr><td colspan="8">No contacts match this filter.</td></tr>{% endfor %}
+  </table></div>
+</section>
+{% endblock %}

@@ -56,7 +56,7 @@ app.config.update(
     PERMANENT_SESSION_LIFETIME=timedelta(hours=int(os.environ.get("BAM_SESSION_HOURS", "12"))),
 )
 
-APP_VERSION = "24.3"
+APP_VERSION = "24.4"
 APP_NAME = "BAM Dealer Enterprise Cloud"
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "").strip()
 OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-5").strip() or "gpt-5"
@@ -648,6 +648,40 @@ def init_db():
             FOREIGN KEY(contact_id) REFERENCES contacts(id) ON DELETE SET NULL
         );
     """)
+
+    # Version 24.4 - CRM + Communications Centre
+    ensure_column(conn, "contacts", "company", "TEXT")
+    ensure_column(conn, "contacts", "crm_status", "TEXT DEFAULT 'Active'")
+    ensure_column(conn, "contacts", "source", "TEXT")
+    ensure_column(conn, "contacts", "tags", "TEXT")
+    ensure_column(conn, "contacts", "preferred_contact", "TEXT")
+    ensure_column(conn, "contacts", "last_contact_date", "TEXT")
+    ensure_column(conn, "contacts", "next_follow_up_date", "TEXT")
+    ensure_column(conn, "contacts", "updated_at", "TEXT")
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS crm_activities (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            contact_id INTEGER NOT NULL,
+            vehicle_id INTEGER,
+            email_message_id INTEGER,
+            activity_date TEXT NOT NULL,
+            activity_type TEXT NOT NULL,
+            subject TEXT NOT NULL,
+            notes TEXT,
+            outcome TEXT,
+            follow_up_date TEXT,
+            created_by TEXT,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(contact_id) REFERENCES contacts(id) ON DELETE CASCADE,
+            FOREIGN KEY(vehicle_id) REFERENCES vehicles(id) ON DELETE SET NULL,
+            FOREIGN KEY(email_message_id) REFERENCES email_messages(id) ON DELETE SET NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_crm_activity_contact ON crm_activities(contact_id);
+        CREATE INDEX IF NOT EXISTS idx_crm_activity_followup ON crm_activities(follow_up_date);
+    """)
+    ensure_column(conn, "email_messages", "priority", "TEXT DEFAULT 'Normal'")
+    ensure_column(conn, "email_messages", "category", "TEXT")
+    ensure_column(conn, "email_messages", "assigned_to", "TEXT")
 
     # Version 24.1 - Professional Workshop Scheduler
     conn.executescript("""
@@ -2563,15 +2597,21 @@ def contacts_page():
     conn = db()
     if request.method == "POST":
         conn.execute("""
-            INSERT INTO contacts(contact_type,name,phone,email,address,licence_no,notes)
-            VALUES(?,?,?,?,?,?,?)
+            INSERT INTO contacts(contact_type,name,company,phone,email,address,licence_no,crm_status,source,tags,preferred_contact,next_follow_up_date,notes)
+            VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)
         """, (
             request.form.get("contact_type"),
             request.form.get("name"),
+            request.form.get("company"),
             request.form.get("phone"),
             request.form.get("email"),
             request.form.get("address"),
             request.form.get("licence_no"),
+            request.form.get("crm_status") or "Active",
+            request.form.get("source"),
+            request.form.get("tags"),
+            request.form.get("preferred_contact"),
+            request.form.get("next_follow_up_date"),
             request.form.get("notes"),
         ))
         conn.commit()
@@ -5462,6 +5502,125 @@ def money(value):
         return f"${float(value or 0):,.2f}"
     except Exception:
         return "$0.00"
+
+
+
+# ---------------- Version 24.4: CRM + Communications ----------------
+
+def _contact_purchase_summary(conn, contact):
+    email=(contact["email"] or "").strip()
+    phone=(contact["phone"] or "").strip()
+    vehicle_rows=[]; part_rows=[]
+    if email or phone:
+        clauses=[]; params=[]
+        if email:
+            clauses.append("LOWER(TRIM(COALESCE(s.buyer_email,'')))=LOWER(TRIM(?))")
+            params.append(email)
+        digits=''.join(ch for ch in phone if ch.isdigit())
+        if digits:
+            clauses.append("REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(s.buyer_phone,''),' ',''),'-',''),'(',''),')','') LIKE ?")
+            params.append('%'+digits[-8:]+'%')
+        if clauses:
+            vehicle_rows=conn.execute(f"""
+                SELECT 'Vehicle' purchase_type,s.sale_date purchase_date,s.sale_price_inc_gst amount,s.invoice_number,
+                       v.id vehicle_id,v.stock_no item_no,(COALESCE(v.year,'') || ' ' || v.make || ' ' || v.model) item_name
+                FROM sales s JOIN vehicles v ON v.id=s.vehicle_id
+                WHERE {' OR '.join(clauses)} ORDER BY s.sale_date DESC
+            """, params).fetchall()
+        clauses=[]; params=[]
+        if email:
+            clauses.append("LOWER(TRIM(COALESCE(ps.customer_email,'')))=LOWER(TRIM(?))")
+            params.append(email)
+        if digits:
+            clauses.append("REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(ps.customer_phone,''),' ',''),'-',''),'(',''),')','') LIKE ?")
+            params.append('%'+digits[-8:]+'%')
+        if clauses:
+            part_rows=conn.execute(f"""
+                SELECT 'Part' purchase_type,ps.sale_date purchase_date,ps.sale_price amount,ps.invoice_number,
+                       p.vehicle_id,p.part_number item_no,p.part_name item_name
+                FROM part_sales ps JOIN parts p ON p.id=ps.part_id
+                WHERE {' OR '.join(clauses)} ORDER BY ps.sale_date DESC
+            """, params).fetchall()
+    rows=[dict(r) for r in vehicle_rows]+[dict(r) for r in part_rows]
+    rows.sort(key=lambda x: str(x.get('purchase_date') or ''), reverse=True)
+    total=sum(float(r.get('amount') or 0) for r in rows)
+    return rows,total
+
+
+@app.route("/crm")
+@login_required
+def crm_centre():
+    conn=db(); q=request.args.get("q","").strip(); status=request.args.get("status","").strip(); today=date.today().isoformat()
+    where=[]; params=[]
+    if q:
+        pat=f"%{q}%"; where.append("(name LIKE ? OR phone LIKE ? OR email LIKE ? OR company LIKE ? OR tags LIKE ?)"); params += [pat]*5
+    if status:
+        where.append("crm_status=?"); params.append(status)
+    sql="SELECT * FROM contacts" + (" WHERE "+" AND ".join(where) if where else "") + " ORDER BY COALESCE(next_follow_up_date,'9999-12-31'), name"
+    contacts=[dict(r) for r in conn.execute(sql,params).fetchall()]
+    for c in contacts:
+        tx,total=_contact_purchase_summary(conn,c); c['purchase_count']=len(tx); c['total_spend']=total
+        c['email_count']=conn.execute("SELECT COUNT(*) c FROM email_messages WHERE contact_id=?",(c['id'],)).fetchone()['c']
+    metrics={
+        'total':conn.execute("SELECT COUNT(*) c FROM contacts").fetchone()['c'],
+        'leads':conn.execute("SELECT COUNT(*) c FROM contacts WHERE crm_status='Lead'").fetchone()['c'],
+        'due':conn.execute("SELECT COUNT(*) c FROM contacts WHERE COALESCE(next_follow_up_date,'')<>'' AND next_follow_up_date<=? AND crm_status<>'Inactive'",(today,)).fetchone()['c'],
+        'vip':conn.execute("SELECT COUNT(*) c FROM contacts WHERE crm_status='VIP'").fetchone()['c'],
+    }
+    due=conn.execute("SELECT * FROM contacts WHERE COALESCE(next_follow_up_date,'')<>'' AND next_follow_up_date<=? AND crm_status<>'Inactive' ORDER BY next_follow_up_date LIMIT 12",(today,)).fetchall()
+    conn.close(); return render_template('crm_centre.html',contacts=contacts,metrics=metrics,due=due,q=q,status_filter=status,today=today)
+
+
+@app.route("/crm/contact/<int:contact_id>", methods=["GET","POST"])
+@login_required
+def crm_contact_detail(contact_id):
+    conn=db(); contact=conn.execute("SELECT * FROM contacts WHERE id=?",(contact_id,)).fetchone()
+    if not contact: conn.close(); return "Contact not found",404
+    if request.method=='POST':
+        action=request.form.get('action','activity')
+        try:
+            if action=='profile':
+                conn.execute("""UPDATE contacts SET contact_type=?,name=?,company=?,phone=?,email=?,address=?,licence_no=?,crm_status=?,source=?,tags=?,preferred_contact=?,next_follow_up_date=?,notes=?,updated_at=CURRENT_TIMESTAMP WHERE id=?""",(
+                    request.form.get('contact_type'),request.form.get('name'),request.form.get('company'),request.form.get('phone'),request.form.get('email'),request.form.get('address'),request.form.get('licence_no'),request.form.get('crm_status') or 'Active',request.form.get('source'),request.form.get('tags'),request.form.get('preferred_contact'),request.form.get('next_follow_up_date'),request.form.get('notes'),contact_id))
+                flash('Customer profile updated.','success')
+            else:
+                act_date=request.form.get('activity_date') or date.today().isoformat(); follow=request.form.get('follow_up_date') or None
+                conn.execute("""INSERT INTO crm_activities(contact_id,vehicle_id,activity_date,activity_type,subject,notes,outcome,follow_up_date,created_by) VALUES(?,?,?,?,?,?,?,?,?)""",(
+                    contact_id,int(request.form.get('vehicle_id')) if request.form.get('vehicle_id') else None,act_date,request.form.get('activity_type') or 'Note',request.form.get('subject') or 'CRM activity',request.form.get('activity_notes'),request.form.get('outcome'),follow,session.get('display_name')))
+                conn.execute("UPDATE contacts SET last_contact_date=?,next_follow_up_date=COALESCE(?,next_follow_up_date),updated_at=CURRENT_TIMESTAMP WHERE id=?",(act_date,follow,contact_id))
+                if follow and request.form.get('create_reminder')=='1':
+                    conn.execute("INSERT INTO reminders(vehicle_id,reminder_date,reminder_type,title,notes,completed) VALUES(NULL,?,?,?,?,0)",(follow,'Customer Follow Up',f"Follow up {contact['name']}",request.form.get('subject') or 'CRM activity'))
+                flash('CRM activity saved.','success')
+            conn.commit()
+        except sqlite3.Error as exc:
+            conn.rollback(); flash(f'Could not save CRM update: {exc}','error')
+        finally: conn.close()
+        return redirect(url_for('crm_contact_detail',contact_id=contact_id))
+    cdict=dict(contact); purchases,total=_contact_purchase_summary(conn,cdict)
+    emails=conn.execute("SELECT * FROM email_messages WHERE contact_id=? ORDER BY COALESCE(message_date,created_at) DESC LIMIT 30",(contact_id,)).fetchall()
+    activities=conn.execute("SELECT a.*,v.stock_no FROM crm_activities a LEFT JOIN vehicles v ON v.id=a.vehicle_id WHERE a.contact_id=? ORDER BY a.activity_date DESC,a.id DESC",(contact_id,)).fetchall()
+    vehicles=conn.execute("SELECT id,stock_no,year,make,model FROM vehicles ORDER BY stock_no DESC").fetchall()
+    conn.close(); return render_template('crm_contact_detail.html',contact=cdict,purchases=purchases,total_spend=total,emails=emails,activities=activities,vehicles=vehicles,today=date.today().isoformat())
+
+
+@app.route("/email-centre/<int:message_id>/crm-followup", methods=["POST"])
+@login_required
+def email_to_crm_followup(message_id):
+    conn=db(); msg=conn.execute("SELECT * FROM email_messages WHERE id=?",(message_id,)).fetchone()
+    if not msg: conn.close(); return "Email not found",404
+    contact_id=msg['contact_id']
+    if not contact_id:
+        name=(msg['sender'] if msg['direction']=='Incoming' else msg['recipient']) or 'Email Contact'
+        email=name if '@' in name else ''
+        cur=conn.execute("INSERT INTO contacts(contact_type,name,email,crm_status,source) VALUES(?,?,?,?,?)",('Customer',name,email,'Lead','Email Centre'))
+        contact_id=cur.lastrowid; conn.execute("UPDATE email_messages SET contact_id=? WHERE id=?",(contact_id,message_id))
+    follow=request.form.get('follow_up_date') or (date.today()+timedelta(days=1)).isoformat()
+    conn.execute("""INSERT INTO crm_activities(contact_id,vehicle_id,email_message_id,activity_date,activity_type,subject,notes,outcome,follow_up_date,created_by) VALUES(?,?,?,?,?,?,?,?,?,?)""",(
+        contact_id,msg['vehicle_id'],message_id,date.today().isoformat(),'Email Follow Up',msg['subject'],msg['body_excerpt'],'Pending',follow,session.get('display_name')))
+    conn.execute("UPDATE contacts SET next_follow_up_date=?,last_contact_date=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",(follow,date.today().isoformat(),contact_id))
+    conn.execute("UPDATE email_messages SET status='Follow Up' WHERE id=?",(message_id,))
+    conn.commit(); conn.close(); flash('Email converted to CRM follow-up.','success')
+    return redirect(url_for('crm_contact_detail',contact_id=contact_id))
 
 
 @app.get("/health")
