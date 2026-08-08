@@ -90,3 +90,6 @@ VIN-led workshop workspace, labour time library, licensed technical-data links, 
 ## Version 23.1 – eManualOnline + Email Centre
 
 Version 23.1 configures eManualOnline as the default Workshop Intelligence provider and adds a BAM Email Centre. Vehicle Workshop Intelligence can launch eManualOnline, copy a vehicle-specific manual search phrase, and save a purchased manual URL against the vehicle. The Email Centre records important customer/supplier correspondence, links it to vehicles and contacts, tracks follow-up status, and can open your normal webmail through optional Azure environment settings. BAM does not store mailbox passwords or copy proprietary manual content.
+
+## Version 24.3 — Parts Intelligence
+Adds the Parts Intelligence Centre, mobile QR/barcode lookup, dynamic QR stock labels, location movement history, stock checks, slow-moving-stock review, part profile completeness, and extended interchange/freight details.

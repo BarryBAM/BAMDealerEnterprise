@@ -1,0 +1,25 @@
+BAM Dealer Enterprise Cloud v24.3
+Parts Intelligence + QR / Barcode
+
+New in this release
+- Parts Intelligence Centre with stock value, potential margin, low-stock, missing-location and missing-photo KPIs.
+- Mobile Part Scanner for QR codes and supported browser barcode formats, with manual SKU/barcode/OEM lookup fallback.
+- Dynamic QR code on every BAM part label linking back to the live part workspace.
+- Barcode defaults to the BAM part number when a separate barcode is not supplied.
+- Quick Apply Suggested Price action from the part workspace.
+- Rack / shelf / bin movement workflow with location history and audit logging.
+- Stock-check date tracking.
+- Part profile completeness, days-in-stock, unit margin and margin percentage.
+- Slow-moving stock list (180+ days) and inventory attention queue.
+- Alternate/cross-reference part numbers and interchange/compatibility notes.
+- Warranty days plus weight and freight dimensions.
+- Existing v24.2 VIN Intelligence, Workshop Scheduler, eManualOnline, Dealer Copilot and v21-v24 features remain intact.
+
+Data safety
+- Database changes are additive migrations only.
+- No live SQLite database is included in this release package.
+- Existing Azure /home/bam-data records remain the source of truth.
+
+Browser scanning
+- Camera scanning uses the browser BarcodeDetector API where supported.
+- Manual SKU/barcode/OEM lookup is always available if camera barcode detection is unavailable.

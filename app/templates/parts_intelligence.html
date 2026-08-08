@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}Parts Intelligence | BAM Motor Group{% endblock %}
+{% block content %}
+<div class="page-head inventory-head">
+  <div><span class="eyebrow">Version 24.3 • Parts Intelligence</span><h1>Parts Intelligence Centre</h1><p>Stock value, QR/barcode lookup, locations, pricing and attention items in one place.</p></div>
+  <div class="page-actions"><a class="button" href="{{ url_for('parts_scanner') }}">⌁ Scan / Lookup Part</a><a class="button secondary" href="{{ url_for('parts_page') }}">Parts Centre</a></div>
+</div>
+<div class="parts-intel-kpis">
+  <article><span>Lines in Stock</span><strong>{{ metrics.lines or 0 }}</strong><small>{{ metrics.units or 0 }} units recorded</small></article>
+  <article><span>Retail Value</span><strong>{{ metrics.retail_value|money }}</strong><small>Current on-hand retail</small></article>
+  <article><span>Potential Margin</span><strong>{{ gross_margin|money }}</strong><small>Retail less recorded cost</small></article>
+  <article class="{% if metrics.low_stock %}attention-kpi{% endif %}"><span>Low Stock</span><strong>{{ metrics.low_stock or 0 }}</strong><small>At or below reorder level</small></article>
+  <article class="{% if metrics.no_location %}attention-kpi{% endif %}"><span>No Location</span><strong>{{ metrics.no_location or 0 }}</strong><small>Needs rack / shelf / bin</small></article>
+  <article class="{% if no_photos %}attention-kpi{% endif %}"><span>No Photos</span><strong>{{ no_photos or 0 }}</strong><small>On-hand parts missing images</small></article>
+</div>
+<div class="workspace-two-column">
+<section class="panel"><div class="panel-title"><h2>Inventory Attention</h2><span>{{ attention|length }} priority records</span></div>
+  <div class="table-wrap"><table><tr><th>Part</th><th>Missing / Attention</th><th>Retail</th><th></th></tr>
+  {% for p in attention %}<tr><td><strong>{{ p.part_number }}</strong><small>{{ p.part_name }}</small></td><td>
+    {% if not p.storage_location %}<span class="intel-chip warning">No location</span>{% endif %}
+    {% if not p.manufacturer_part_no %}<span class="intel-chip">No OEM</span>{% endif %}
+    {% if not p.barcode %}<span class="intel-chip">No barcode</span>{% endif %}
+    {% if not p.photo_count %}<span class="intel-chip">No photo</span>{% endif %}
+  </td><td>{{ p.selling_price|money }}</td><td><a class="button small-button" href="{{ url_for('part_detail',part_id=p.id) }}">Open</a></td></tr>
+  {% else %}<tr><td colspan="4">All current stock records are complete.</td></tr>{% endfor %}</table></div>
+</section>
+<section class="panel"><div class="panel-title"><h2>Stock by Category</h2><span>Top categories by retail value</span></div>
+  <div class="category-intel-list">{% for c in categories %}<div><div><strong>{{ c.category }}</strong><small>{{ c.lines }} lines • {{ c.units }} units</small></div><b>{{ c.retail|money }}</b></div>{% else %}<p>No parts stock yet.</p>{% endfor %}</div>
+</section>
+</div>
+<div class="workspace-two-column">
+<section class="panel"><div class="panel-title"><h2>Slow-Moving Stock</h2><span>180+ days</span></div>
+  <div class="table-wrap"><table><tr><th>Part</th><th>Age</th><th>Location</th><th>Retail</th><th></th></tr>
+  {% for p in stale %}<tr><td><strong>{{ p.part_number }}</strong><small>{{ p.part_name }}</small></td><td>{{ p.days_old or 0 }} days</td><td>{{ p.storage_location or '—' }}</td><td>{{ p.selling_price|money }}</td><td><a class="button small-button" href="{{ url_for('part_detail',part_id=p.id) }}">Review</a></td></tr>
+  {% else %}<tr><td colspan="5">No on-hand stock older than 180 days.</td></tr>{% endfor %}</table></div>
+</section>
+<section class="panel"><div class="panel-title"><h2>Recent Parts Sales</h2><span>Latest 12</span></div>
+  <div class="table-wrap"><table><tr><th>Date</th><th>Part</th><th>Donor</th><th>Sale</th></tr>
+  {% for s in recent_sales %}<tr><td>{{ s.sale_date }}</td><td><strong>{{ s.part_number }}</strong><small>{{ s.part_name }}</small></td><td>{{ s.vehicle_stock_no or '—' }}</td><td>{{ s.sale_price|money }}</td></tr>
+  {% else %}<tr><td colspan="4">No parts sales recorded yet.</td></tr>{% endfor %}</table></div>
+</section>
+</div>
+{% endblock %}

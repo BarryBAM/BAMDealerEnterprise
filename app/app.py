@@ -22,6 +22,12 @@ from werkzeug.utils import secure_filename
 from werkzeug.middleware.proxy_fix import ProxyFix
 from openpyxl import load_workbook
 
+try:
+    import qrcode
+    import qrcode.image.svg
+except ImportError:
+    qrcode = None
+
 APP_DIR = Path(__file__).resolve().parent
 PROJECT_DIR = APP_DIR.parent
 BASE_DIR = PROJECT_DIR
@@ -50,7 +56,7 @@ app.config.update(
     PERMANENT_SESSION_LIFETIME=timedelta(hours=int(os.environ.get("BAM_SESSION_HOURS", "12"))),
 )
 
-APP_VERSION = "24.2"
+APP_VERSION = "24.3"
 APP_NAME = "BAM Dealer Enterprise Cloud"
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "").strip()
 OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-5").strip() or "gpt-5"
@@ -511,6 +517,29 @@ def init_db():
     ensure_column(conn, "parts", "reserved_for", "TEXT")
     ensure_column(conn, "parts", "reserved_until", "TEXT")
     ensure_column(conn, "parts", "updated_at", "TEXT")
+
+    # Version 24.3 - Parts Intelligence + QR / Barcode workflow
+    ensure_column(conn, "parts", "alternate_part_numbers", "TEXT")
+    ensure_column(conn, "parts", "interchange_notes", "TEXT")
+    ensure_column(conn, "parts", "warranty_days", "INTEGER DEFAULT 0")
+    ensure_column(conn, "parts", "weight_kg", "REAL DEFAULT 0")
+    ensure_column(conn, "parts", "length_cm", "REAL DEFAULT 0")
+    ensure_column(conn, "parts", "width_cm", "REAL DEFAULT 0")
+    ensure_column(conn, "parts", "height_cm", "REAL DEFAULT 0")
+    ensure_column(conn, "parts", "inventory_last_checked", "TEXT")
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS part_location_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            part_id INTEGER NOT NULL,
+            old_location TEXT,
+            new_location TEXT,
+            moved_by TEXT,
+            notes TEXT,
+            moved_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(part_id) REFERENCES parts(id) ON DELETE CASCADE
+        );
+    """)
+    conn.execute("UPDATE parts SET barcode=part_number WHERE COALESCE(barcode,'')='' AND COALESCE(part_number,'')!=''")
     conn.executescript("""
         CREATE TABLE IF NOT EXISTS equipment (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -3074,7 +3103,7 @@ def parts_page():
                 donor["year"] if donor else (request.form.get("year") or None),
                 request.form.get("condition") or "Used", float(request.form.get("selling_price") or 0),
                 request.form.get("status") or "In Stock", request.form.get("position"),
-                request.form.get("fitment"), request.form.get("manufacturer_part_no"), request.form.get("barcode"),
+                request.form.get("fitment"), request.form.get("manufacturer_part_no"), (request.form.get("barcode") or part_number),
             ))
         except sqlite3.IntegrityError:
             conn.rollback()
@@ -3102,8 +3131,8 @@ def parts_page():
     params = []
     if q:
         token = f"%{q}%"
-        where.append("(part_number LIKE ? OR part_name LIKE ? OR category LIKE ? OR supplier LIKE ? OR storage_location LIKE ? OR vehicle_stock_no LIKE ? OR manufacturer_part_no LIKE ? OR barcode LIKE ?)")
-        params.extend([token] * 8)
+        where.append("(part_number LIKE ? OR part_name LIKE ? OR category LIKE ? OR supplier LIKE ? OR storage_location LIKE ? OR vehicle_stock_no LIKE ? OR manufacturer_part_no LIKE ? OR alternate_part_numbers LIKE ? OR barcode LIKE ?)")
+        params.extend([token] * 9)
     if status_filter:
         where.append("status=?")
         params.append(status_filter)
@@ -3174,9 +3203,24 @@ def part_detail(part_id):
     gross_profit = revenue - sold_cost - freight
     donor = conn.execute("SELECT * FROM vehicles WHERE id=?", (part["vehicle_id"],)).fetchone() if part["vehicle_id"] else None
     price_suggestion = parts_price_suggestion(conn, part)
+    location_history = conn.execute("SELECT * FROM part_location_history WHERE part_id=? ORDER BY moved_at DESC,id DESC LIMIT 20", (part_id,)).fetchall()
+    added = None
+    try:
+        added = datetime.fromisoformat(str(part["date_added"] or part["updated_at"] or "").replace("Z", "+00:00"))
+    except (ValueError, TypeError):
+        added = None
+    days_in_stock = max(0, (datetime.now().date() - added.date()).days) if added else 0
+    fields = [part["part_number"], part["part_name"], part["category"], part["manufacturer_part_no"], part["storage_location"], part["fitment"], part["condition"], part["barcode"]]
+    profile_percent = round(sum(1 for value in fields if str(value or "").strip()) / len(fields) * 100)
+    current_price = float(part["selling_price"] or 0)
+    unit_cost = float(part["unit_cost_inc_gst"] or 0)
+    margin = current_price - unit_cost
+    margin_percent = round((margin / current_price * 100), 1) if current_price else 0
+    intelligence = {"days_in_stock": days_in_stock, "profile_percent": profile_percent, "margin": margin, "margin_percent": margin_percent}
     conn.close()
     return render_template("part_detail.html", part=part, photos=photos, sales=sales, donor=donor,
-                           sold_qty=sold_qty, revenue=revenue, freight=freight, gross_profit=gross_profit, price_suggestion=price_suggestion)
+                           sold_qty=sold_qty, revenue=revenue, freight=freight, gross_profit=gross_profit, price_suggestion=price_suggestion,
+                           location_history=location_history, intelligence=intelligence)
 
 
 @app.route("/parts/<int:part_id>/edit", methods=["GET", "POST"])
@@ -3197,7 +3241,8 @@ def part_edit(part_id):
                     part_number=?,part_name=?,category=?,subcategory=?,description=?,supplier=?,quantity_on_hand=?,reorder_level=?,
                     unit_cost_inc_gst=?,gst_amount_per_unit=?,selling_price=?,storage_location=?,notes=?,vehicle_id=?,vehicle_stock_no=?,
                     vin=?,make=?,model=?,year=?,condition=?,status=?,engine_code=?,transmission_code=?,barcode=?,position=?,fitment=?,
-                    manufacturer_part_no=?,reserved_for=?,reserved_until=?,updated_at=CURRENT_TIMESTAMP
+                    manufacturer_part_no=?,reserved_for=?,reserved_until=?,alternate_part_numbers=?,interchange_notes=?,warranty_days=?,
+                    weight_kg=?,length_cm=?,width_cm=?,height_cm=?,inventory_last_checked=?,updated_at=CURRENT_TIMESTAMP
                 WHERE id=?
             """, (
                 part_number, request.form.get("part_name"), request.form.get("category"), request.form.get("subcategory"),
@@ -3208,8 +3253,11 @@ def part_edit(part_id):
                 source_stock or None, donor["vin"] if donor else request.form.get("vin"), donor["make"] if donor else request.form.get("make"),
                 donor["model"] if donor else request.form.get("model"), donor["year"] if donor else (request.form.get("year") or None),
                 request.form.get("condition") or "Used", request.form.get("status") or "In Stock", request.form.get("engine_code"),
-                request.form.get("transmission_code"), request.form.get("barcode"), request.form.get("position"), request.form.get("fitment"),
-                request.form.get("manufacturer_part_no"), request.form.get("reserved_for"), request.form.get("reserved_until") or None, part_id,
+                request.form.get("transmission_code"), (request.form.get("barcode") or part_number), request.form.get("position"), request.form.get("fitment"),
+                request.form.get("manufacturer_part_no"), request.form.get("reserved_for"), request.form.get("reserved_until") or None,
+                request.form.get("alternate_part_numbers"), request.form.get("interchange_notes"), int(float(request.form.get("warranty_days") or 0)),
+                float(request.form.get("weight_kg") or 0), float(request.form.get("length_cm") or 0), float(request.form.get("width_cm") or 0),
+                float(request.form.get("height_cm") or 0), request.form.get("inventory_last_checked") or None, part_id,
             ))
         except sqlite3.IntegrityError:
             conn.rollback()
@@ -5212,6 +5260,183 @@ def workshop_booking_delete(booking_id):
         conn.rollback(); flash(str(exc),"error")
     finally: conn.close()
     return redirect(url_for("workshop_scheduler"))
+
+
+@app.get("/parts-intelligence")
+@login_required
+def parts_intelligence():
+    conn = db()
+    today = date.today()
+    stale_cutoff = (today - timedelta(days=180)).isoformat()
+    metrics = conn.execute("""
+        SELECT COUNT(*) AS lines,
+               COALESCE(SUM(quantity_on_hand),0) AS units,
+               COALESCE(SUM(quantity_on_hand*unit_cost_inc_gst),0) AS cost_value,
+               COALESCE(SUM(quantity_on_hand*selling_price),0) AS retail_value,
+               SUM(CASE WHEN quantity_on_hand<=reorder_level AND status NOT IN ('Sold','Scrap') THEN 1 ELSE 0 END) AS low_stock,
+               SUM(CASE WHEN COALESCE(storage_location,'')='' AND quantity_on_hand>0 THEN 1 ELSE 0 END) AS no_location,
+               SUM(CASE WHEN status='Reserved' THEN 1 ELSE 0 END) AS reserved
+        FROM parts
+    """).fetchone()
+    no_photos = conn.execute("""
+        SELECT COUNT(*) AS c FROM parts p
+        WHERE p.quantity_on_hand>0 AND NOT EXISTS(SELECT 1 FROM part_photos ph WHERE ph.part_id=p.id)
+    """).fetchone()["c"]
+    stale = conn.execute("""
+        SELECT p.*, CAST(julianday(?) - julianday(COALESCE(NULLIF(p.date_added,''),NULLIF(p.updated_at,''),date('now'))) AS INTEGER) AS days_old
+        FROM parts p
+        WHERE p.quantity_on_hand>0 AND COALESCE(NULLIF(p.date_added,''),NULLIF(p.updated_at,''),'9999-12-31')<=?
+        ORDER BY days_old DESC LIMIT 12
+    """, (today.isoformat(), stale_cutoff)).fetchall()
+    attention = conn.execute("""
+        SELECT p.*,
+          (SELECT COUNT(*) FROM part_photos ph WHERE ph.part_id=p.id) AS photo_count
+        FROM parts p
+        WHERE p.quantity_on_hand>0 AND (
+          COALESCE(p.storage_location,'')='' OR COALESCE(p.manufacturer_part_no,'')='' OR
+          COALESCE(p.barcode,'')='' OR NOT EXISTS(SELECT 1 FROM part_photos ph WHERE ph.part_id=p.id)
+        )
+        ORDER BY p.selling_price DESC,p.id DESC LIMIT 15
+    """).fetchall()
+    categories = conn.execute("""
+        SELECT COALESCE(NULLIF(category,''),'Uncategorised') AS category, COUNT(*) AS lines,
+               COALESCE(SUM(quantity_on_hand),0) AS units,
+               COALESCE(SUM(quantity_on_hand*selling_price),0) AS retail
+        FROM parts WHERE quantity_on_hand>0
+        GROUP BY COALESCE(NULLIF(category,''),'Uncategorised') ORDER BY retail DESC LIMIT 12
+    """).fetchall()
+    recent_sales = conn.execute("""
+        SELECT ps.*,p.part_number,p.part_name,p.vehicle_stock_no
+        FROM part_sales ps JOIN parts p ON p.id=ps.part_id
+        ORDER BY ps.sale_date DESC,ps.id DESC LIMIT 12
+    """).fetchall()
+    conn.close()
+    gross_margin = float(metrics["retail_value"] or 0) - float(metrics["cost_value"] or 0)
+    return render_template("parts_intelligence.html", metrics=metrics, no_photos=no_photos, stale=stale,
+                           attention=attention, categories=categories, recent_sales=recent_sales, gross_margin=gross_margin)
+
+
+@app.get("/parts/scan")
+@login_required
+def parts_scanner():
+    return render_template("parts_scanner.html")
+
+
+@app.get("/parts/lookup")
+@login_required
+def part_lookup():
+    code = (request.args.get("code") or "").strip()
+    if not code:
+        flash("Scan or enter a part number, barcode or OEM number.", "error")
+        return redirect(url_for("parts_scanner"))
+    # QR labels contain a BAM part URL. Resolve the trailing numeric id safely.
+    match = re.search(r"/parts/(\d+)(?:$|[/?#])", code)
+    conn = db()
+    if match:
+        row = conn.execute("SELECT id FROM parts WHERE id=?", (int(match.group(1)),)).fetchone()
+    else:
+        row = conn.execute("""
+            SELECT id FROM parts
+            WHERE LOWER(COALESCE(part_number,''))=LOWER(?)
+               OR LOWER(COALESCE(barcode,''))=LOWER(?)
+               OR LOWER(COALESCE(manufacturer_part_no,''))=LOWER(?)
+               OR LOWER(COALESCE(alternate_part_numbers,'')) LIKE LOWER(?)
+            ORDER BY CASE WHEN LOWER(COALESCE(part_number,''))=LOWER(?) THEN 0 ELSE 1 END,id DESC LIMIT 1
+        """, (code, code, code, f"%{code}%", code)).fetchone()
+    conn.close()
+    if not row:
+        flash(f"No part found for {code}.", "error")
+        return redirect(url_for("parts_scanner", code=code))
+    return redirect(url_for("part_detail", part_id=row["id"]))
+
+
+@app.get("/parts/<int:part_id>/qr.svg")
+@login_required
+def part_qr(part_id):
+    conn = db()
+    part = conn.execute("SELECT id,part_number FROM parts WHERE id=?", (part_id,)).fetchone()
+    conn.close()
+    if not part:
+        return "Part not found", 404
+    if qrcode is None:
+        return Response("QR support is not installed. Deploy requirements.txt and restart the app.", status=503, mimetype="text/plain")
+    target = url_for("part_detail", part_id=part_id, _external=True)
+    factory = qrcode.image.svg.SvgPathImage
+    image = qrcode.make(target, image_factory=factory, box_size=8, border=2)
+    out = io.BytesIO()
+    image.save(out)
+    return Response(out.getvalue(), mimetype="image/svg+xml", headers={"Cache-Control":"no-store"})
+
+
+@app.post("/parts/<int:part_id>/apply-price")
+@login_required
+def part_apply_suggested_price(part_id):
+    conn = db()
+    try:
+        part = conn.execute("SELECT * FROM parts WHERE id=?", (part_id,)).fetchone()
+        if not part:
+            return "Part not found", 404
+        suggestion = parts_price_suggestion(conn, part)
+        price = float(request.form.get("price") or suggestion["suggested"] or 0)
+        if price < 0:
+            raise ValueError("Price cannot be negative.")
+        conn.execute("UPDATE parts SET selling_price=?,updated_at=CURRENT_TIMESTAMP WHERE id=?", (price, part_id))
+        conn.commit()
+        log_action("Parts Intelligence price applied", "part", part_id, f"{part['part_number']} -> ${price:.2f}")
+        flash(f"Selling price updated to ${price:,.2f}.", "success")
+    except (ValueError, sqlite3.Error) as exc:
+        conn.rollback()
+        flash(str(exc), "error")
+    finally:
+        conn.close()
+    return redirect(url_for("part_detail", part_id=part_id))
+
+
+@app.post("/parts/<int:part_id>/move")
+@login_required
+def part_move_location(part_id):
+    new_location = (request.form.get("storage_location") or "").strip()
+    if not new_location:
+        flash("Enter the new rack / shelf / bin location.", "error")
+        return redirect(url_for("part_detail", part_id=part_id))
+    conn = db()
+    try:
+        part = conn.execute("SELECT * FROM parts WHERE id=?", (part_id,)).fetchone()
+        if not part:
+            return "Part not found", 404
+        old_location = part["storage_location"] or ""
+        conn.execute("UPDATE parts SET storage_location=?,inventory_last_checked=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                     (new_location, date.today().isoformat(), part_id))
+        conn.execute("INSERT INTO part_location_history(part_id,old_location,new_location,moved_by,notes) VALUES(?,?,?,?,?)",
+                     (part_id, old_location, new_location, session.get("display_name") or session.get("username") or "User", request.form.get("notes")))
+        conn.commit()
+        log_action("Part moved", "part", part_id, f"{old_location or 'Unlocated'} -> {new_location}")
+        flash(f"{part['part_number'] or part['part_name']} moved to {new_location}.", "success")
+    except sqlite3.Error as exc:
+        conn.rollback(); flash(str(exc), "error")
+    finally:
+        conn.close()
+    return redirect(url_for("part_detail", part_id=part_id))
+
+
+@app.post("/parts/<int:part_id>/stock-check")
+@login_required
+def part_stock_check(part_id):
+    conn = db()
+    try:
+        part = conn.execute("SELECT * FROM parts WHERE id=?", (part_id,)).fetchone()
+        if not part:
+            return "Part not found", 404
+        conn.execute("UPDATE parts SET inventory_last_checked=?,updated_at=CURRENT_TIMESTAMP WHERE id=?", (date.today().isoformat(), part_id))
+        conn.commit()
+        log_action("Part stock checked", "part", part_id, part["part_number"] or part["part_name"])
+        flash("Stock check recorded.", "success")
+    except sqlite3.Error as exc:
+        conn.rollback(); flash(str(exc), "error")
+    finally:
+        conn.close()
+    return redirect(url_for("part_detail", part_id=part_id))
+
 
 @app.route("/parts/<int:part_id>/label")
 @login_required

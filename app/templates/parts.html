@@ -2,8 +2,8 @@
 {% block title %}Parts Centre | BAM Motor Group{% endblock %}
 {% block content %}
 <div class="page-head inventory-head">
-  <div><span class="eyebrow">Version 21 • Professional Parts & Profit Centre</span><h1>Parts Centre</h1><p>Search, photograph, price, reserve, sell and trace every part back to its donor vehicle.</p></div>
-  <div><a class="button" href="{{ url_for('shipping_new') }}">📦 Create Shipment</a> <a class="button secondary" href="{{ url_for('dismantling_profit_report') }}">💰 Dismantling Profit</a> <a class="button secondary" href="{{ url_for('shipping_centre') }}">Shipping Centre</a></div>
+  <div><span class="eyebrow">Version 24.3 • Professional Parts & Intelligence Centre</span><h1>Parts Centre</h1><p>Search, photograph, price, reserve, sell and trace every part back to its donor vehicle.</p></div>
+  <div><a class="button" href="{{ url_for('parts_scanner') }}">⌁ Scan Part</a> <a class="button secondary" href="{{ url_for('parts_intelligence') }}">Parts Intelligence</a> <a class="button secondary" href="{{ url_for('shipping_new') }}">📦 Create Shipment</a> <a class="button secondary" href="{{ url_for('dismantling_profit_report') }}">💰 Dismantling Profit</a></div>
 </div>
 <div class="parts-kpis">
   <article><span>Part Lines</span><strong>{{ part_metrics.part_lines or 0 }}</strong><small>Unique stock records</small></article>

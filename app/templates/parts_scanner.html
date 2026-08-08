@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}Part Scanner | BAM Motor Group{% endblock %}
+{% block content %}
+<div class="page-head inventory-head"><div><span class="eyebrow">Version 24.3 • Mobile Parts Scanner</span><h1>Scan or Find a Part</h1><p>Scan a BAM QR/barcode where supported, or enter a SKU, barcode or OEM number.</p></div><div class="page-actions"><a class="button secondary" href="{{ url_for('parts_intelligence') }}">Parts Intelligence</a></div></div>
+<section class="panel scanner-panel">
+  <form action="{{ url_for('part_lookup') }}" method="get" class="scanner-search"><input id="scan-code" name="code" value="{{ request.args.get('code','') }}" placeholder="PRT-000001, barcode or OEM number" autofocus><button>Find Part</button></form>
+  <div class="scanner-camera">
+    <video id="scanner-video" playsinline muted></video>
+    <div><button id="start-scan" type="button" class="button">Start Camera Scanner</button><button id="stop-scan" type="button" class="button secondary" hidden>Stop</button></div>
+    <p id="scanner-status" class="muted">Camera scanning uses your browser's barcode detector when available. Manual lookup always works.</p>
+  </div>
+</section>
+<script>
+const start=document.getElementById('start-scan'), stop=document.getElementById('stop-scan'), video=document.getElementById('scanner-video'), statusEl=document.getElementById('scanner-status'), input=document.getElementById('scan-code');
+let stream=null, detector=null, timer=null;
+async function scanFrame(){ if(!detector||!stream) return; try{ const codes=await detector.detect(video); if(codes.length){ const value=codes[0].rawValue||''; stopScan(); input.value=value; statusEl.textContent='Found: '+value; window.location='{{ url_for("part_lookup") }}?code='+encodeURIComponent(value); return; }}catch(e){} timer=setTimeout(scanFrame,250); }
+async function startScan(){ if(!('BarcodeDetector' in window)){ statusEl.textContent='Camera barcode detection is not supported by this browser. Enter the code above instead.'; return; } try{ detector=new BarcodeDetector({formats:['qr_code','code_128','code_39','ean_13','ean_8','data_matrix']}); stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'}}}); video.srcObject=stream; await video.play(); video.classList.add('active'); start.hidden=true; stop.hidden=false; statusEl.textContent='Point the camera at the BAM label.'; scanFrame(); }catch(e){ statusEl.textContent='Camera could not start: '+e.message; }}
+function stopScan(){ if(timer) clearTimeout(timer); if(stream) stream.getTracks().forEach(t=>t.stop()); stream=null; video.srcObject=null; video.classList.remove('active'); start.hidden=false; stop.hidden=true; }
+start.addEventListener('click',startScan); stop.addEventListener('click',stopScan); window.addEventListener('pagehide',stopScan);
+</script>
+{% endblock %}
