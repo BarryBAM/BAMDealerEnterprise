@@ -1,0 +1,24 @@
+BAM Dealer Enterprise Cloud v24.5
+Mobile Operations
+
+Highlights
+- Dedicated /mobile command centre for phones and tablets.
+- Fast vehicle lookup by VIN, registration, BAM stock number, make or model.
+- Camera barcode/QR scanning for VIN labels where supported by the mobile browser.
+- Vehicle quick view with direct phone-camera photo capture.
+- Mobile parts scanner for BAM QR labels, barcodes, SKU and OEM numbers.
+- Part quick view with photo capture, rack/shelf/bin moves and one-touch stock checks.
+- Mobile workshop screen with today's bookings and clock-on / clock-off controls.
+- Installable web-app manifest and BAM home-screen icon.
+- Dedicated bottom navigation on narrow phone screens.
+- Updated phone installation page for Azure/cloud use.
+
+Data safety
+- No database file is included in this release package.
+- Existing v24.4 data and all previous additive migrations are preserved.
+- Mobile photo uploads continue to use BAM_UPLOAD_DIR persistent storage.
+
+Browser notes
+- Camera photo capture works through normal HTML mobile file capture.
+- Live QR/barcode scanning uses the browser BarcodeDetector API when supported.
+  Manual VIN/part lookup remains available on browsers that do not support it.

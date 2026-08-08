@@ -56,7 +56,7 @@ app.config.update(
     PERMANENT_SESSION_LIFETIME=timedelta(hours=int(os.environ.get("BAM_SESSION_HOURS", "12"))),
 )
 
-APP_VERSION = "24.4"
+APP_VERSION = "24.5"
 APP_NAME = "BAM Dealer Enterprise Cloud"
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "").strip()
 OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-5").strip() or "gpt-5"
@@ -4364,7 +4364,12 @@ def shipping_label(shipment_id):
 @login_required
 def iphone_access():
     ip = local_network_ip()
-    return render_template("iphone_access.html", network_ip=ip, mobile_url=f"http://{ip}:5000")
+    return render_template(
+        "iphone_access.html",
+        network_ip=ip,
+        mobile_url=url_for("mobile_operations", _external=True),
+        local_mobile_url=f"http://{ip}:5000/mobile",
+    )
 
 
 
@@ -5621,6 +5626,203 @@ def email_to_crm_followup(message_id):
     conn.execute("UPDATE email_messages SET status='Follow Up' WHERE id=?",(message_id,))
     conn.commit(); conn.close(); flash('Email converted to CRM follow-up.','success')
     return redirect(url_for('crm_contact_detail',contact_id=contact_id))
+
+
+
+# -----------------------------------------------------------------------------
+# Version 24.5 - Mobile Operations
+# -----------------------------------------------------------------------------
+
+@app.get("/mobile")
+@login_required
+def mobile_operations():
+    today_iso = date.today().isoformat()
+    conn = db()
+    metrics = conn.execute("""
+        SELECT
+          (SELECT COUNT(*) FROM vehicles WHERE status NOT IN ('Sold')) AS vehicles,
+          (SELECT COUNT(*) FROM parts WHERE quantity_on_hand>0) AS parts_in_stock,
+          (SELECT COUNT(*) FROM workshop_bookings WHERE booking_date=? AND status!='Cancelled') AS workshop_today,
+          (SELECT COUNT(*) FROM workshop_time_entries WHERE clock_out IS NULL) AS live_timers,
+          (SELECT COUNT(*) FROM reminders WHERE completed=0 AND due_date<=?) AS reminders_due
+    """, (today_iso, today_iso)).fetchone()
+    bookings = conn.execute("""
+        SELECT b.*,v.stock_no,v.year,v.make,v.model
+        FROM workshop_bookings b
+        LEFT JOIN vehicles v ON v.id=b.vehicle_id
+        WHERE b.booking_date=? AND b.status!='Cancelled'
+        ORDER BY COALESCE(b.start_time,'99:99'),b.id LIMIT 10
+    """, (today_iso,)).fetchall()
+    open_timers = conn.execute("""
+        SELECT t.*,b.description,b.bay,v.stock_no,v.make,v.model
+        FROM workshop_time_entries t
+        JOIN workshop_bookings b ON b.id=t.booking_id
+        LEFT JOIN vehicles v ON v.id=b.vehicle_id
+        WHERE t.clock_out IS NULL ORDER BY t.clock_in
+    """).fetchall()
+    recent_vehicles = conn.execute("""
+        SELECT id,stock_no,year,make,model,registration,vin,status
+        FROM vehicles ORDER BY id DESC LIMIT 6
+    """).fetchall()
+    conn.close()
+    return render_template("mobile_dashboard.html", metrics=metrics, bookings=bookings,
+                           open_timers=open_timers, recent_vehicles=recent_vehicles, today_iso=today_iso)
+
+
+@app.get("/mobile/vehicles")
+@login_required
+def mobile_vehicle_lookup():
+    code = (request.args.get("code") or "").strip()
+    rows = []
+    if code:
+        like = f"%{code}%"
+        conn = db()
+        rows = conn.execute("""
+            SELECT id,stock_no,year,make,model,variant,vin,registration,status
+            FROM vehicles
+            WHERE LOWER(COALESCE(stock_no,''))=LOWER(?)
+               OR LOWER(COALESCE(vin,''))=LOWER(?)
+               OR LOWER(COALESCE(registration,''))=LOWER(?)
+               OR stock_no LIKE ? OR vin LIKE ? OR registration LIKE ?
+               OR make LIKE ? OR model LIKE ?
+            ORDER BY CASE
+                WHEN LOWER(COALESCE(stock_no,''))=LOWER(?) THEN 0
+                WHEN LOWER(COALESCE(vin,''))=LOWER(?) THEN 0
+                WHEN LOWER(COALESCE(registration,''))=LOWER(?) THEN 0
+                ELSE 1 END,id DESC LIMIT 20
+        """, (code,code,code,like,like,like,like,like,code,code,code)).fetchall()
+        conn.close()
+        if len(rows) == 1:
+            return redirect(url_for("mobile_vehicle", vehicle_id=rows[0]["id"]))
+    return render_template("mobile_vehicle_lookup.html", rows=rows, code=code)
+
+
+@app.route("/mobile/vehicles/<int:vehicle_id>", methods=["GET", "POST"])
+@login_required
+def mobile_vehicle(vehicle_id):
+    conn = db()
+    vehicle = conn.execute("SELECT * FROM vehicles WHERE id=?", (vehicle_id,)).fetchone()
+    if not vehicle:
+        conn.close(); return "Vehicle not found", 404
+    if request.method == "POST":
+        files = request.files.getlist("photos")
+        caption = (request.form.get("caption") or "Mobile capture").strip() or "Mobile capture"
+        added = 0
+        try:
+            for file in files:
+                filename = save_upload(file)
+                if filename:
+                    conn.execute("INSERT INTO vehicle_photos(vehicle_id,filename,caption) VALUES(?,?,?)",
+                                 (vehicle_id,filename,caption))
+                    added += 1
+            conn.commit()
+            log_action("Mobile vehicle photo capture", "vehicle", vehicle_id, f"{added} photo(s)")
+            flash(f"{added} vehicle photo(s) uploaded." if added else "No valid image selected.",
+                  "success" if added else "error")
+        except (ValueError, sqlite3.Error) as exc:
+            conn.rollback(); flash(str(exc), "error")
+        finally:
+            conn.close()
+        return redirect(url_for("mobile_vehicle", vehicle_id=vehicle_id))
+    photos = conn.execute("SELECT * FROM vehicle_photos WHERE vehicle_id=? ORDER BY id DESC LIMIT 8", (vehicle_id,)).fetchall()
+    parts_count = conn.execute("SELECT COUNT(*) AS c FROM parts WHERE vehicle_stock_no=?", (vehicle["stock_no"],)).fetchone()["c"]
+    open_jobs = conn.execute("SELECT COUNT(*) AS c FROM job_cards WHERE vehicle_id=? AND COALESCE(status,'')!='Completed'", (vehicle_id,)).fetchone()["c"]
+    conn.close()
+    return render_template("mobile_vehicle.html", vehicle=vehicle, photos=photos, parts_count=parts_count, open_jobs=open_jobs)
+
+
+@app.get("/mobile/parts")
+@login_required
+def mobile_part_lookup():
+    code = (request.args.get("code") or "").strip()
+    rows = []
+    if code:
+        match = re.search(r"/parts/(\d+)(?:$|[/?#])", code)
+        conn = db()
+        if match:
+            row = conn.execute("SELECT id FROM parts WHERE id=?", (int(match.group(1)),)).fetchone()
+            rows = [row] if row else []
+        else:
+            like = f"%{code}%"
+            rows = conn.execute("""
+                SELECT id,part_number,part_name,manufacturer_part_no,barcode,vehicle_stock_no,location,status,quantity_on_hand
+                FROM parts
+                WHERE LOWER(COALESCE(part_number,''))=LOWER(?)
+                   OR LOWER(COALESCE(barcode,''))=LOWER(?)
+                   OR LOWER(COALESCE(manufacturer_part_no,''))=LOWER(?)
+                   OR part_number LIKE ? OR barcode LIKE ? OR manufacturer_part_no LIKE ?
+                   OR part_name LIKE ? OR vehicle_stock_no LIKE ? OR location LIKE ?
+                ORDER BY CASE WHEN LOWER(COALESCE(part_number,''))=LOWER(?) THEN 0 ELSE 1 END,id DESC LIMIT 20
+            """, (code,code,code,like,like,like,like,like,like,code)).fetchall()
+        conn.close()
+        if len(rows) == 1:
+            return redirect(url_for("mobile_part", part_id=rows[0]["id"]))
+    return render_template("mobile_part_lookup.html", rows=rows, code=code)
+
+
+@app.route("/mobile/parts/<int:part_id>", methods=["GET", "POST"])
+@login_required
+def mobile_part(part_id):
+    conn = db()
+    part = conn.execute("SELECT * FROM parts WHERE id=?", (part_id,)).fetchone()
+    if not part:
+        conn.close(); return "Part not found", 404
+    if request.method == "POST":
+        action = request.form.get("action") or "photo"
+        try:
+            if action == "photo":
+                files = request.files.getlist("photos")
+                added = 0
+                for file in files:
+                    filename = save_upload(file)
+                    if filename:
+                        featured = 1 if not conn.execute("SELECT id FROM part_photos WHERE part_id=? LIMIT 1", (part_id,)).fetchone() else 0
+                        conn.execute("INSERT INTO part_photos(part_id,filename,caption,is_featured) VALUES(?,?,?,?)",
+                                     (part_id,filename,"Mobile capture",featured))
+                        added += 1
+                conn.commit(); log_action("Mobile part photo capture","part",part_id,f"{added} photo(s)")
+                flash(f"{added} part photo(s) uploaded." if added else "No valid image selected.", "success" if added else "error")
+            elif action == "move":
+                new_location = (request.form.get("location") or "").strip()
+                if not new_location:
+                    raise ValueError("Enter a rack, shelf or bin location.")
+                old_location = part["location"] or ""
+                conn.execute("UPDATE parts SET location=? WHERE id=?", (new_location,part_id))
+                # The location history table was introduced in v24.3.
+                conn.execute("INSERT INTO part_location_history(part_id,old_location,new_location,moved_by,notes) VALUES(?,?,?,?,?)",
+                             (part_id,old_location,new_location,session.get("display_name"),"Mobile move"))
+                conn.commit(); log_action("Mobile part moved","part",part_id,f"{old_location} -> {new_location}")
+                flash(f"Part moved to {new_location}.","success")
+            elif action == "stockcheck":
+                conn.execute("UPDATE parts SET inventory_last_checked=CURRENT_TIMESTAMP WHERE id=?", (part_id,))
+                conn.commit(); log_action("Mobile stock check","part",part_id,part["part_number"] or part["part_name"]); flash("Stock check recorded.","success")
+            else:
+                raise ValueError("Unknown mobile action.")
+        except (ValueError,sqlite3.Error) as exc:
+            conn.rollback(); flash(str(exc),"error")
+        finally:
+            conn.close()
+        return redirect(url_for("mobile_part",part_id=part_id))
+    photos = conn.execute("SELECT * FROM part_photos WHERE part_id=? ORDER BY is_featured DESC,id DESC LIMIT 6", (part_id,)).fetchall()
+    conn.close()
+    return render_template("mobile_part.html", part=part, photos=photos)
+
+
+@app.get("/mobile/workshop")
+@login_required
+def mobile_workshop():
+    today_iso = date.today().isoformat()
+    conn = db()
+    bookings = conn.execute("""
+        SELECT b.*,v.stock_no,v.year,v.make,v.model,v.registration,
+               (SELECT COUNT(*) FROM workshop_time_entries t WHERE t.booking_id=b.id AND t.clock_out IS NULL) AS timer_active
+        FROM workshop_bookings b
+        LEFT JOIN vehicles v ON v.id=b.vehicle_id
+        WHERE b.booking_date=? AND b.status!='Cancelled'
+        ORDER BY COALESCE(b.start_time,'99:99'),b.id
+    """, (today_iso,)).fetchall()
+    conn.close()
+    return render_template("mobile_workshop.html", bookings=bookings, today_iso=today_iso)
 
 
 @app.get("/health")

@@ -5,6 +5,11 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{% block title %}BAM Motor Group{% endblock %}</title>
 <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+<link rel="manifest" href="{{ url_for('static', filename='manifest.webmanifest') }}">
+<meta name="theme-color" content="#101f34">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="apple-touch-icon" href="{{ url_for('static', filename='bam-mobile-icon.svg') }}">
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script>
 (function(){
@@ -61,7 +66,8 @@
     <a href="{{ url_for('audit_page') }}">Audit Log</a>
     <a href="{{ url_for('backup_centre') }}" class="{% if request.endpoint and request.endpoint.startswith('backup_') %}active{% endif %}">💾 Backup & Restore</a>
     {% if session.get('role') == 'owner' %}<a href="{{ url_for('users_page') }}" class="{% if request.endpoint in ['users_page','user_new','user_edit'] %}active{% endif %}">👤 User Management</a>{% endif %}
-    <a href="{{ url_for('iphone_access') }}">📱 iPhone Access</a>
+    <a href="{{ url_for('mobile_operations') }}" class="v245-mobile-nav {% if request.endpoint and request.endpoint.startswith('mobile_') %}active{% endif %}">📱 Mobile Operations</a>
+    <a href="{{ url_for('iphone_access') }}">⇧ Install on Phone</a>
   </nav>
 
   <div class="sidebar-footer">

@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Mobile Operations | BAM Motor Group{% endblock %}
+{% block content %}
+<div class="mobile-shell">
+  <div class="mobile-hero"><div><span class="eyebrow">Version 24.5 • Mobile Operations</span><h1>Yard & Workshop</h1><p>Fast phone access for vehicles, parts, photos and workshop timers.</p></div><a class="button secondary" href="{{ url_for('dashboard') }}">Desktop Dashboard</a></div>
+  <div class="mobile-kpis">
+    <article><span>Vehicles</span><strong>{{ metrics.vehicles or 0 }}</strong></article>
+    <article><span>Parts In Stock</span><strong>{{ metrics.parts_in_stock or 0 }}</strong></article>
+    <article><span>Workshop Today</span><strong>{{ metrics.workshop_today or 0 }}</strong></article>
+    <article><span>Live Timers</span><strong>{{ metrics.live_timers or 0 }}</strong></article>
+  </div>
+  <div class="mobile-action-grid">
+    <a href="{{ url_for('mobile_vehicle_lookup') }}"><b>🚗</b><strong>Find Vehicle</strong><span>VIN • rego • stock</span></a>
+    <a href="{{ url_for('mobile_part_lookup') }}"><b>▦</b><strong>Scan Part</strong><span>QR • barcode • SKU</span></a>
+    <a href="{{ url_for('mobile_workshop') }}"><b>⏱</b><strong>Workshop</strong><span>Clock on / off</span></a>
+    <a href="{{ url_for('vehicle_new') }}"><b>＋</b><strong>Add Vehicle</strong><span>New stock record</span></a>
+    <a href="{{ url_for('parts_page') }}"><b>⚙</b><strong>Add Part</strong><span>Parts Centre</span></a>
+    <a href="{{ url_for('crm_centre') }}"><b>🤝</b><strong>CRM</strong><span>Customers & follow-ups</span></a>
+  </div>
+  {% if open_timers %}<section class="panel mobile-section"><h2>Live Workshop Timers</h2>{% for t in open_timers %}<a class="mobile-list-card live" href="{{ url_for('workshop_booking_detail', booking_id=t.booking_id) }}"><strong>{{ t.technician or 'Technician' }}</strong><span>{{ t.stock_no or 'No vehicle' }} — {{ t.description }}</span><small>Started {{ t.clock_in|replace('T',' ') }}{% if t.bay %} • {{ t.bay }}{% endif %}</small></a>{% endfor %}</section>{% endif %}
+  <section class="panel mobile-section"><div class="panel-title"><div><h2>Today's Workshop</h2><p>{{ today_iso }}</p></div><a href="{{ url_for('mobile_workshop') }}">Open</a></div>{% for b in bookings %}<a class="mobile-list-card" href="{{ url_for('workshop_booking_detail',booking_id=b.id) }}"><strong>{{ b.start_time or 'Any time' }} — {{ b.stock_no or b.customer_name or 'Workshop Job' }}</strong><span>{{ b.description }}</span><small>{{ b.status }}{% if b.bay %} • {{ b.bay }}{% endif %}{% if b.technician %} • {{ b.technician }}{% endif %}</small></a>{% else %}<p class="muted">No workshop bookings today.</p>{% endfor %}</section>
+  <section class="panel mobile-section"><h2>Recent Vehicles</h2>{% for v in recent_vehicles %}<a class="mobile-list-card" href="{{ url_for('mobile_vehicle',vehicle_id=v.id) }}"><strong>{{ v.stock_no }} — {{ v.year or '' }} {{ v.make }} {{ v.model }}</strong><span>{{ v.registration or 'No rego' }}{% if v.vin %} • {{ v.vin }}{% endif %}</span><small>{{ v.status }}</small></a>{% endfor %}</section>
+</div>
+{% include '_mobile_nav.html' %}
+{% endblock %}

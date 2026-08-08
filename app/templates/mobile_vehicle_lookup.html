@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}Mobile Vehicle Lookup | BAM Motor Group{% endblock %}
+{% block content %}
+<div class="mobile-shell">
+  <div class="mobile-hero"><div><span class="eyebrow">Version 24.5</span><h1>Find Vehicle</h1><p>Search stock number, VIN, registration, make or model.</p></div></div>
+  <section class="panel scanner-panel mobile-section">
+    <form method="get" class="scanner-search"><input id="vehicle-code" name="code" value="{{ code }}" placeholder="VIN, rego or BAM-00001" autofocus><button>Find Vehicle</button></form>
+    <div class="scanner-camera"><video id="scanner-video" playsinline muted></video><div><button id="start-scan" type="button" class="button">Start Camera Scanner</button><button id="stop-scan" type="button" class="button secondary" hidden>Stop</button></div><p id="scanner-status" class="muted">If the VIN has a barcode or QR code, point the camera at it. Manual entry always works.</p></div>
+  </section>
+  {% if code %}<section class="panel mobile-section"><h2>Results</h2>{% for v in rows %}<a class="mobile-list-card" href="{{ url_for('mobile_vehicle',vehicle_id=v.id) }}"><strong>{{ v.stock_no }} — {{ v.year or '' }} {{ v.make }} {{ v.model }}</strong><span>{{ v.registration or 'No rego' }}{% if v.vin %} • {{ v.vin }}{% endif %}</span><small>{{ v.status }}</small></a>{% else %}<p>No vehicle found for <strong>{{ code }}</strong>.</p><a class="button" href="{{ url_for('vehicle_new') }}">Add New Vehicle</a>{% endfor %}</section>{% endif %}
+</div>
+{% include '_mobile_nav.html' %}
+<script>
+const start=document.getElementById('start-scan'), stop=document.getElementById('stop-scan'), video=document.getElementById('scanner-video'), statusEl=document.getElementById('scanner-status'), input=document.getElementById('vehicle-code'); let stream=null,detector=null,timer=null;
+async function scanFrame(){if(!detector||!stream)return;try{const codes=await detector.detect(video);if(codes.length){const value=codes[0].rawValue||'';stopScan();input.value=value;window.location='{{ url_for("mobile_vehicle_lookup") }}?code='+encodeURIComponent(value);return;}}catch(e){}timer=setTimeout(scanFrame,250)}
+async function startScan(){if(!('BarcodeDetector' in window)){statusEl.textContent='Camera barcode detection is not supported here. Type the VIN instead.';return;}try{detector=new BarcodeDetector({formats:['qr_code','code_128','code_39','data_matrix']});stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'}}});video.srcObject=stream;await video.play();video.classList.add('active');start.hidden=true;stop.hidden=false;statusEl.textContent='Point the camera at the VIN barcode or QR code.';scanFrame();}catch(e){statusEl.textContent='Camera could not start: '+e.message;}}
+function stopScan(){if(timer)clearTimeout(timer);if(stream)stream.getTracks().forEach(t=>t.stop());stream=null;video.srcObject=null;video.classList.remove('active');start.hidden=false;stop.hidden=true;} start.addEventListener('click',startScan);stop.addEventListener('click',stopScan);window.addEventListener('pagehide',stopScan);
+</script>
+{% endblock %}

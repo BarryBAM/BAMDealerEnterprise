@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block title %}{{ vehicle.stock_no }} Mobile | BAM Motor Group{% endblock %}
+{% block content %}
+<div class="mobile-shell">
+  <div class="mobile-hero"><div><span class="eyebrow">Mobile Vehicle</span><h1>{{ vehicle.stock_no }}</h1><p>{{ vehicle.year or '' }} {{ vehicle.make }} {{ vehicle.model }} {{ vehicle.variant or '' }}</p></div><span class="status-pill">{{ vehicle.status }}</span></div>
+  <div class="mobile-kpis"><article><span>Rego</span><strong class="small-value">{{ vehicle.registration or '—' }}</strong></article><article><span>Odometer</span><strong class="small-value">{{ '{:,}'.format(vehicle.odometer_km) if vehicle.odometer_km else '—' }}</strong></article><article><span>Parts Removed</span><strong>{{ parts_count }}</strong></article><article><span>Open Jobs</span><strong>{{ open_jobs }}</strong></article></div>
+  <section class="panel mobile-section"><h2>Quick Photo Capture</h2><p>Take photos straight from the phone camera and save them to this vehicle.</p><form method="post" enctype="multipart/form-data" class="mobile-capture-form"><input type="file" name="photos" accept="image/*" capture="environment" multiple required><input name="caption" value="Mobile capture" placeholder="Caption"><button>Upload Vehicle Photos</button></form></section>
+  {% if photos %}<section class="panel mobile-section"><h2>Recent Photos</h2><div class="mobile-photo-grid">{% for p in photos %}<img src="{{ url_for('uploaded_file',filename=p.filename) }}" alt="{{ p.caption or vehicle.stock_no }}">{% endfor %}</div></section>{% endif %}
+  <section class="panel mobile-section"><h2>Vehicle Details</h2><div class="mobile-facts"><div><span>VIN</span><strong>{{ vehicle.vin or '—' }}</strong></div><div><span>Purpose</span><strong>{{ vehicle.vehicle_purpose or 'Retail Sale' }}</strong></div><div><span>Dismantling</span><strong>{{ vehicle.dismantling_status or '—' }}</strong></div><div><span>Colour</span><strong>{{ vehicle.colour or '—' }}</strong></div></div></section>
+  <div class="mobile-action-grid compact"><a href="{{ url_for('vehicle_detail',vehicle_id=vehicle.id) }}"><b>↗</b><strong>Full Vehicle</strong></a><a href="{{ url_for('vin_intelligence',vehicle_id=vehicle.id) }}"><b>🔎</b><strong>VIN Intelligence</strong></a><a href="{{ url_for('workshop_intelligence',vehicle_id=vehicle.id) }}"><b>🛠</b><strong>Workshop</strong></a>{% if vehicle.vehicle_purpose=='Parts Vehicle' or vehicle.status=='BER' %}<a href="{{ url_for('vehicle_dismantling',vehicle_id=vehicle.id) }}"><b>⚙</b><strong>Dismantling</strong></a>{% endif %}</div>
+</div>
+{% include '_mobile_nav.html' %}
+{% endblock %}
