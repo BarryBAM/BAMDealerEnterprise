@@ -50,7 +50,7 @@ app.config.update(
     PERMANENT_SESSION_LIFETIME=timedelta(hours=int(os.environ.get("BAM_SESSION_HOURS", "12"))),
 )
 
-APP_VERSION = "23.1"
+APP_VERSION = "24.0"
 APP_NAME = "BAM Dealer Enterprise Cloud"
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "").strip()
 OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-5").strip() or "gpt-5"
@@ -4609,6 +4609,231 @@ def emanual_link_add(vehicle_id):
     flash("eManualOnline manual linked to this vehicle.", "success")
     return redirect(url_for("workshop_intelligence", vehicle_id=vehicle_id))
 
+
+
+# ---------------------------------------------------------------------------
+# Version 24 - Intelligent Dealer Platform
+# Safe local Dealer Copilot + Executive Dashboard.
+# The Copilot only runs predefined, read-only queries against BAM's own data.
+# ---------------------------------------------------------------------------
+def _copilot_money(value):
+    try:
+        return f"${float(value or 0):,.2f}"
+    except Exception:
+        return "$0.00"
+
+
+def dealer_copilot_answer(conn, question):
+    q = (question or "").strip()
+    low = q.lower()
+    result = {"question": q, "summary": "", "items": [], "kind": "general", "tips": []}
+    if not q:
+        result["summary"] = "Ask about vehicles, parts, workshop jobs, customers, invoices, reminders or business performance."
+        return result
+
+    # Exact stock / VIN / registration lookup first.
+    vehicle = conn.execute("""
+        SELECT id,stock_no,year,make,model,status,vin,registration,asking_price,purchase_price_inc_gst
+        FROM vehicles
+        WHERE UPPER(COALESCE(stock_no,''))=UPPER(?) OR UPPER(COALESCE(vin,''))=UPPER(?) OR UPPER(COALESCE(registration,''))=UPPER(?)
+        LIMIT 1
+    """, (q,q,q)).fetchone()
+    if vehicle:
+        result["kind"] = "vehicle"
+        result["summary"] = f"Found {vehicle['stock_no']} — {vehicle['year'] or ''} {vehicle['make']} {vehicle['model']}."
+        result["items"] = [{"title": f"{vehicle['stock_no']} — {vehicle['year'] or ''} {vehicle['make']} {vehicle['model']}", "subtitle": f"{vehicle['status']} · VIN {vehicle['vin'] or 'not recorded'} · Rego {vehicle['registration'] or 'not recorded'}", "amount": _copilot_money(vehicle['asking_price']), "url": url_for('vehicle_detail', vehicle_id=vehicle['id'])}]
+        return result
+
+    if ("profit" in low or "profitable" in low) and ("vehicle" in low or "car" in low or "stock" in low):
+        rows = conn.execute("""
+            SELECT v.id,v.stock_no,v.year,v.make,v.model,
+              COALESCE((SELECT s.sale_price_inc_gst FROM sales s WHERE s.vehicle_id=v.id),0)
+              + COALESCE((SELECT SUM(ps.sale_price) FROM part_sales ps JOIN parts p ON p.id=ps.part_id WHERE p.vehicle_id=v.id),0)
+              + COALESCE(v.shell_sale_price,0) AS revenue,
+              COALESCE(v.purchase_price_inc_gst,0)
+              + COALESCE((SELECT SUM(e.cost_inc_gst) FROM expenses e WHERE e.vehicle_id=v.id),0)
+              + COALESCE((SELECT SUM(CASE WHEN j.actual_cost_inc_gst>0 THEN j.actual_cost_inc_gst ELSE j.estimated_cost END) FROM job_cards j WHERE j.vehicle_id=v.id),0)
+              + COALESCE((SELECT SUM(se.cost_inc_gst) FROM service_entries se WHERE se.vehicle_id=v.id),0) AS invested
+            FROM vehicles v
+            ORDER BY (revenue-invested) DESC
+            LIMIT 10
+        """).fetchall()
+        result["kind"] = "profit"
+        result["summary"] = "Most profitable vehicles based on recorded vehicle sales, donor-part sales and shell revenue less recorded investment and costs."
+        for r in rows:
+            profit=float(r['revenue'] or 0)-float(r['invested'] or 0)
+            result["items"].append({"title": f"{r['stock_no']} — {r['year'] or ''} {r['make']} {r['model']}", "subtitle": f"Revenue {_copilot_money(r['revenue'])} · Invested {_copilot_money(r['invested'])}", "amount": _copilot_money(profit), "url": url_for('vehicle_detail', vehicle_id=r['id'])})
+        return result
+
+    days_match = re.search(r"(\d+)\s*day", low)
+    days = int(days_match.group(1)) if days_match else 90
+    if ("sitting" in low or "stock age" in low or "days in stock" in low or "old stock" in low):
+        today_text=date.today().isoformat()
+        rows=conn.execute("""
+            SELECT id,stock_no,year,make,model,status,purchase_date,
+                   CAST(julianday(?) - julianday(COALESCE(purchase_date,substr(created_at,1,10))) AS INTEGER) AS days_in_stock
+            FROM vehicles
+            WHERE status NOT IN ('Sold','BER')
+              AND (julianday(?) - julianday(COALESCE(purchase_date,substr(created_at,1,10)))) >= ?
+            ORDER BY days_in_stock DESC
+            LIMIT 30
+        """,(today_text,today_text,days)).fetchall()
+        result["kind"]="stock_age"
+        result["summary"]=f"{len(rows)} active vehicle(s) have been in stock for at least {days} days."
+        result["items"]=[{"title":f"{r['stock_no']} — {r['year'] or ''} {r['make']} {r['model']}","subtitle":f"{r['days_in_stock']} days · {r['status']}","amount":"","url":url_for('vehicle_detail',vehicle_id=r['id'])} for r in rows]
+        return result
+
+    if "photo" in low and ("missing" in low or "need" in low or "without" in low):
+        rows=conn.execute("""
+            SELECT id,stock_no,year,make,model,status FROM vehicles
+            WHERE status NOT IN ('Sold','BER') AND COALESCE(photo_filename,'')=''
+              AND NOT EXISTS (SELECT 1 FROM vehicle_photos p WHERE p.vehicle_id=vehicles.id)
+            ORDER BY id DESC LIMIT 30
+        """).fetchall()
+        result["kind"]="photos"; result["summary"]=f"{len(rows)} active vehicle(s) are missing photos."
+        result["items"]=[{"title":f"{r['stock_no']} — {r['year'] or ''} {r['make']} {r['model']}","subtitle":r['status'],"amount":"","url":url_for('vehicle_detail',vehicle_id=r['id'])} for r in rows]
+        return result
+
+    if "workshop" in low or "job" in low:
+        overdue = "overdue" in low
+        sql="""SELECT j.id,j.vehicle_id,j.description,j.status,j.job_date,v.stock_no,v.make,v.model
+               FROM job_cards j LEFT JOIN vehicles v ON v.id=j.vehicle_id
+               WHERE COALESCE(j.status,'Open')!='Completed'"""
+        params=[]
+        if overdue:
+            sql += " AND COALESCE(j.job_date,'9999-12-31') < ?"; params.append(date.today().isoformat())
+        sql += " ORDER BY j.job_date,j.id DESC LIMIT 30"
+        rows=conn.execute(sql,params).fetchall()
+        result["kind"]="workshop"; result["summary"]=("Overdue" if overdue else "Active")+f" workshop jobs: {len(rows)}."
+        result["items"]=[{"title":r['description'] or 'Workshop job',"subtitle":f"{r['stock_no'] or 'No vehicle'} — {r['make'] or ''} {r['model'] or ''} · {r['status']}","amount":"","url":url_for('vehicle_detail',vehicle_id=r['vehicle_id']) if r['vehicle_id'] else url_for('workshop_centre')} for r in rows]
+        return result
+
+    if "invoice" in low and ("draft" in low or "outstanding" in low or "unpaid" in low):
+        rows=conn.execute("""
+            SELECT s.vehicle_id,s.invoice_number,s.invoice_status,s.buyer_name,s.sale_price_inc_gst,v.stock_no,v.make,v.model
+            FROM sales s JOIN vehicles v ON v.id=s.vehicle_id
+            WHERE COALESCE(s.invoice_status,'Draft')!='Paid'
+            ORDER BY s.sale_date DESC LIMIT 30
+        """).fetchall()
+        result["kind"]="invoice"; result["summary"]=f"{len(rows)} invoice(s) are not marked Paid."
+        result["items"]=[{"title":r['invoice_number'] or 'Draft invoice',"subtitle":f"{r['buyer_name'] or 'Buyer'} · {r['stock_no']} {r['make']} {r['model']} · {r['invoice_status'] or 'Draft'}","amount":_copilot_money(r['sale_price_inc_gst']),"url":url_for('sale_invoice',vehicle_id=r['vehicle_id'])} for r in rows]
+        return result
+
+    if "reminder" in low or "task" in low or "attention" in low:
+        rows=conn.execute("""
+            SELECT r.id,r.vehicle_id,r.reminder_date,r.title,r.notes,v.stock_no,v.make,v.model
+            FROM reminders r LEFT JOIN vehicles v ON v.id=r.vehicle_id
+            WHERE r.completed=0
+            ORDER BY COALESCE(r.reminder_date,'9999-12-31'),r.id LIMIT 30
+        """).fetchall()
+        result["kind"]="reminders"; result["summary"]=f"{len(rows)} open reminder(s) need attention."
+        result["items"]=[{"title":r['title'],"subtitle":f"{r['stock_no'] or ''} {r['make'] or ''} {r['model'] or ''} · Due {r['reminder_date'] or 'not set'}","amount":"","url":url_for('vehicle_detail',vehicle_id=r['vehicle_id']) if r['vehicle_id'] else url_for('reminders_page')} for r in rows]
+        return result
+
+    if "part" in low or "engine" in low or "gearbox" in low or "transmission" in low:
+        stop={"show","me","all","find","parts","part","in","stock","the","a","an","for","from","do","we","have"}
+        terms=[t for t in re.findall(r"[a-z0-9-]+",low) if t not in stop and len(t)>1]
+        search="%"+"%".join(terms[:4])+"%" if terms else "%"
+        rows=conn.execute("""
+            SELECT id,part_number,part_name,category,quantity_on_hand,selling_price,storage_location,make,model,vehicle_stock_no,status
+            FROM parts
+            WHERE (LOWER(COALESCE(part_name,'')) LIKE ? OR LOWER(COALESCE(category,'')) LIKE ? OR LOWER(COALESCE(make,'')) LIKE ? OR LOWER(COALESCE(model,'')) LIKE ? OR LOWER(COALESCE(fitment,'')) LIKE ? OR LOWER(COALESCE(manufacturer_part_no,'')) LIKE ?)
+            ORDER BY quantity_on_hand DESC,id DESC LIMIT 40
+        """,(search,search,search,search,search,search)).fetchall()
+        result["kind"]="parts"; result["summary"]=f"Found {len(rows)} matching part(s)."
+        result["items"]=[{"title":f"{r['part_number'] or ''} — {r['part_name']}","subtitle":f"{r['make'] or ''} {r['model'] or ''} · Qty {r['quantity_on_hand'] or 0} · {r['storage_location'] or 'No location'} · {r['status'] or ''}","amount":_copilot_money(r['selling_price']),"url":url_for('part_detail',part_id=r['id'])} for r in rows]
+        return result
+
+    if any(k in low for k in ("sales this month","revenue this month","monthly sales","month profit","monthly profit")):
+        month=date.today().strftime('%Y-%m')
+        vehicle_rev=float(conn.execute("SELECT COALESCE(SUM(sale_price_inc_gst),0) v FROM sales WHERE substr(sale_date,1,7)=?",(month,)).fetchone()['v'] or 0)
+        parts_rev=float(conn.execute("SELECT COALESCE(SUM(sale_price),0) v FROM part_sales WHERE substr(sale_date,1,7)=?",(month,)).fetchone()['v'] or 0)
+        result["kind"]="money"; result["summary"]=f"Recorded revenue this month is {_copilot_money(vehicle_rev+parts_rev)}."
+        result["items"]=[{"title":"Vehicle sales","subtitle":month,"amount":_copilot_money(vehicle_rev),"url":url_for('invoice_centre')},{"title":"Parts sales","subtitle":month,"amount":_copilot_money(parts_rev),"url":url_for('parts_page')}]
+        return result
+
+    # Broad safe search fallback.
+    like=f"%{q}%"
+    vehicles=conn.execute("SELECT id,stock_no,year,make,model,status FROM vehicles WHERE stock_no LIKE ? OR make LIKE ? OR model LIKE ? OR vin LIKE ? OR registration LIKE ? LIMIT 12",(like,like,like,like,like)).fetchall()
+    parts=conn.execute("SELECT id,part_number,part_name,make,model,quantity_on_hand,selling_price FROM parts WHERE part_number LIKE ? OR part_name LIKE ? OR make LIKE ? OR model LIKE ? OR manufacturer_part_no LIKE ? LIMIT 12",(like,like,like,like,like)).fetchall()
+    result["kind"]="search"
+    for r in vehicles:
+        result["items"].append({"title":f"{r['stock_no']} — {r['year'] or ''} {r['make']} {r['model']}","subtitle":r['status'],"amount":"","url":url_for('vehicle_detail',vehicle_id=r['id'])})
+    for r in parts:
+        result["items"].append({"title":f"{r['part_number'] or ''} — {r['part_name']}","subtitle":f"{r['make'] or ''} {r['model'] or ''} · Qty {r['quantity_on_hand'] or 0}","amount":_copilot_money(r['selling_price']),"url":url_for('part_detail',part_id=r['id'])})
+    result["summary"]=f"I found {len(result['items'])} BAM record(s) matching “{q}”." if result['items'] else "I couldn't match that request yet. Try asking about parts, stock age, photos, workshop jobs, reminders, invoices or profitable vehicles."
+    result["tips"]=["Which vehicles have been sitting longer than 90 days?","Show vehicles missing photos","Show overdue workshop jobs","Which vehicles are most profitable?","Show draft invoices","Find Mini Cooper engine parts"]
+    return result
+
+
+@app.route("/copilot", methods=["GET", "POST"])
+@login_required
+def dealer_copilot():
+    question=(request.form.get("question") if request.method=="POST" else request.args.get("q")) or ""
+    conn=db()
+    answer=dealer_copilot_answer(conn,question) if question.strip() else None
+    conn.close()
+    examples=[
+        "Which vehicles have been sitting longer than 90 days?",
+        "Show vehicles missing photos",
+        "Show overdue workshop jobs",
+        "Which vehicles are most profitable?",
+        "Show draft invoices",
+        "Find Mini Cooper engine parts",
+    ]
+    return render_template("dealer_copilot.html",question=question,answer=answer,examples=examples)
+
+
+@app.route("/executive-dashboard")
+@login_required
+def executive_dashboard():
+    conn=db(); ensure_smart_reminders(conn)
+    today=date.today(); today_text=today.isoformat(); month=today.strftime('%Y-%m'); year=today.strftime('%Y')
+    vehicle_today=float(conn.execute("SELECT COALESCE(SUM(sale_price_inc_gst),0) v FROM sales WHERE substr(sale_date,1,10)=?",(today_text,)).fetchone()['v'] or 0)
+    parts_today=float(conn.execute("SELECT COALESCE(SUM(sale_price),0) v FROM part_sales WHERE substr(sale_date,1,10)=?",(today_text,)).fetchone()['v'] or 0)
+    vehicle_month=float(conn.execute("SELECT COALESCE(SUM(sale_price_inc_gst),0) v FROM sales WHERE substr(sale_date,1,7)=?",(month,)).fetchone()['v'] or 0)
+    parts_month=float(conn.execute("SELECT COALESCE(SUM(sale_price),0) v FROM part_sales WHERE substr(sale_date,1,7)=?",(month,)).fetchone()['v'] or 0)
+    vehicle_year=float(conn.execute("SELECT COALESCE(SUM(sale_price_inc_gst),0) v FROM sales WHERE substr(sale_date,1,4)=?",(year,)).fetchone()['v'] or 0)
+    parts_year=float(conn.execute("SELECT COALESCE(SUM(sale_price),0) v FROM part_sales WHERE substr(sale_date,1,4)=?",(year,)).fetchone()['v'] or 0)
+    month_cost=float(conn.execute("SELECT COALESCE(SUM(cost_inc_gst),0) v FROM expenses WHERE substr(expense_date,1,7)=?",(month,)).fetchone()['v'] or 0)
+    month_cost+=float(conn.execute("SELECT COALESCE(SUM(CASE WHEN actual_cost_inc_gst>0 THEN actual_cost_inc_gst ELSE estimated_cost END),0) v FROM job_cards WHERE substr(job_date,1,7)=?",(month,)).fetchone()['v'] or 0)
+    month_cost+=float(conn.execute("SELECT COALESCE(SUM(cost_inc_gst),0) v FROM service_entries WHERE substr(service_date,1,7)=?",(month,)).fetchone()['v'] or 0)
+    active=conn.execute("SELECT COUNT(*) c,COALESCE(SUM(purchase_price_inc_gst),0) value FROM vehicles WHERE status NOT IN ('Sold','BER')").fetchone()
+    avg_age=float(conn.execute("SELECT COALESCE(AVG(julianday(?) - julianday(COALESCE(purchase_date,substr(created_at,1,10)))),0) v FROM vehicles WHERE status NOT IN ('Sold','BER')",(today_text,)).fetchone()['v'] or 0)
+    parts_stock=conn.execute("SELECT COALESCE(SUM(quantity_on_hand),0) qty,COALESCE(SUM(quantity_on_hand*selling_price),0) retail FROM parts").fetchone()
+    open_workshop=conn.execute("SELECT COUNT(*) c FROM job_cards WHERE COALESCE(status,'Open')!='Completed'").fetchone()['c']
+    open_reminders=conn.execute("SELECT COUNT(*) c FROM reminders WHERE completed=0").fetchone()['c']
+    draft_invoices=conn.execute("SELECT COUNT(*) c,COALESCE(SUM(sale_price_inc_gst),0) value FROM sales WHERE COALESCE(invoice_status,'Draft')!='Paid'").fetchone()
+    unread_emails=conn.execute("SELECT COUNT(*) c FROM email_messages WHERE status='Unread'").fetchone()['c']
+    donor_count=conn.execute("SELECT COUNT(*) c FROM vehicles WHERE COALESCE(vehicle_purpose,'Retail Sale')='Parts Vehicle' OR status='BER'").fetchone()['c']
+    top_donors=conn.execute("""
+      SELECT v.id,v.stock_no,v.year,v.make,v.model,
+       COALESCE((SELECT SUM(ps.sale_price) FROM part_sales ps JOIN parts p ON p.id=ps.part_id WHERE p.vehicle_id=v.id),0)+COALESCE(v.shell_sale_price,0) revenue,
+       COALESCE(v.purchase_price_inc_gst,0)+COALESCE((SELECT SUM(e.cost_inc_gst) FROM expenses e WHERE e.vehicle_id=v.id),0) invested
+      FROM vehicles v WHERE COALESCE(v.vehicle_purpose,'Retail Sale')='Parts Vehicle' OR v.status='BER'
+      ORDER BY (revenue-invested) DESC LIMIT 6
+    """).fetchall()
+    aged_stock=conn.execute("""
+      SELECT id,stock_no,year,make,model,status,CAST(julianday(?) - julianday(COALESCE(purchase_date,substr(created_at,1,10))) AS INTEGER) days
+      FROM vehicles WHERE status NOT IN ('Sold','BER') ORDER BY days DESC LIMIT 8
+    """,(today_text,)).fetchall()
+    monthly=conn.execute("""
+      WITH months AS (
+        SELECT substr(sale_date,1,7) m FROM sales WHERE sale_date IS NOT NULL
+        UNION SELECT substr(sale_date,1,7) FROM part_sales WHERE sale_date IS NOT NULL
+      )
+      SELECT m,
+        COALESCE((SELECT SUM(sale_price_inc_gst) FROM sales WHERE substr(sale_date,1,7)=m),0) vehicle_sales,
+        COALESCE((SELECT SUM(sale_price) FROM part_sales WHERE substr(sale_date,1,7)=m),0) parts_sales
+      FROM months WHERE m<>'' GROUP BY m ORDER BY m DESC LIMIT 12
+    """).fetchall()
+    monthly=list(reversed(monthly))
+    conn.close()
+    kpis={"today_revenue":vehicle_today+parts_today,"month_revenue":vehicle_month+parts_month,"year_revenue":vehicle_year+parts_year,"month_result":vehicle_month+parts_month-month_cost,
+          "active_stock":active['c'],"stock_investment":active['value'],"avg_age":avg_age,"parts_qty":parts_stock['qty'],"parts_retail":parts_stock['retail'],"open_workshop":open_workshop,
+          "open_reminders":open_reminders,"draft_invoices":draft_invoices['c'],"draft_invoice_value":draft_invoices['value'],"unread_emails":unread_emails,"donor_count":donor_count}
+    return render_template("executive_dashboard.html",kpis=kpis,top_donors=top_donors,aged_stock=aged_stock,
+                           month_labels=[r['m'] for r in monthly],month_values=[float(r['vehicle_sales'] or 0)+float(r['parts_sales'] or 0) for r in monthly])
 
 @app.route("/parts/<int:part_id>/label")
 @login_required

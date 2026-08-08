@@ -32,6 +32,8 @@
   <nav class="sidebar-nav">
     <span class="nav-section">Operations</span>
     <a href="{{ url_for('dashboard') }}" class="{% if request.endpoint=='dashboard' %}active{% endif %}">⌂ Dashboard</a>
+    <a href="{{ url_for('dealer_copilot') }}" class="v24-copilot-nav {% if request.endpoint=='dealer_copilot' %}active{% endif %}">✦ Dealer Copilot</a>
+    <a href="{{ url_for('executive_dashboard') }}" class="{% if request.endpoint=='executive_dashboard' %}active{% endif %}">📊 Executive Dashboard</a>
     <a href="{{ url_for('equipment_list') }}" class="tooling-nav {% if request.endpoint in ['equipment_list','equipment_new','equipment_detail','equipment_edit'] %}active{% endif %}">🔧 Tooling & Equipment</a>
     <a href="{{ url_for('vehicle_list') }}" class="{% if request.endpoint in ['vehicle_list','vehicle_detail'] %}active{% endif %}">🚗 Vehicle Inventory</a>
     <a href="{{ url_for('vehicle_new') }}" class="{% if request.endpoint=='vehicle_new' %}active{% endif %}">＋ Add New Vehicle</a>

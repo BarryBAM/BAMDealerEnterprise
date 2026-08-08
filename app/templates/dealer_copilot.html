@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}Dealer Copilot | BAM Motor Group{% endblock %}
+{% block content %}
+<div class="page-head"><div><span class="eyebrow">Version 24 • Intelligent Dealer Platform</span><h1>✦ Dealer Copilot</h1><p>Ask BAM about the records already stored in your business system. Copilot uses safe, read-only BAM queries.</p></div><a class="button secondary" href="{{ url_for('executive_dashboard') }}">Executive Dashboard</a></div>
+<section class="panel copilot-hero">
+<form method="post" class="copilot-form"><input name="question" value="{{ question }}" autofocus placeholder="e.g. Which vehicles have been sitting longer than 90 days?" required><button class="button" type="submit">Ask BAM</button></form>
+<div class="copilot-examples">{% for x in examples %}<a href="{{ url_for('dealer_copilot',q=x) }}">{{ x }}</a>{% endfor %}</div>
+</section>
+{% if answer %}
+<section class="panel copilot-answer"><div class="panel-title"><div><span class="eyebrow">BAM Answer</span><h2>{{ answer.summary }}</h2></div><span>{{ answer.items|length }} result(s)</span></div>
+<div class="copilot-result-list">{% for item in answer.items %}<a href="{{ item.url }}" class="copilot-result"><div><strong>{{ item.title }}</strong><small>{{ item.subtitle }}</small></div>{% if item.amount %}<b>{{ item.amount }}</b>{% endif %}</a>{% else %}<div class="command-empty">No matching BAM records.</div>{% endfor %}</div>
+{% if answer.tips %}<div class="copilot-tips"><strong>Try:</strong>{% for t in answer.tips %}<a href="{{ url_for('dealer_copilot',q=t) }}">{{ t }}</a>{% endfor %}</div>{% endif %}
+</section>
+{% endif %}
+<section class="panel"><div class="panel-title"><h2>What Copilot understands in v24.0</h2></div><div class="copilot-capabilities"><div>🚗 Stock age & vehicle lookup</div><div>⚙ Parts & donor stock</div><div>🛠 Workshop jobs</div><div>💰 Vehicle profitability</div><div>🧾 Invoice status</div><div>🔔 Reminders & attention</div><div>📷 Missing photos</div><div>📈 Monthly revenue</div></div></section>
+{% endblock %}
