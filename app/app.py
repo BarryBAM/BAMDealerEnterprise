@@ -1,5 +1,10 @@
 
 import os
+import imaplib
+import smtplib
+import email
+from email.message import EmailMessage
+from email.header import decode_header
 import sqlite3
 import re
 import socket
@@ -56,7 +61,7 @@ app.config.update(
     PERMANENT_SESSION_LIFETIME=timedelta(hours=int(os.environ.get("BAM_SESSION_HOURS", "12"))),
 )
 
-APP_VERSION = "24.5"
+APP_VERSION = "24.6"
 APP_NAME = "BAM Dealer Enterprise Cloud"
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "").strip()
 OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-5").strip() or "gpt-5"
@@ -67,6 +72,11 @@ WORKSHOP_PORTAL_URL = os.environ.get("BAM_WORKSHOP_PORTAL_URL", "https://www.ema
 DEFAULT_LABOUR_RATE = float(os.environ.get("BAM_LABOUR_RATE", "145") or 145)
 EMAIL_WEBMAIL_URL = os.environ.get("BAM_EMAIL_WEBMAIL_URL", "").strip()
 EMAIL_ADDRESS = os.environ.get("BAM_EMAIL_ADDRESS", "").strip()
+EMAIL_IMAP_SERVER = os.environ.get("BAM_EMAIL_IMAP_SERVER", "").strip()
+EMAIL_IMAP_PORT = int(os.environ.get("BAM_EMAIL_IMAP_PORT", "993"))
+EMAIL_SMTP_SERVER = os.environ.get("BAM_EMAIL_SMTP_SERVER", "").strip()
+EMAIL_SMTP_PORT = int(os.environ.get("BAM_EMAIL_SMTP_PORT", "465"))
+EMAIL_PASSWORD = os.environ.get("BAM_EMAIL_PASSWORD", "").strip()
 
 ALLOWED_EXTENSIONS = {"png", "jpg", "jpeg", "webp", "pdf"}
 BACKUP_EXTENSIONS = {"zip"}
@@ -4813,7 +4823,58 @@ def email_centre():
                            email_webmail_url=EMAIL_WEBMAIL_URL, email_address=EMAIL_ADDRESS, q=q, status_filter=status,
                            today=date.today().isoformat())
 
+@app.route("/email-centre/compose", methods=["GET", "POST"])
+@login_required
+def compose_email():
+    if request.method == "POST":
+        recipient = (request.form.get("recipient") or "").strip()
+        subject = (request.form.get("subject") or "").strip()
+        body = (request.form.get("body") or "").strip()
 
+        if not recipient or not subject:
+            flash("Recipient and subject are required.", "error")
+            return render_template(
+                "compose_email.html",
+                email_address=EMAIL_ADDRESS,
+                recipient=recipient,
+                subject=subject,
+                body=body,
+            )
+
+        if not all([
+            EMAIL_ADDRESS,
+            EMAIL_PASSWORD,
+            EMAIL_SMTP_SERVER,
+            EMAIL_SMTP_PORT,
+        ]):
+            flash("Email sending is not fully configured.", "error")
+            return redirect(url_for("email_centre"))
+
+        try:
+            msg = EmailMessage()
+            msg["From"] = EMAIL_ADDRESS
+            msg["To"] = recipient
+            msg["Subject"] = subject
+            msg.set_content(body)
+
+            with smtplib.SMTP_SSL(
+                EMAIL_SMTP_SERVER,
+                EMAIL_SMTP_PORT,
+                timeout=30,
+            ) as smtp:
+                smtp.login(EMAIL_ADDRESS, EMAIL_PASSWORD)
+                smtp.send_message(msg)
+
+            flash("Email sent successfully.", "success")
+            return redirect(url_for("email_centre"))
+
+        except Exception as exc:
+            flash(f"Could not send email: {exc}", "error")
+
+    return render_template(
+        "compose_email.html",
+        email_address=EMAIL_ADDRESS,
+    )
 @app.route("/email-centre/<int:message_id>/status", methods=["POST"])
 @login_required
 def email_message_status(message_id):
@@ -4821,7 +4882,7 @@ def email_message_status(message_id):
     if new_status not in {"Unread","Read","Follow Up","Completed"}: new_status="Read"
     conn=db(); conn.execute("UPDATE email_messages SET status=? WHERE id=?", (new_status,message_id)); conn.commit(); conn.close()
     flash("Email status updated.", "success")
-    return redirect(request.referrer or url_for("email_centre"))
+    return redirect(request.referrer or url_for("centre"))
 
 
 @app.route("/email-centre/<int:message_id>/delete", methods=["POST"])

@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+
+{% block title %}Compose Email | BAM Motor Group{% endblock %}
+
+{% block content %}
+
+<div class="page-head">
+    <div>
+        <p class="eyebrow">BAM Communications Centre</p>
+        <h1>Compose Email</h1>
+    </div>
+
+    <div class="page-actions">
+        <a class="button secondary" href="{{ url_for('email_centre') }}">
+            Back to Email Centre
+        </a>
+    </div>
+</div>
+
+<section class="panel">
+    <div class="panel-title">
+        <div>
+            <h2>New Email</h2>
+            <p>Send email from {{ email_address }}</p>
+        </div>
+    </div>
+
+    <form method="post" class="form-grid">
+
+        <label class="wide">
+            From
+            <input
+                type="email"
+                value="{{ email_address }}"
+                readonly
+            >
+        </label>
+
+        <label class="wide">
+            To
+            <input
+                type="email"
+                name="recipient"
+                value="{{ recipient or '' }}"
+                placeholder="customer@example.com"
+                required
+            >
+        </label>
+
+        <label class="wide">
+            Subject
+            <input
+                type="text"
+                name="subject"
+                value="{{ subject or '' }}"
+                placeholder="Email subject"
+                required
+            >
+        </label>
+
+        <label class="wide">
+            Message
+            <textarea
+                name="body"
+                rows="12"
+                placeholder="Type your message here..."
+            >{{ body or '' }}</textarea>
+        </label>
+
+        <div class="wide">
+            <button class="button" type="submit">
+                Send Email
+            </button>
+        </div>
+
+    </form>
+</section>
+
+{% endblock %}
