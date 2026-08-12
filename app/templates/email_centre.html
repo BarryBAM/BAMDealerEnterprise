@@ -4,7 +4,7 @@
 <div class="page-head">
   <div><p class="eyebrow">Version 24.6 • BAM Communications Centre</p><h1>Email Centre</h1>></div>
   <div class="page-actions"><a class="button secondary" href="{{ url_for('crm_centre') }}">CRM Centre</a>
-    {% if email_webmail_url %}<a class="button" target="_blank" rel="noopener" href="{{ email_webmail_url }}">Open Webmail</a>{% endif %}
+    {% if email_webmail_url %}<a class="button" target="_top" rel="noopener" href="{{ email_webmail_url }}">Open Webmail</a>{% endif %}
     <a class="button secondary" href="{{ url_for('compose_email') }}">Compose Email</a>
   </div>
 </div>
