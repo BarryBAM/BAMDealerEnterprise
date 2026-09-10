@@ -3522,6 +3522,11 @@ def global_search():
     conn.close()
     return render_template("global_search.html", q=q, vehicles=vehicles, contacts=contacts, parts=parts, invoices=invoices)
 
+@app.route("/facebook-marketplace")
+@login_required
+def facebook_marketplace():
+    return redirect("https://www.facebook.com/marketplace/")
+
 
 @app.route("/reports/finance")
 @login_required
