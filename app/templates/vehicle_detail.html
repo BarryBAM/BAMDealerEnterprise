@@ -11,6 +11,7 @@
     <a class="button secondary" href="{{ url_for('dealer_intelligence', vehicle_id=vehicle.id) }}">🧠 Dealer Intelligence</a>
     <a class="button secondary" href="{{ url_for('vin_intelligence', vehicle_id=vehicle.id) }}">🔎 VIN Intelligence</a>
     <a class="button secondary" href="{{ url_for('workshop_intelligence', vehicle_id=vehicle.id) }}">🛠 Workshop Intelligence</a>
+    <a class="button secondary" href="https://motorregistry.com.au/" target="_blank" rel="noopener">🔎 REVS / Vehicle History Check</a>
     <span class="status">{{ vehicle.status }}</span>
     <a class="button" href="{{ url_for('vehicle_edit', vehicle_id=vehicle.id) }}">Edit Asset</a>
     {% if (vehicle.vehicle_purpose or 'Retail Sale') == 'Parts Vehicle' or vehicle.status == 'BER' %}<a class="button" href="{{ url_for('vehicle_dismantling', vehicle_id=vehicle.id) }}">🔧 Dismantling</a>{% endif %}
