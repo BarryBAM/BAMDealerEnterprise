@@ -298,9 +298,9 @@
             onclick="window.print()">
         Print / Save PDF
     </button>
-    <a class="button" href="https://www.facebook.com/" target="_blank" rel="noopener">
-    📘 Post to Facebook Business Page
-</a>
+ <button class="button" type="button" onclick="prepareFacebookPost()">
+  📘 Prepare Facebook Ad
+</button>
 </div>
 </div>
 
@@ -575,7 +575,27 @@
         await copyText(combinedText);
         alert("All advertisements copied.");
     }
+async function prepareFacebookPost() {
+    const facebookText = advertisementText("facebook-title", "facebook-ad");
 
+    if (!facebookText.trim()) {
+        alert("Please generate the Facebook advertisement first.");
+        return;
+    }
+
+    try {
+        await navigator.clipboard.writeText(facebookText);
+        alert(
+            "Facebook ad prepared!\n\n" +
+            "The advertisement has been copied.\n" +
+            "Facebook will now open.\n\n" +
+            "Paste the ad into your BAM Motor Group post, check it, then publish when ready."
+        );
+        window.open("https://www.facebook.com/", "_blank");
+    } catch (error) {
+        alert("Could not copy the Facebook advertisement. Please use Copy All instead.");
+    }
+}
     function downloadTextFile() {
         const combinedText =
             "BAM MOTOR GROUP — DEALER ADVERTISEMENT PACK\n\n" +
