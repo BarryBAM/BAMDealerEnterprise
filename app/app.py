@@ -2039,8 +2039,13 @@ def vehicle_detail(vehicle_id):
     )
 
     vehicle_profit = sale_price - total_invested
-    barry_receives = barry_invested + vehicle_profit / 2
-    matt_receives = matt_invested + vehicle_profit / 2
+
+    if sale and sale_price > 0:
+        barry_receives = barry_invested + vehicle_profit / 2
+        matt_receives = matt_invested + vehicle_profit / 2
+    else:
+        barry_receives = 0.0
+        matt_receives = 0.0
 
     # Version 21 - every dismantled-part sale feeds back to the donor vehicle.
     donor_parts = conn.execute(
