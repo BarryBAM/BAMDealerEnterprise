@@ -341,12 +341,14 @@ def init_db():
 
     ensure_column(conn, "vehicles", "asset_type", "TEXT DEFAULT 'Car'")
     ensure_column(conn, "vehicles", "length_m", "REAL")
+    ensure_column(conn, "vehicles", "width_m", "REAL")
     ensure_column(conn, "vehicles", "tare_weight_kg", "REAL")
     ensure_column(conn, "vehicles", "atm_kg", "REAL")
     ensure_column(conn, "vehicles", "gtm_kg", "REAL")
     ensure_column(conn, "vehicles", "berths", "INTEGER")
     ensure_column(conn, "vehicles", "axles", "INTEGER")
     ensure_column(conn, "vehicles", "caravan_features", "TEXT")
+    ensure_column(conn, "vehicles", "trailer_features", "TEXT")
     ensure_column(conn, "vehicles", "boat_type", "TEXT")
     ensure_column(conn, "vehicles", "hull_material", "TEXT")
     ensure_column(conn, "vehicles", "engine_make", "TEXT")
@@ -1528,8 +1530,8 @@ def vehicle_new():
                 "stock_no","status","purchase_date","make","model","variant","year","vin","registration",
                 "odometer_km","colour","purchase_price_inc_gst","purchase_gst","barry_contribution",
                 "matt_contribution","rego_expiry","photo_filename","notes","ppsr_number","roadworthy_status",
-                "service_due_date","service_history","asset_type","length_m","tare_weight_kg","atm_kg","gtm_kg",
-                "berths","axles","caravan_features","boat_type","hull_material","engine_make","engine_model",
+                "service_due_date","service_history","asset_type","length_m","width_m","tare_weight_kg",
+                "berths","axles","caravan_features","trailer_features","boat_type",
                 "engine_hours","horsepower","fuel_type","hin","trailer_included","trailer_registration",
                 "capacity_people","boat_features","vehicle_purpose","dismantling_status"
             ]
@@ -1543,10 +1545,10 @@ def vehicle_new():
                 request.form.get("notes"), request.form.get("ppsr_number"),
                 request.form.get("roadworthy_status") or "Not Checked", request.form.get("service_due_date"),
                 request.form.get("service_history"), request.form.get("asset_type") or "Car",
-                request.form.get("length_m") or None, request.form.get("tare_weight_kg") or None,
+                request.form.get("length_m") or None, request.form.get("width_m") or None, request.form.get("tare_weight_kg") or None,
                 request.form.get("atm_kg") or None, request.form.get("gtm_kg") or None,
                 request.form.get("berths") or None, request.form.get("axles") or None,
-                request.form.get("caravan_features"), request.form.get("boat_type"),
+                request.form.get("caravan_features"), request.form.get("trailer_features"), request.form.get("boat_type"),
                 request.form.get("hull_material"), request.form.get("engine_make"),
                 request.form.get("engine_model"), request.form.get("engine_hours") or None,
                 request.form.get("horsepower") or None, request.form.get("fuel_type"),
@@ -1613,12 +1615,14 @@ def vehicle_edit(vehicle_id):
                 "service_history": request.form.get("service_history") or None,
                 "asset_type": request.form.get("asset_type") or "Car",
                 "length_m": request.form.get("length_m") or None,
+                "width_m": request.form.get("width_m") or None,
                 "tare_weight_kg": request.form.get("tare_weight_kg") or None,
                 "atm_kg": request.form.get("atm_kg") or None,
                 "gtm_kg": request.form.get("gtm_kg") or None,
                 "berths": request.form.get("berths") or None,
                 "axles": request.form.get("axles") or None,
                 "caravan_features": request.form.get("caravan_features") or None,
+                "trailer_features": request.form.get("trailer_features") or None,
                 "boat_type": request.form.get("boat_type") or None,
                 "hull_material": request.form.get("hull_material") or None,
                 "engine_make": request.form.get("engine_make") or None,
