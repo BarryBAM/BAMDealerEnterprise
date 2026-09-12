@@ -150,6 +150,7 @@
     <input type="number" step="0.01" name="cost_inc_gst" placeholder="Cost inc GST"><input type="file" name="receipt"><textarea name="notes" placeholder="Notes"></textarea><button>Add Expense</button>
   </form>
   <table><tr><th>Date</th><th>Description</th><th>Cost</th></tr>{% for e in expenses %}<tr><td>{{ e.expense_date or '' }}</td><td>{{ e.description }}</td><td>{{ e.cost_inc_gst|money }}</td></tr>{% else %}<tr><td colspan="3">No expenses yet.</td></tr>{% endfor %}</table>
+  <div class="expense-total"><strong>Total Expenses:</strong> {{ expense_total|money }}</div>
 </section>
 <section id="workshop" class="panel"><div class="section-head"><div><h2>Workshop</h2><p>Job cards and labour estimates.</p></div><a class="button" href="{{ url_for('workshop_intelligence', vehicle_id=vehicle.id) }}">Open Workshop Intelligence</a></div>
   <form method="post" action="{{ url_for('job_card_add', vehicle_id=vehicle.id) }}" class="stack">
