@@ -178,4 +178,25 @@
   </form>
   {% if sale %}<div class="sale-summary"><strong>Sale recorded: {{ sale.sale_price_inc_gst|money }}</strong><span class="badge">{{ sale.invoice_status or 'Draft' }}</span><a class="button" href="{{ url_for('sale_invoice', vehicle_id=vehicle.id) }}" target="_blank">Tax Invoice</a><a class="button" href="{{ url_for('sale_invoice_edit', vehicle_id=vehicle.id) }}">Edit Invoice</a><a class="button" href="{{ url_for('deal_file', vehicle_id=vehicle.id) }}">Deal File</a></div>{% endif %}
 </section>
+<section id="partner-contributions" class="panel">
+  <h2>Partner Contribution & Profit</h2>
+
+  <div class="workspace-two-column">
+    <div>
+      <h3>Barry</h3>
+      <p><strong>Total Invested:</strong> {{ barry_invested|money }}</p>
+      <p><strong>Amount to Receive:</strong> {{ barry_receives|money }}</p>
+    </div>
+
+    <div>
+      <h3>Matt</h3>
+      <p><strong>Total Invested:</strong> {{ matt_invested|money }}</p>
+      <p><strong>Amount to Receive:</strong> {{ matt_receives|money }}</p>
+    </div>
+  </div>
+
+  <div class="sale-summary">
+    <strong>Vehicle Profit / Loss:</strong> {{ vehicle_profit|money }}
+  </div>
+</section>
 {% endblock %}
