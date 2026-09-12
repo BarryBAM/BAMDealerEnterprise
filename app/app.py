@@ -1968,6 +1968,80 @@ def vehicle_detail(vehicle_id):
     selling_costs = float((sale["advertising_cost"] or 0) + (sale["transfer_cost"] or 0)) if sale else 0
     total_invested = float(vehicle["purchase_price_inc_gst"] or 0) + expense_total + job_total + service_total + parts_total + selling_costs
 
+    def split_partner_costs(rows, amount_func):
+        barry = 0.0
+        matt = 0.0
+
+        for row in rows:
+            amount = float(amount_func(row) or 0)
+            paid_by = str(row["paid_by"] or "Shared").strip().lower()
+
+            if paid_by == "barry":
+                barry += amount
+            elif paid_by == "matt":
+                matt += amount
+            else:
+                barry += amount / 2
+                matt += amount / 2
+
+        return barry, matt
+
+    barry_invested = float(vehicle["barry_contribution"] or 0)
+    matt_invested = float(vehicle["matt_contribution"] or 0)
+
+    purchase_price = float(vehicle["purchase_price_inc_gst"] or 0)
+    purchase_balance = max(
+        purchase_price - barry_invested - matt_invested,
+        0
+    )
+    barry_invested += purchase_balance / 2
+    matt_invested += purchase_balance / 2
+
+    barry_expenses, matt_expenses = split_partner_costs(
+        expenses,
+        lambda row: row["cost_inc_gst"]
+    )
+
+    barry_jobs, matt_jobs = split_partner_costs(
+        job_cards,
+        lambda row: (
+            row["actual_cost_inc_gst"]
+            if float(row["actual_cost_inc_gst"] or 0) > 0
+            else row["estimated_cost"]
+        )
+    )
+
+    barry_services, matt_services = split_partner_costs(
+        services,
+        lambda row: row["cost_inc_gst"]
+    )
+
+    barry_parts, matt_parts = split_partner_costs(
+        parts_used,
+        lambda row: float(row["quantity_used"] or 0)
+        * float(row["unit_cost_inc_gst"] or 0)
+    )
+
+    barry_invested += (
+        barry_expenses
+        + barry_jobs
+        + barry_services
+        + barry_parts
+        + selling_costs / 2
+    )
+
+    matt_invested += (
+        matt_expenses
+        + matt_jobs
+        + matt_services
+        + matt_parts
+        + selling_costs / 2
+    )
+
+    vehicle_profit = sale_price - total_invested
+    barry_receives = barry_invested + vehicle_profit / 2
+    matt_receives = matt_invested + vehicle_profit / 2
+
     # Version 21 - every dismantled-part sale feeds back to the donor vehicle.
     donor_parts = conn.execute(
         "SELECT * FROM parts WHERE vehicle_id=? ORDER BY id DESC", (vehicle_id,)
