@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Executive Dashboard | BAM Motor Group{% endblock %}
 {% block content %}
-<div class="page-head"><div><span class="eyebrow">Version 24 • Executive Intelligence</span><h1>📊 Executive Dashboard</h1><p>A business-wide view of vehicles, parts, workshop activity, cash-generating sales and outstanding actions.</p></div><a class="button" href="{{ url_for('dealer_copilot') }}">✦ Ask Dealer Copilot</a></div>
+<div class="page-head"><div><span class="eyebrow">Version 25.0 • Executive Intelligence</span><h1>📊 Executive Dashboard</h1><p>A business-wide view of vehicles, parts, workshop activity, cash-generating sales and outstanding actions.</p></div><a class="button" href="{{ url_for('dealer_copilot') }}">✦ Ask Dealer Copilot</a></div>
 <div class="executive-kpis">
   <article><span>Revenue Today</span><strong>{{ kpis.today_revenue|money }}</strong><small>Vehicle + parts sales</small></article>
   <article><span>Revenue This Month</span><strong>{{ kpis.month_revenue|money }}</strong><small>Recorded sales</small></article>
