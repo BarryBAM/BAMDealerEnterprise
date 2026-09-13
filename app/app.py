@@ -1475,7 +1475,50 @@ def dashboard():
         email_metrics=email_metrics,
         recent_emails=recent_emails,
     )
+@app.route("/partner-settlement")
+@login_required
+def partner_settlement():
+    conn = db()
 
+    vehicles = conn.execute("""
+        SELECT
+            id,
+            stock_no,
+            year,
+            make,
+            model,
+            status,
+            purchase_price_inc_gst,
+            barry_contribution,
+            matt_contribution
+        FROM vehicles
+        ORDER BY id DESC
+    """).fetchall()
+
+    barry_total = sum(float(v["barry_contribution"] or 0) for v in vehicles)
+    matt_total = sum(float(v["matt_contribution"] or 0) for v in vehicles)
+
+    difference = barry_total - matt_total
+    settlement_amount = abs(difference) / 2
+
+    if difference > 0:
+        settlement_message = f"Matt owes Barry ${settlement_amount:,.2f}"
+    elif difference < 0:
+        settlement_message = f"Barry owes Matt ${settlement_amount:,.2f}"
+    else:
+        settlement_message = "Barry and Matt are fully balanced"
+
+    conn.close()
+
+    return render_template(
+        "partner_settlement.html",
+        vehicles=vehicles,
+        barry_total=barry_total,
+        matt_total=matt_total,
+        difference=difference,
+        settlement_amount=settlement_amount,
+        settlement_message=settlement_message,
+    )
 @app.route("/vehicles")
 @login_required
 def vehicle_list():
