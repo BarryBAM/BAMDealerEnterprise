@@ -21,6 +21,13 @@
 <div class="pricing-summary"><span>Asking margin over purchase</span><strong id="asking-margin">$0.00</strong></div>
 </div></div>
 <label>Barry Contribution<input type="number" step="0.01" name="barry_contribution" value="{{ vehicle.barry_contribution or 0 }}"></label><label>Matt Contribution<input type="number" step="0.01" name="matt_contribution" value="{{ vehicle.matt_contribution or 0 }}"></label>
+<label>Sale Ownership
+    <select name="sale_ownership">
+        <option value="BAM Joint" {% if (vehicle.sale_ownership or 'BAM Joint') == 'BAM Joint' %}selected{% endif %}>BAM Joint</option>
+        <option value="Barry Personal" {% if vehicle.sale_ownership == 'Barry Personal' %}selected{% endif %}>Barry Personal</option>
+        <option value="Matt Personal" {% if vehicle.sale_ownership == 'Matt Personal' %}selected{% endif %}>Matt Personal</option>
+    </select>
+</label>
 <label>Registration Expiry<input type="date" name="rego_expiry" value="{{ vehicle.rego_expiry or '' }}"></label><label>Shell / Scrap Sale<input type="number" step="0.01" min="0" name="shell_sale_price" value="{{ vehicle.shell_sale_price or 0 }}"></label><label>Shell Sale Date<input type="date" name="shell_sale_date" value="{{ vehicle.shell_sale_date or '' }}"></label><label>PPSR Number ...<input name="ppsr_number" value="{{ vehicle.ppsr_number or '' }}"></label>
 <label>Condition / Roadworthy<select name="roadworthy_status">{% for r in ["Not Checked","Required","Booked","Passed","Failed"] %}<option {% if vehicle.roadworthy_status==r %}selected{% endif %}>{{ r }}</option>{% endfor %}</select></label><label>Service Due Date<input type="date" name="service_due_date" value="{{ vehicle.service_due_date or '' }}"></label>
 <div class="wide asset-section caravan-fields"><h2>Caravan Details</h2><div class="grid-form nested-grid">

@@ -128,6 +128,7 @@ def init_db():
         purchase_gst REAL NOT NULL DEFAULT 0,
         barry_contribution REAL NOT NULL DEFAULT 0,
         matt_contribution REAL NOT NULL DEFAULT 0,
+        sale_ownership TEXT NOT NULL DEFAULT 'BAM Joint',
         rego_expiry TEXT,
         photo_filename TEXT,
         notes TEXT,
@@ -694,7 +695,7 @@ def init_db():
     ensure_column(conn, "email_messages", "priority", "TEXT DEFAULT 'Normal'")
     ensure_column(conn, "email_messages", "category", "TEXT")
     ensure_column(conn, "email_messages", "assigned_to", "TEXT")
-
+    ensure_column(conn, "vehicles", "sale_ownership", "TEXT NOT NULL DEFAULT 'BAM Joint'")
     # Version 24.1 - Professional Workshop Scheduler
     conn.executescript("""
         CREATE TABLE IF NOT EXISTS workshop_bookings (
@@ -1572,9 +1573,9 @@ def vehicle_new():
             fields = [
                 "stock_no","status","purchase_date","make","model","variant","year","vin","registration",
                 "odometer_km","colour","purchase_price_inc_gst","purchase_gst","barry_contribution",
-                "matt_contribution","rego_expiry","photo_filename","notes","ppsr_number","roadworthy_status",
-                "service_due_date","service_history","asset_type","length_m","width_m","tare_weight_kg",
-                "berths","axles","caravan_features","trailer_features","boat_type",
+                "matt_contribution","sale_ownership","rego_expiry","photo_filename","notes","ppsr_number","roadworthy_status",
+                "service_due_date","service_history","asset_type","length_m","width_m","tare_Weight_kg","atm_kg","gtm_kg",
+                "berths","axles","caravan_features","trailer_features","boat_type","hull_material","engine_make","engine_model",
                 "engine_hours","horsepower","fuel_type","hin","trailer_included","trailer_registration",
                 "capacity_people","boat_features","vehicle_purpose","dismantling_status"
             ]
@@ -1584,7 +1585,7 @@ def vehicle_new():
                 request.form.get("variant"), request.form.get("year") or None, request.form.get("vin") or None,
                 request.form.get("registration"), request.form.get("odometer_km") or None, request.form.get("colour"),
                 price, gst, float(request.form.get("barry_contribution") or 0),
-                float(request.form.get("matt_contribution") or 0), request.form.get("rego_expiry"), photo,
+                float(request.form.get("matt_contribution") or 0),request.form.get("sale_ownership") or "BAM Joint", request.form.get("rego_expiry"), photo,
                 request.form.get("notes"), request.form.get("ppsr_number"),
                 request.form.get("roadworthy_status") or "Not Checked", request.form.get("service_due_date"),
                 request.form.get("service_history"), request.form.get("asset_type") or "Car",
@@ -1649,6 +1650,7 @@ def vehicle_edit(vehicle_id):
                 "negotiated_price": float(request.form.get("negotiated_price") or 0),
                 "barry_contribution": float(request.form.get("barry_contribution") or 0),
                 "matt_contribution": float(request.form.get("matt_contribution") or 0),
+                "sale_ownership": request.form.get("sale_ownership") or vehicle["sale_ownership"] or "BAM Joint",
                 "rego_expiry": request.form.get("rego_expiry") or None,
                 "photo_filename": photo_filename,
                 "notes": request.form.get("notes") or None,
@@ -1695,7 +1697,7 @@ def vehicle_edit(vehicle_id):
                     stock_no=?, status=?, purchase_date=?, make=?, model=?, variant=?, year=?,
                     vin=?, registration=?, odometer_km=?, colour=?, purchase_price_inc_gst=?,
                     purchase_gst=?, asking_price=?, minimum_sale_price=?, negotiated_price=?,
-                    barry_contribution=?, matt_contribution=?, rego_expiry=?,
+                    barry_contribution=?, matt_contribution=?, sale_ownership=?, rego_expiry=?,
                     photo_filename=?, notes=?, ppsr_number=?, roadworthy_status=?,
                     service_due_date=?, service_history=?, asset_type=?, length_m=?, tare_weight_kg=?,
                     atm_kg=?, gtm_kg=?, berths=?, axles=?, caravan_features=?, boat_type=?, hull_material=?,
@@ -1710,6 +1712,7 @@ def vehicle_edit(vehicle_id):
                 values["colour"], values["purchase_price_inc_gst"], values["purchase_gst"],
                 values["asking_price"], values["minimum_sale_price"], values["negotiated_price"],
                 values["barry_contribution"], values["matt_contribution"],
+                values["sale_ownership"],
                 values["rego_expiry"], values["photo_filename"], values["notes"],
                 values["ppsr_number"], values["roadworthy_status"],
                 values["service_due_date"], values["service_history"], values["asset_type"],
@@ -1737,7 +1740,7 @@ def vehicle_edit(vehicle_id):
                 "stock_no", "status", "purchase_date", "make", "model", "variant",
                 "year", "vin", "registration", "odometer_km", "colour",
                 "purchase_price_inc_gst", "asking_price", "minimum_sale_price", "negotiated_price",
-                "barry_contribution", "matt_contribution",
+                "barry_contribution", "matt_contribution", "sale_ownership",
                 "rego_expiry", "ppsr_number", "roadworthy_status",
                 "service_due_date", "service_history", "asset_type", "length_m", "tare_weight_kg",
                 "atm_kg", "gtm_kg", "berths", "axles", "caravan_features", "boat_type",
@@ -1767,7 +1770,7 @@ def vehicle_edit(vehicle_id):
             conn.close()
             flash(str(exc), "error")
             vehicle = {**dict(vehicle), **request.form.to_dict()}
-
+ 
     else:
         conn.close()
 
@@ -2041,8 +2044,15 @@ def vehicle_detail(vehicle_id):
         purchase_price - barry_invested - matt_invested,
         0
     )
-    barry_invested += purchase_balance / 2
-    matt_invested += purchase_balance / 2
+    sale_ownership = vehicle["sale_ownership"] or "BAM Joint"
+
+    if sale_ownership == "Barry Personal":
+        barry_invested += purchase_balance
+    elif sale_ownership == "Matt Personal":
+        matt_invested += purchase_balance
+    else:
+        barry_invested += purchase_balance / 2
+        matt_invested += purchase_balance / 2
 
     barry_expenses, matt_expenses = split_partner_costs(
         expenses,
@@ -2088,12 +2098,18 @@ def vehicle_detail(vehicle_id):
     vehicle_profit = sale_price - total_invested
 
     if sale and sale_price > 0:
-        barry_receives = barry_invested + vehicle_profit / 2
-        matt_receives = matt_invested + vehicle_profit / 2
+        if sale_ownership == "Barry Personal":
+            barry_receives = sale_price
+            matt_receives = 0.0
+        elif sale_ownership == "Matt Personal":
+           barry_receives = 0.0
+           matt_receives = sale_price
+        else:
+           barry_receives = barry_invested + vehicle_profit / 2
+           matt_receives = matt_invested + vehicle_profit / 2
     else:
         barry_receives = 0.0
         matt_receives = 0.0
-
     # Version 21 - every dismantled-part sale feeds back to the donor vehicle.
     donor_parts = conn.execute(
         "SELECT * FROM parts WHERE vehicle_id=? ORDER BY id DESC", (vehicle_id,)
@@ -3911,9 +3927,9 @@ def quick_add_vehicle():
         INSERT INTO vehicles(
             stock_no,status,purchase_date,make,model,variant,year,vin,registration,
             odometer_km,colour,purchase_price_inc_gst,purchase_gst,
-            barry_contribution,matt_contribution,rego_expiry,photo_filename,notes,
+            barry_contribution,matt_contribution,sale_ownership,rego_expiry,photo_filename,notes,
             ppsr_number,roadworthy_status,service_due_date,service_history
-        ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     """, (
         stock_no,
         request.form.get("status") or "In Stock",
@@ -3930,6 +3946,7 @@ def quick_add_vehicle():
         gst,
         float(request.form.get("barry_contribution") or 0),
         float(request.form.get("matt_contribution") or 0),
+        request.form.get("sale_ownership") or "BAM Joint",
         request.form.get("rego_expiry"),
         None,
         request.form.get("notes"),
