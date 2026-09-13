@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+
+{% block title %}Partner Settlement | BAM Motor Group{% endblock %}
+
+{% block content %}
+
+<div class="page-head">
+    <div>
+        <p class="eyebrow">Version 25.1 • Partner Settlement</p>
+        <h1>Partner Settlement & Reconciliation Centre</h1>
+        <p>Track Barry and Matt contributions and see the current balancing position.</p>
+    </div>
+</div>
+
+<div class="mini-kpi-grid">
+    <article>
+        <span>Barry Contributions</span>
+        <strong>{{ barry_total|money }}</strong>
+    </article>
+
+    <article>
+        <span>Matt Contributions</span>
+        <strong>{{ matt_total|money }}</strong>
+    </article>
+
+    <article>
+        <span>Difference</span>
+        <strong>{{ difference|abs|money }}</strong>
+    </article>
+
+    <article>
+        <span>Settlement Required</span>
+        <strong>{{ settlement_amount|money }}</strong>
+    </article>
+</div>
+
+<section class="panel">
+    <div class="panel-title">
+        <div>
+            <h2>Current Settlement Position</h2>
+            <p>{{ settlement_message }}</p>
+        </div>
+    </div>
+</section>
+
+<section class="panel">
+    <div class="panel-title">
+        <div>
+            <h2>Vehicle Contributions</h2>
+            <p>Contribution amounts recorded against each vehicle.</p>
+        </div>
+    </div>
+
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th>Stock No.</th>
+                    <th>Vehicle</th>
+                    <th>Status</th>
+                    <th>Purchase Price</th>
+                    <th>Barry</th>
+                    <th>Matt</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for v in vehicles %}
+                <tr>
+                    <td>{{ v.stock_no or "-" }}</td>
+                    <td>{{ v.year or "" }} {{ v.make or "" }} {{ v.model or "" }}</td>
+                    <td>{{ v.status or "-" }}</td>
+                    <td>{{ (v.purchase_price_inc_gst or 0)|money }}</td>
+                    <td>{{ (v.barry_contribution or 0)|money }}</td>
+                    <td>{{ (v.matt_contribution or 0)|money }}</td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="6">No vehicle contribution records found.</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</section>
+
+{% endblock %}
