@@ -1,5 +1,6 @@
 
 import os
+import html
 import imaplib
 import smtplib
 import email
@@ -8,6 +9,7 @@ from email.header import decode_header
 import sqlite3
 import re
 import socket
+import ipaddress
 import io
 import csv
 import json
@@ -21,7 +23,7 @@ from datetime import datetime, date, timedelta
 from functools import wraps
 from pathlib import Path
 
-from flask import Flask, Response, flash, jsonify, redirect, render_template, request, send_file, send_from_directory, session, url_for
+from flask import Flask, Response, flash, jsonify, redirect, render_template, render_template_string, request, send_file, send_from_directory, session, url_for
 from werkzeug.security import check_password_hash, generate_password_hash
 from werkzeug.utils import secure_filename
 from werkzeug.middleware.proxy_fix import ProxyFix
@@ -61,7 +63,7 @@ app.config.update(
     PERMANENT_SESSION_LIFETIME=timedelta(hours=int(os.environ.get("BAM_SESSION_HOURS", "12"))),
 )
 
-APP_VERSION = "25.0"
+APP_VERSION = "25.13.1"
 APP_NAME = "BAM Dealer Enterprise Cloud"
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "").strip()
 OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-5").strip() or "gpt-5"
@@ -740,6 +742,80 @@ def init_db():
         CREATE INDEX IF NOT EXISTS idx_workshop_bookings_vehicle ON workshop_bookings(vehicle_id);
         CREATE INDEX IF NOT EXISTS idx_workshop_time_booking ON workshop_time_entries(booking_id);
     """)
+
+    # Version 25.1 - BAM Auction Watch
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS auction_vehicles (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, status TEXT NOT NULL DEFAULT 'Watching', asset_type TEXT NOT NULL DEFAULT 'Car',
+            auction_name TEXT, auction_location TEXT, auction_url TEXT, lot_number TEXT, auction_start TEXT, auction_finish TEXT,
+            year INTEGER, make TEXT NOT NULL, model TEXT NOT NULL, variant TEXT, vin TEXT, registration TEXT, odometer_km INTEGER,
+            engine_hours REAL, colour TEXT, interior TEXT, transmission TEXT, drive_type TEXT, fuel_type TEXT, tow_bar INTEGER NOT NULL DEFAULT 0,
+            condition_grade TEXT, condition_notes TEXT, current_bid REAL NOT NULL DEFAULT 0, max_bid REAL NOT NULL DEFAULT 0,
+            sold_price REAL NOT NULL DEFAULT 0, auction_fees REAL NOT NULL DEFAULT 0, transport_cost REAL NOT NULL DEFAULT 0, other_costs REAL NOT NULL DEFAULT 0,
+            market_low REAL NOT NULL DEFAULT 0, market_mid REAL NOT NULL DEFAULT 0, market_high REAL NOT NULL DEFAULT 0, valuation_source TEXT, valuation_checked_at TEXT,
+            won_vehicle_id INTEGER, created_by TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT,
+            FOREIGN KEY(won_vehicle_id) REFERENCES vehicles(id) ON DELETE SET NULL
+        );
+        CREATE TABLE IF NOT EXISTS auction_photos (id INTEGER PRIMARY KEY AUTOINCREMENT, auction_vehicle_id INTEGER NOT NULL, filename TEXT NOT NULL, caption TEXT, uploaded_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY(auction_vehicle_id) REFERENCES auction_vehicles(id) ON DELETE CASCADE);
+        CREATE INDEX IF NOT EXISTS idx_auction_vehicle_type ON auction_vehicles(asset_type);
+        CREATE INDEX IF NOT EXISTS idx_auction_make_model ON auction_vehicles(make,model);
+        CREATE INDEX IF NOT EXISTS idx_auction_finish ON auction_vehicles(auction_finish);
+        CREATE INDEX IF NOT EXISTS idx_auction_status ON auction_vehicles(status);
+    """)
+
+    # Version 25.5 - richer Auction Watch fields for cars, caravans, boats,
+    # trailers and motorcycles. ensure_column keeps existing databases safe.
+    ensure_column(conn, "auction_vehicles", "engine_size", "TEXT")
+    ensure_column(conn, "auction_vehicles", "engine_cc", "INTEGER")
+    ensure_column(conn, "auction_vehicles", "engine_cylinders", "TEXT")
+    ensure_column(conn, "auction_vehicles", "length_m", "REAL")
+    ensure_column(conn, "auction_vehicles", "berths", "INTEGER")
+    ensure_column(conn, "auction_vehicles", "axles", "INTEGER")
+    ensure_column(conn, "auction_vehicles", "tare_weight_kg", "REAL")
+    ensure_column(conn, "auction_vehicles", "atm_kg", "REAL")
+    ensure_column(conn, "auction_vehicles", "gtm_kg", "REAL")
+    ensure_column(conn, "auction_vehicles", "ball_weight_kg", "REAL")
+    ensure_column(conn, "auction_vehicles", "width_m", "REAL")
+    ensure_column(conn, "auction_vehicles", "height_m", "REAL")
+    ensure_column(conn, "auction_vehicles", "caravan_features", "TEXT")
+    ensure_column(conn, "auction_vehicles", "boat_type", "TEXT")
+    ensure_column(conn, "auction_vehicles", "hull_material", "TEXT")
+    ensure_column(conn, "auction_vehicles", "engine_make", "TEXT")
+    ensure_column(conn, "auction_vehicles", "engine_model", "TEXT")
+    ensure_column(conn, "auction_vehicles", "horsepower", "REAL")
+    ensure_column(conn, "auction_vehicles", "trailer_included", "INTEGER DEFAULT 0")
+    ensure_column(conn, "auction_vehicles", "trailer_registration", "TEXT")
+    ensure_column(conn, "auction_vehicles", "capacity_people", "INTEGER")
+    ensure_column(conn, "auction_vehicles", "boat_features", "TEXT")
+    ensure_column(conn, "auction_vehicles", "trailer_features", "TEXT")
+
+    # Version 25.6 - BAM Buying Watch + unified valuation hub.
+    ensure_column(conn, "auction_vehicles", "listing_source", "TEXT DEFAULT 'Auction'")
+    ensure_column(conn, "auction_vehicles", "seller_name", "TEXT")
+    ensure_column(conn, "auction_vehicles", "seller_phone", "TEXT")
+    ensure_column(conn, "auction_vehicles", "seller_location", "TEXT")
+    ensure_column(conn, "auction_vehicles", "listing_url", "TEXT")
+    ensure_column(conn, "auction_vehicles", "date_first_seen", "TEXT")
+    ensure_column(conn, "auction_vehicles", "last_checked", "TEXT")
+    ensure_column(conn, "auction_vehicles", "asking_price", "REAL DEFAULT 0")
+    ensure_column(conn, "auction_vehicles", "negotiated_price", "REAL DEFAULT 0")
+    ensure_column(conn, "auction_vehicles", "private_value_low", "REAL DEFAULT 0")
+    ensure_column(conn, "auction_vehicles", "private_value_high", "REAL DEFAULT 0")
+    ensure_column(conn, "auction_vehicles", "wholesale_value_low", "REAL DEFAULT 0")
+    ensure_column(conn, "auction_vehicles", "wholesale_value_high", "REAL DEFAULT 0")
+    ensure_column(conn, "auction_vehicles", "trade_value_low", "REAL DEFAULT 0")
+    ensure_column(conn, "auction_vehicles", "trade_value_high", "REAL DEFAULT 0")
+    ensure_column(conn, "auction_vehicles", "dealer_value_low", "REAL DEFAULT 0")
+    ensure_column(conn, "auction_vehicles", "dealer_value_high", "REAL DEFAULT 0")
+    ensure_column(conn, "auction_vehicles", "suggested_buy_price", "REAL DEFAULT 0")
+    ensure_column(conn, "auction_vehicles", "valuation_provider", "TEXT")
+    ensure_column(conn, "auction_vehicles", "valuation_confidence", "TEXT")
+    # Version 25.8.3 - registration sale/status from auction listings.
+    ensure_column(conn, "auction_vehicles", "registration_status", "TEXT")
+    # Version 25.9 - richer Buying Watch vehicle details.
+    ensure_column(conn, "auction_vehicles", "reserve_status", "TEXT")
+    ensure_column(conn, "auction_vehicles", "body_type", "TEXT")
+    ensure_column(conn, "auction_vehicles", "seat_count", "INTEGER")
 
     count = conn.execute(
         "SELECT COUNT(*) AS c FROM users"
@@ -1612,7 +1688,7 @@ def vehicle_new():
             return redirect(url_for("vehicle_list"))
         except (sqlite3.IntegrityError, ValueError) as exc:
             flash(str(exc), "error")
-    return render_template("vehicle_form.html", suggested_stock=suggested_stock)
+    return render_template("vehicle_form.html", suggested_stock=suggested_stock, vehicle_makes=VEHICLE_MAKES, vehicle_model_catalog=VEHICLE_MODEL_CATALOG, fuel_types=FUEL_TYPES, transmission_types=TRANSMISSION_TYPES, drive_types=DRIVE_TYPES)
 
 @app.route("/vehicles/<int:vehicle_id>/edit", methods=["GET", "POST"])
 @login_required
@@ -6037,6 +6113,2419 @@ def mobile_workshop():
     """, (today_iso,)).fetchall()
     conn.close()
     return render_template("mobile_workshop.html", bookings=bookings, today_iso=today_iso)
+
+
+# -----------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# BAM Buying Watch listing importer - Version 25.8
+# Clean multi-site importer. Public listing pages are read with a browser-like
+# request, parsed from metadata / JSON-LD / visible page text, and normalised
+# into the same BAM Buying Watch fields. Sites that require login (especially
+# Facebook Marketplace) fall back to pasted listing text instead of crashing.
+# ---------------------------------------------------------------------------
+
+def _strip_html(value):
+    value = str(value or "")
+    # Keep natural breaks between common block elements before stripping tags.
+    value = re.sub(r"<(?:br|/p|/div|/li|/tr|/h[1-6])\b[^>]*>", "\n", value, flags=re.I)
+    value = re.sub(r"<script\b[^>]*>.*?</script>", " ", value, flags=re.I | re.S)
+    value = re.sub(r"<style\b[^>]*>.*?</style>", " ", value, flags=re.I | re.S)
+    value = re.sub(r"<[^>]+>", " ", value)
+    value = html.unescape(value)
+    return re.sub(r"\s+", " ", value).strip()
+
+
+def _meta_content(page_html, prop):
+    patterns = [
+        rf'<meta[^>]+(?:property|name)\s*=\s*["\']{re.escape(prop)}["\'][^>]+content\s*=\s*["\']([^"\']*)["\']',
+        rf'<meta[^>]+content\s*=\s*["\']([^"\']*)["\'][^>]+(?:property|name)\s*=\s*["\']{re.escape(prop)}["\']',
+    ]
+    for pat in patterns:
+        match = re.search(pat, page_html or "", flags=re.I | re.S)
+        if match:
+            return _strip_html(match.group(1))
+    return ""
+
+
+def _detect_listing_source(url):
+    host = (urllib.parse.urlparse(url or "").netloc or "").lower()
+    if "facebook.com" in host or "fb.com" in host:
+        return "Facebook Marketplace"
+    if "gumtree.com" in host:
+        return "Gumtree"
+    if "carsales.com" in host:
+        return "Carsales"
+    auction_words = ("manheim", "pickles", "grays", "lloyds", "slattery", "auction")
+    if any(word in host for word in auction_words):
+        return "Auction"
+    return "Other"
+
+
+def _listing_site_name(url):
+    host = (urllib.parse.urlparse(url or "").netloc or "").lower()
+    if "grays.com" in host:
+        return "Grays"
+    if "pickles.com" in host:
+        return "Pickles"
+    if "manheim.com" in host:
+        return "Manheim"
+    if "lloyds" in host:
+        return "Lloyds Auctions"
+    if "slattery" in host:
+        return "Slattery Auctions"
+    if "carsales.com" in host:
+        return "Carsales"
+    if "gumtree.com" in host:
+        return "Gumtree"
+    if "facebook.com" in host or "fb.com" in host:
+        return "Facebook Marketplace"
+    return ""
+
+
+def _validate_public_http_url(url):
+    """Reject local/private addresses before BAM makes a server-side request."""
+    if not re.match(r"^https?://", url or "", flags=re.I):
+        raise ValueError("Please paste a full http:// or https:// listing link.")
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme not in ("http", "https") or not parsed.hostname:
+        raise ValueError("Only normal public web links can be imported.")
+    host = parsed.hostname.lower()
+    if host in {"localhost", "localhost.localdomain"}:
+        raise ValueError("Local/private web addresses cannot be imported.")
+    try:
+        infos = socket.getaddrinfo(host, parsed.port or (443 if parsed.scheme == "https" else 80), type=socket.SOCK_STREAM)
+        for info in infos:
+            addr = ipaddress.ip_address(info[4][0])
+            if addr.is_private or addr.is_loopback or addr.is_link_local or addr.is_multicast or addr.is_reserved:
+                raise ValueError("Local/private web addresses cannot be imported.")
+    except socket.gaierror as exc:
+        raise ValueError(f"BAM could not find that website: {exc}")
+    return parsed
+
+
+def _first_match(text, patterns, flags=re.I):
+    for pattern in patterns:
+        match = re.search(pattern, text or "", flags=flags)
+        if match:
+            return match.group(1).strip()
+    return ""
+
+
+def _number(value, integer=False):
+    if value is None:
+        return None
+    cleaned = re.sub(r"[^0-9.\-]", "", str(value).replace(",", ""))
+    if not cleaned or cleaned in {"-", ".", "-."}:
+        return None
+    try:
+        number = float(cleaned)
+        return int(number) if integer else number
+    except ValueError:
+        return None
+
+
+def _extract_listing_details(raw_text, url="", title="", description=""):
+    clean = _strip_html(raw_text)
+    source = _detect_listing_source(url)
+    details = {"listing_source": source}
+    source_text = clean[:180000]
+    lower = source_text.lower()
+
+    if url:
+        details["listing_url"] = url
+        if source == "Auction":
+            details["auction_url"] = url
+            site_name = _listing_site_name(url)
+            if site_name:
+                details["auction_name"] = site_name
+
+    # Year.
+    value = _first_match(source_text, [r"\b((?:19|20)\d{2})\b"])
+    if value:
+        details["year"] = int(value)
+
+    # Prices. Labelled prices beat generic dollar amounts.
+    asking = _first_match(source_text, [
+        r"(?:asking\s+price|advertised\s+price|price)\s*[:\-]?\s*\$\s*([\d,]+(?:\.\d{1,2})?)",
+    ])
+    current_bid = _first_match(source_text, [
+        r"current\s+bid(?:\s*\([^)]*\))?\s*[:\-]?\s*\$\s*([\d,]+(?:\.\d{1,2})?)",
+        r"highest\s+bid\s*[:\-]?\s*\$\s*([\d,]+(?:\.\d{1,2})?)",
+    ])
+    if source == "Auction":
+        val = _number(current_bid)
+        if val is not None:
+            details["current_bid"] = val
+    else:
+        val = _number(asking)
+        if val is None:
+            generic_price = _first_match(source_text, [r"\$\s*([\d,]{3,}(?:\.\d{1,2})?)"])
+            val = _number(generic_price)
+        if val is not None:
+            details["asking_price"] = val
+
+    # Kilometres / odometer.
+    odometer = _first_match(source_text, [
+        r"(?:indicated\s+odometer\s+reading|odometer\s+reading|odometer|kilometres|kilometers)\s*[:\-]?\s*([\d,]+)\s*(?:km|kms)?",
+        r"([\d,]{2,})\s*(?:km|kms|kilometres|kilometers)\b",
+    ])
+    val = _number(odometer, integer=True)
+    if val is not None and val < 10_000_000:
+        details["odometer_km"] = val
+
+    # VIN / chassis and registration.
+    vin = _first_match(source_text, [
+        r"(?:vin\s*/\s*chassis|vin|chassis(?:\s+number)?)\s*[:#\-]?\s*([A-HJ-NPR-Z0-9]{17})",
+        r"\b([A-HJ-NPR-Z0-9]{17})\b",
+    ])
+    if vin:
+        details["vin"] = vin.upper()
+    rego = _first_match(source_text, [
+        r"(?:registration\s+no\.?|registration|rego)\s*[:#\-]?\s*([A-Z0-9\-]{3,10})",
+    ])
+    if rego:
+        details["registration"] = rego.upper()
+
+    # Registration sale/status. Grays commonly publishes values such as
+    # "Sold Registered, Sold on Consignment" or "Sold Unregistered".
+    registration_status = _first_match(source_text, [
+        r"(?:registration\s+status|rego\s+status)\s*[:\-]?\s*(.+?)(?=\s+(?:engine\s+capacity|engine\s+size|fuel\s+type|drive\s+type|transmission|indicated\s+odometer|odometer|exterior\s+colour|exterior\s+color|general\s+condition|features)\s*[:\-]?|$)",
+    ])
+    if registration_status:
+        registration_status = re.sub(r"\s+", " ", registration_status).strip(" ,.-")
+        if len(registration_status) <= 100:
+            details["registration_status"] = registration_status
+
+    # Reserve status, body type and seating capacity.
+    if re.search(r"\bno\s+reserve\b", source_text, flags=re.I):
+        details["reserve_status"] = "No Reserve"
+    elif re.search(r"\breserve(?:\s+price)?(?:\s+applies|\s+met|\s+not\s+met|\s+price)?\b", source_text, flags=re.I):
+        details["reserve_status"] = "Reserve"
+
+    body_type = _first_match(source_text, [
+        r"(?:body\s+type|body\s+style)\s*[:\-]?\s*([A-Za-z][A-Za-z /-]{1,30}?)(?=\s+(?:no\.?\s+of\s+seats|seats|build\s+date|compliance|vin|registration)\s*[:\-]?|$)",
+    ])
+    if body_type:
+        details["body_type"] = re.sub(r"\s+", " ", body_type).strip(" ,.-").title()
+    seats = _first_match(source_text, [
+        r"(?:no\.?\s+of\s+seats|number\s+of\s+seats|seats)\s*[:\-]?\s*(\d{1,2})",
+        r"\b(\d{1,2})\s*seat\b",
+    ])
+    if seats:
+        try:
+            seat_count = int(seats)
+            if 1 <= seat_count <= 99:
+                details["seat_count"] = seat_count
+        except ValueError:
+            pass
+
+    # Engine details.
+    engine_cc = _first_match(source_text, [
+        r"(?:engine\s+capacity|engine\s+size|capacity)\s*[:\-]?\s*([\d,]{3,5})\s*cc\b",
+        r"\b([\d,]{3,5})\s*cc\b",
+    ])
+    cc = _number(engine_cc, integer=True)
+    if cc:
+        details["engine_cc"] = cc
+        litres = round(cc / 1000.0, 1)
+        details.setdefault("engine_size", f"{litres:.1f}L")
+    litre = _first_match(source_text, [r"\b(\d(?:\.\d)?)\s*(?:l|litre|liter)\b"])
+    if litre and not details.get("engine_size"):
+        details["engine_size"] = f"{litre}L"
+
+    cylinders = _first_match(source_text, [
+        r"(?:engine\s+cylinders|cylinders|cylinder)\s*[:\-]?\s*(\d{1,2})",
+        r"\b(\d{1,2})\s*cyl(?:inder)?s?\b",
+        r"\b(\d{1,2})cyl\b",
+    ])
+    if cylinders:
+        details["engine_cylinders"] = cylinders
+
+    # Transmission. Keep common BAM-compatible values but preserve Sports Automatic.
+    transmission_checks = [
+        ("Sports Automatic", r"\bsports\s+automatic\b|\bspts?\s+auto(?:matic)?\b"),
+        ("DCT", r"\b(?:dct|dual[\s-]?clutch)\b"),
+        ("CVT", r"\bcvt\b"),
+        ("Automatic", r"\bautomatic\b"),
+        ("Manual", r"\bmanual\b"),
+    ]
+    for label, pattern in transmission_checks:
+        if re.search(pattern, source_text, flags=re.I):
+            details["transmission"] = label
+            break
+
+    # Fuel and drive. Prefer a labelled fuel field. Auction/navigation pages can
+    # contain unrelated words such as "hybrid", so broad page-wide matching is
+    # deliberately avoided when a site does not publish a fuel label.
+    labelled_fuel = _first_match(source_text, [
+        r"(?:fuel\s+type|fuel)\s*[:\-]?\s*(plug[\s-]?in hybrid|phev|hybrid|electric|diesel|petrol|gasoline|lpg)\b",
+    ])
+    fuel_probe = labelled_fuel or " ".join(x for x in (title, description) if x)
+    fuel_map = [
+        ("Plug-in Hybrid", r"plug[\s-]?in hybrid|\bphev\b"),
+        ("Hybrid", r"\bhybrid\b"),
+        ("Electric", r"\belectric\b|\bev\b"),
+        ("Diesel", r"\bdiesel\b"),
+        ("Petrol", r"\bpetrol\b|\bgasoline\b"),
+        ("LPG", r"\blpg\b"),
+    ]
+    for label, pattern in fuel_map:
+        if re.search(pattern, fuel_probe, flags=re.I):
+            details["fuel_type"] = label
+            break
+    drive_map = [
+        ("4WD", r"\bfour\s+wheel\s+drive\b|\b4wd\b|\b4x4\b"),
+        ("AWD", r"\ball[\s-]?wheel\s+drive\b|\bawd\b"),
+        ("FWD", r"\bfront[\s-]?wheel\s+drive\b|\bfwd\b"),
+        ("RWD", r"\brear[\s-]?wheel\s+drive\b|\brwd\b"),
+        ("2WD", r"\b2wd\b"),
+    ]
+    for label, pattern in drive_map:
+        if re.search(pattern, source_text, flags=re.I):
+            details["drive_type"] = label
+            break
+
+    # Make/model using BAM catalogues.
+    best_make = ""
+    best_model = ""
+    for asset_catalog in AUCTION_ASSET_MODEL_CATALOG.values():
+        for make, models in asset_catalog.items():
+            if re.search(rf"\b{re.escape(make.lower())}\b", lower):
+                for model in sorted(models, key=len, reverse=True):
+                    if re.search(rf"\b{re.escape(model.lower())}\b", lower):
+                        best_make, best_model = make, model
+                        break
+                if best_make:
+                    break
+        if best_make:
+            break
+    if best_make:
+        details["make"] = best_make
+    if best_model:
+        details["model"] = best_model
+
+    # Facebook/Gumtree and older/classic vehicles are not always present in the
+    # modern BAM catalogue. Recognise distinctive model names from the pasted ad
+    # text rather than leaving Make / Model blank. These aliases are intentionally
+    # conservative so BAM does not guess from ordinary description words.
+    if not details.get("make") or not details.get("model"):
+        classic_aliases = [
+            ("Ford", "Model T", r"\b(?:ford\s+)?model\s+t\b"),
+            ("Ford", "Model A", r"\bford\s+model\s+a\b"),
+        ]
+        for alias_make, alias_model, alias_pattern in classic_aliases:
+            if re.search(alias_pattern, source_text, flags=re.I):
+                details.setdefault("make", alias_make)
+                details.setdefault("model", alias_model)
+                best_make = details.get("make", alias_make)
+                best_model = details.get("model", alias_model)
+                break
+
+    # For pasted Marketplace/Gumtree text, also inspect the first few non-empty
+    # lines for a conventional vehicle heading such as "2012 Toyota Hilux SR5".
+    # This supplements the catalogue matcher without overriding a confident match.
+    if source in ("Facebook Marketplace", "Gumtree") and (not details.get("make") or not details.get("model")):
+        heading_lines = [x.strip() for x in re.split(r"[\r\n]+", raw_text or "") if x.strip()][:8]
+        heading_text = " ".join(heading_lines)[:1200]
+        heading_lower = heading_text.lower()
+        for asset_catalog in AUCTION_ASSET_MODEL_CATALOG.values():
+            found = False
+            for make, models in asset_catalog.items():
+                if re.search(rf"\b{re.escape(make.lower())}\b", heading_lower):
+                    for model in sorted(models, key=len, reverse=True):
+                        if re.search(rf"\b{re.escape(model.lower())}\b", heading_lower):
+                            details.setdefault("make", make)
+                            details.setdefault("model", model)
+                            best_make = details.get("make", make)
+                            best_model = details.get("model", model)
+                            found = True
+                            break
+                if found:
+                    break
+            if found:
+                break
+
+    # Variant: use BAM catalogue first, then capture text after detected model in title.
+    if best_make and best_model:
+        variants = VEHICLE_VARIANT_CATALOG.get(best_make, {}).get(best_model, [])
+        for variant in sorted(variants, key=len, reverse=True):
+            if re.search(rf"\b{re.escape(variant.lower())}\b", lower):
+                details["variant"] = variant
+                break
+        title_text = _strip_html(title or "")
+        year_prefix = rf"(?:19|20)\d{{2}}\s+" if details.get("year") else ""
+        match = re.search(
+            rf"\b{year_prefix}{re.escape(best_make)}\s+{re.escape(best_model)}\s+(.+?)(?=,|\s+-\s+|\s+(?:Sports\s+Automatic|Automatic|Manual|AWD|4WD|Petrol|Diesel|SUV)\b|$)",
+            title_text,
+            flags=re.I,
+        )
+        if match:
+            candidate = re.sub(r"\s+", " ", match.group(1)).strip(" ,-")
+            # Auction titles often include a badge + series (for example TX SY II),
+            # which is more useful than a shorter catalogue-only badge such as TX.
+            if 1 <= len(candidate) <= 40 and len(candidate) >= len(details.get("variant", "")):
+                details["variant"] = candidate
+
+    # Colour and interior.
+    labelled_colour = _first_match(source_text, [
+        r"(?:exterior\s+colour|exterior\s+color|colour|color)\s*[:\-]?\s*([A-Za-z][A-Za-z ]{1,24})",
+    ])
+    if labelled_colour:
+        # Stop at the next likely label if stripped HTML ran labels together.
+        labelled_colour = re.split(r"\b(?:general\s+condition|condition|interior|transmission|drive|fuel|registration|vin|engine|features)\b", labelled_colour, maxsplit=1, flags=re.I)[0].strip()
+        details["colour"] = labelled_colour.title()
+    else:
+        colours = ("White", "Black", "Silver", "Grey", "Gray", "Blue", "Red", "Green", "Yellow", "Orange", "Brown", "Beige", "Gold", "Purple")
+        for colour in colours:
+            if re.search(rf"\b{colour.lower()}\b", lower):
+                details["colour"] = "Grey" if colour == "Gray" else colour
+                break
+    interior = _first_match(source_text, [r"(?:interior|trim)\s*[:\-]?\s*(cloth|leather|vinyl|other)\b"])
+    if interior:
+        details["interior"] = interior.title()
+
+    # Auction-specific labels used by Grays / Pickles / Manheim / Lloyds etc.
+    lot = _first_match(source_text, [
+        r"(?:lot\s+id|lot\s+no\.?|lot\s+number|lot)\s*[:#\-]?\s*([A-Z0-9\-]+)",
+    ])
+    if not lot and url:
+        path_match = re.search(r"/lot/([A-Z0-9\-]+)", urllib.parse.urlparse(url).path, flags=re.I)
+        if path_match:
+            lot = path_match.group(1)
+    if lot:
+        details["lot_number"] = lot
+
+    location = _first_match(source_text, [
+        r"(?:auction\s+location|pickup\s+location|location)\s*[:\-]?\s*([A-Za-z0-9][A-Za-z0-9 ,./&\-]{3,120})",
+    ])
+    if location:
+        location = re.split(r"\b(?:category|current bid|lot|vin|registration|engine|odometer|colour|color|body type|features)\b", location, maxsplit=1, flags=re.I)[0].strip(" ,.-")
+        if source == "Auction":
+            details["auction_location"] = location
+        else:
+            details["seller_location"] = location
+
+    # Conservative condition information. Do not invent Excellent/Good.
+    condition_grade = _first_match(source_text, [r"(?:condition\s+grade|condition)\s*[:\-]?\s*(excellent|good|average|poor|damaged|ber|unknown)\b"])
+    if condition_grade:
+        details["condition_grade"] = condition_grade.title() if condition_grade.lower() != "ber" else "BER"
+
+    note_parts = []
+    if description:
+        note_parts.append(_strip_html(description))
+    elif source in ("Facebook Marketplace", "Gumtree") and raw_text:
+        # Marketplace fallback imports are pasted as listing text rather than
+        # fetched HTML. Preserve that seller description in BAM's
+        # Condition / Inspection Notes so the original ad wording is kept with
+        # the watch vehicle instead of being discarded after field extraction.
+        marketplace_note = _strip_html(raw_text).strip()
+        if marketplace_note and not marketplace_note.lower().startswith(("http://", "https://")):
+            note_parts.append(marketplace_note)
+
+    # Grays publishes two especially useful inspection sections. Preserve both
+    # in BAM's Condition / Inspection Notes field so the buying decision has
+    # the key/spare-key/service-history information and the assessor's damage
+    # notes together in one place.
+    if "grays.com" in (urllib.parse.urlparse(url or "").netloc or "").lower():
+        general_condition = _first_match(source_text, [
+            r"General\s+Condition\s+for\s+age\s+and\s+distance\s+travelled\s*:?\s*(.+?)(?=The\s+below\s+condition\s+assessment|Features\s*:|Motor\s+Dealer\s+Licence|$)",
+        ], flags=re.I | re.S)
+        condition_assessment = _first_match(source_text, [
+            r"The\s+below\s+condition\s+assessment.*?(?:opinion\s*:?)\s*(.+?)(?=Features\s*:|Motor\s+Dealer\s+Licence|$)",
+            r"The\s+below\s+condition\s+assessment\s+is\s+the\s+opinion\s+of\s+our\s+booking\s+staff.*?\s*(.+?)(?=Features\s*:|Motor\s+Dealer\s+Licence|$)",
+        ], flags=re.I | re.S)
+
+        if general_condition:
+            # Restore readable line breaks between Grays' labelled checks.
+            gc = re.sub(
+                r"\s+(?=(?:Key|Spare\s+Key|Owners?\s+Manual|Service\s+History|Engine\s+Turns\s+Over)\s*:)",
+                "\n",
+                general_condition.strip(),
+                flags=re.I,
+            )
+            note_parts.append("GENERAL CONDITION\n" + gc)
+
+        if condition_assessment:
+            ca = condition_assessment.strip()
+            # Put numbered defects and the final free-text damage summary on
+            # separate lines where Grays' HTML was flattened to one line.
+            ca = re.sub(r"\s+(?=\d+\.\s+)", "\n", ca)
+            ca = re.sub(
+                r"\s+(?=Scratches\s+And\s+Dents|Scratches\s+and\s+Dents)",
+                "\n",
+                ca,
+                flags=re.I,
+            )
+            note_parts.append("CONDITION ASSESSMENT\n" + ca)
+
+    condition_text = _first_match(source_text, [
+        r"(?:condition\s+details|inspection\s+notes|vehicle\s+condition)\s*[:\-]?\s*(.{20,1200}?)(?=\b(?:vin|registration|engine|odometer|location|current bid|lot)\b|$)",
+    ], flags=re.I | re.S)
+    if condition_text:
+        note_parts.append(condition_text)
+
+    # De-duplicate identical note blocks while preserving their order.
+    unique_notes = []
+    seen_notes = set()
+    for part in note_parts:
+        cleaned_part = (part or "").strip()
+        key = re.sub(r"\s+", " ", cleaned_part).lower()
+        if cleaned_part and key not in seen_notes:
+            seen_notes.add(key)
+            unique_notes.append(cleaned_part)
+
+    note = "\n\n".join(unique_notes).strip()
+    if note:
+        details["condition_notes"] = note[:4000]
+
+    # Extra Grays labels that are reliable on vehicle lot pages.
+    if "grays.com" in (urllib.parse.urlparse(url or "").netloc or "").lower():
+        sale_name = _first_match(source_text, [r"Part\s+of\s+Sale\s*[:\-]?\s*(.+?)(?=Warranty|Description|GST|Location|Lot\s+ID|$)"])
+        if sale_name:
+            details["auction_name"] = sale_name.strip(" -")[:120]
+
+        # A completed lot may no longer expose a Current Bid. Keep its final
+        # result in Sold Price instead of incorrectly treating it as a live bid.
+        sold = _first_match(source_text, [
+            r"(?:sold\s+for|sold\s+price|final\s+bid\s+price)\s*[:\-]?\s*\$\s*([\d,]+(?:\.\d{1,2})?)",
+        ])
+        sold_value = _number(sold)
+        if sold_value is not None:
+            details["sold_price"] = sold_value
+            details["status"] = "Sold"
+
+    # Caravan / camper / trailer specifications (Grays, Slattery and generic listings).
+    caravan_probe = " ".join((title or "", description or "", source_text[:50000]))
+    if re.search(r"\b(caravan|camper\s*trailer|pop\s*top|motorhome)\b", caravan_probe, re.I):
+        details["asset_type"] = "Caravan"
+    elif re.search(r"\btrailer\b", caravan_probe, re.I) and not details.get("asset_type"):
+        details["asset_type"] = "Trailer"
+
+    def _kg_field(patterns):
+        raw = _first_match(source_text, patterns, flags=re.I | re.S)
+        v = _number(raw)
+        return v if v is not None and 0 < v < 100000 else None
+
+    tare = _kg_field([
+        r"(?:tare\s+(?:weight|mass)|tare)\s*[:\-]?\s*([\d,]+(?:\.\d+)?)\s*(?:kg|kgs|kilograms?)?",
+    ])
+    atm = _kg_field([
+        r"(?:aggregate\s+trailer\s+mass|\bATM\b)\s*[:\-]?\s*([\d,]+(?:\.\d+)?)\s*(?:kg|kgs)?",
+    ])
+    gtm = _kg_field([
+        r"(?:gross\s+trailer\s+mass|\bGTM\b|\bGVM\b)\s*[:\-]?\s*([\d,]+(?:\.\d+)?)\s*(?:kg|kgs)?",
+    ])
+    ball = _kg_field([
+        r"(?:tow\s*ball\s+(?:weight|mass)|ball\s+(?:weight|mass)|ball\s+loading)\s*[:\-]?\s*([\d,]+(?:\.\d+)?)\s*(?:kg|kgs)?",
+    ])
+    if tare is not None: details["tare_weight_kg"] = tare
+    if atm is not None: details["atm_kg"] = atm
+    if gtm is not None: details["gtm_kg"] = gtm
+    if ball is not None: details["ball_weight_kg"] = ball
+
+    berths = _first_match(source_text, [r"(?:berths?|sleeping\s+capacity|sleeps?)\s*[:\-]?\s*(\d{1,2})"], flags=re.I)
+    if berths:
+        details["berths"] = int(berths)
+    axles = _first_match(source_text, [r"(?:axles?|axle\s+configuration)\s*[:\-]?\s*(\d{1,2})"], flags=re.I)
+    if axles:
+        details["axles"] = int(axles)
+
+    # Dimensions: accept metres or millimetres and normalise to metres.
+    def _metres(label):
+        m = re.search(rf"(?:{label})\s*[:\-]?\s*([\d,.]+)\s*(mm|cm|m|metres?|meters?)\b", source_text, re.I)
+        if not m: return None
+        try: v=float(m.group(1).replace(',', ''))
+        except ValueError: return None
+        unit=m.group(2).lower()
+        if unit=='mm': v/=1000
+        elif unit=='cm': v/=100
+        return round(v,3) if 0 < v < 100 else None
+    for key,label in (("length_m",r"overall\s+length|length"),("width_m",r"overall\s+width|width"),("height_m",r"overall\s+height|height")):
+        v=_metres(label)
+        if v is not None: details[key]=v
+
+    details = _apply_site_specific_details(details, source_text, url=url, title=title, description=description)
+
+    # v25.13.1 - Caravan equipment / fit-out notes.
+    # Grays and Slattery often place the useful caravan equipment in the lot
+    # description rather than in structured fields. Keep that information in
+    # both Caravan Features and Condition / Inspection Notes.
+    if details.get("asset_type") == "Caravan":
+        host = (urllib.parse.urlparse(url or "").netloc or "").lower()
+        if "grays.com" in host or "slattery" in host:
+            equipment_terms = re.compile(
+                r"\b(fridge|refrigerator|solar|solar panel|battery|batteries|inverter|air\s*condition|"
+                r"aircon|air con|hot\s*water|toilet|shower|ensuite|microwave|awning|annex|tv|television|"
+                r"gas\s*bottle|water\s*tank|fresh\s*water|grey\s*water|bed|bunk|sleeps?|berth|"
+                r"generator|reversing\s*camera|reverse\s*camera|suspension|brakes?|stove|cooktop|oven|"
+                r"rangehood|washing\s*machine|stereo|radio|antenna|aerial|12v|240v|charger|toolbox|"
+                r"bike\s*rack|jerry\s*can|stone\s*guard|sway\s*control|stabiliser|stabilizer)\b", re.I)
+
+            # Prefer the listing description because it avoids auction-site navigation text.
+            candidates = []
+            for block in (description or "",):
+                block = re.sub(r"\s+", " ", block).strip()
+                if block and equipment_terms.search(block):
+                    candidates.append(block)
+
+            # Also collect useful labelled/equipment lines from the flattened page.
+            for m in re.finditer(r"[^\r\n]{0,180}(?:fridge|refrigerator|solar|batter(?:y|ies)|inverter|air\s*condition(?:ing)?|aircon|hot\s*water|ensuite|toilet|shower|microwave|awning|annex|water\s*tank|gas\s*bottle|generator|stove|cooktop|oven|washing\s*machine)[^\r\n]{0,260}", source_text or "", re.I):
+                line = re.sub(r"\s+", " ", m.group(0)).strip(" -:;,.|")
+                if 5 <= len(line) <= 500:
+                    candidates.append(line)
+
+            # De-duplicate while preserving order.
+            useful = []
+            seen = set()
+            for part in candidates:
+                key = re.sub(r"[^a-z0-9]+", " ", part.lower()).strip()
+                if key and key not in seen:
+                    seen.add(key)
+                    useful.append(part)
+
+            if useful:
+                equipment_text = "\n".join(useful)[:6000]
+                details["caravan_features"] = equipment_text
+                existing = (details.get("condition_notes") or "").strip()
+                heading = "CARAVAN EQUIPMENT / FEATURES"
+                if heading.lower() not in existing.lower():
+                    combined = (existing + "\n\n" if existing else "") + heading + "\n" + equipment_text
+                    details["condition_notes"] = combined[:8000]
+
+    return details
+
+
+def _apply_site_specific_details(details, source_text, url="", title="", description=""):
+    """Clean up fields for major Australian listing/auction sites.
+
+    Generic parsing remains the fallback, but each supported site gets stricter
+    rules so navigation text is not mistaken for vehicle data.
+    """
+    host = (urllib.parse.urlparse(url or "").netloc or "").lower()
+    text = source_text or ""
+    td = " ".join(x for x in (title, description) if x)
+    slug = urllib.parse.unquote((urllib.parse.urlparse(url or "").path or "").replace("-", " "))
+    vehicle_probe = " ".join(x for x in (td, slug) if x)
+
+    def set_if(key, value):
+        if value not in (None, ""):
+            details[key] = value
+
+
+    # v25.11.3: reject JavaScript field-name tokens that can look like real values.
+    bad_tokens = {"expiry", "expirydate", "registrationexpiry", "registrationdate", "odometer", "capacity", "fueltype", "bodytype", "transmission", "drivetype", "colour", "color", "vin"}
+    def plausible_token(value):
+        return bool(value) and re.sub(r"[^a-z0-9]", "", str(value).lower()) not in bad_tokens
+
+    def clean_site_note(*bad_phrases):
+        note = (details.get("condition_notes") or "").strip()
+        low = note.lower()
+        if note and any(p.lower() in low for p in bad_phrases):
+            details.pop("condition_notes", None)
+
+    # Common auction finish wording, including Manheim-style natural language.
+    if any(x in host for x in ("manheim", "pickles", "slattery")):
+        finish_text = _first_match(text, [
+            r"(?:auction\s+ends?|auction\s+finishes?|closing\s+time|closes?)\s*[:\-]?\s*(?:on\s+)?((?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)?[,]?\s*\d{1,2}\s+[A-Za-z]+\s+20\d{2}\s+\d{1,2}(?::\d{2})?\s*(?:AM|PM)?)",
+            r"(?:for\s+auction\s+in.*?\s+on\s+)((?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)[,]?\s*\d{1,2}\s+[A-Za-z]+\s+20\d{2}\s+\d{1,2}(?::\d{2})?\s*(?:AM|PM)?)",
+        ], flags=re.I | re.S)
+        if finish_text:
+            dt = _auction_datetime_value(finish_text)
+            if dt:
+                details["auction_finish"] = dt
+
+    # v25.11.4: build exact label/value pairs before site-specific mapping.
+    # This prevents labels such as NUMBER / EXPIRYDATE from being treated as values.
+    def labelled_value(label, stop_labels=()):
+        stops = list(stop_labels) + [
+            "Make", "Model", "Colour", "Color", "VIN", "Series", "Transmission",
+            "Drive Type", "Body Type", "Registration Number", "Registration Expiry",
+            "Engine Number", "Engine Type", "Odometer", "Fuel Type", "Capacity",
+            "No of Seats", "No. of Seats", "Owners Manual", "Service History",
+            "Compliance Date", "Build Date", "Trim", "Cylinders", "Registration",
+            "GVM", "GCM", "KW RPM", "Track", "Width", "Height", "Log Book",
+            "Wheelbase", "Kerb Weight", "Total Quantity", "Sold Registered"
+        ]
+        stop_alt = "|".join(re.escape(x) for x in sorted(set(stops), key=len, reverse=True))
+        pat = rf"(?:^|\s){re.escape(label)}\s*[:\-]?\s*(.+?)(?=\s+(?:{stop_alt})\b|$)"
+        m = re.search(pat, text, flags=re.I | re.S)
+        return re.sub(r"\s+", " ", m.group(1)).strip(" :;-.,") if m else ""
+
+    def jsonish_value(*keys):
+        # Read simple values embedded in flattened JavaScript/JSON state.
+        for key in keys:
+            patterns = [
+                rf"(?i)(?:[\"'\\]?){re.escape(key)}(?:[\"'\\]?)\s*[:=]\s*(?:\\?[\"']?)\s*([^,}}\]\r\n]{{1,120}})",
+                rf"(?i)\b{re.escape(key)}\b\s*[:\\]+\s*(?:\\?[\"']?)\s*([^,}}\]\r\n]{{1,120}})",
+            ]
+            for pat2 in patterns:
+                m2 = re.search(pat2, text or "")
+                if m2:
+                    v = m2.group(1).strip().strip("\\\"' :;")
+                    if v:
+                        return re.sub(r"\s+", " ", v)
+        return ""
+
+    def jsonish_number(*keys):
+        v = jsonish_value(*keys)
+        m = re.search(r"-?\d+(?:\.\d+)?", v or "")
+        return m.group(0) if m else ""
+
+    if "manheim" in host:
+        details["auction_name"] = "Manheim"
+        # Manheim's numeric asset ID is stable and preferable to stray state text.
+        m = re.search(r"/passenger-vehicles/(\d+)", urllib.parse.urlparse(url).path, flags=re.I)
+        if m:
+            details["lot_number"] = m.group(1)
+        elif (details.get("lot_number") or "").upper() in {"VIC", "NSW", "QLD", "SA", "WA", "TAS", "NT", "ACT"}:
+            details.pop("lot_number", None)
+
+        loc = details.get("auction_location") or ""
+        if any(word in loc.lower() for word in ("site links", "price guide", "about us", "sign in", "locations")):
+            details.pop("auction_location", None)
+        manheim_loc = _first_match(text, [
+            r"(?:auction\s+location|location|site)\s*[:\-]?\s*([A-Za-z][A-Za-z .'-]+,\s*(?:VIC|NSW|QLD|SA|WA|TAS|NT|ACT))\b",
+        ])
+        if manheim_loc:
+            details["auction_location"] = re.sub(r"\s+", " ", manheim_loc).strip()
+
+        # Ranger/utility pages commonly encode diesel as 3.2D / 2.0D in title or URL.
+        if re.search(r"\b(?:diesel|\d(?:\.\d)?\s*d\b|\d(?:\.\d)?dt\b)", vehicle_probe, flags=re.I):
+            details["fuel_type"] = "Diesel"
+        elif re.search(r"\bpetrol\b", vehicle_probe, flags=re.I):
+            details["fuel_type"] = "Petrol"
+        elif details.get("fuel_type") in {"Hybrid", "Plug-in Hybrid", "Electric"} and not re.search(r"\b(?:hybrid|phev|electric|ev)\b", vehicle_probe, flags=re.I):
+            details.pop("fuel_type", None)
+
+        size = _first_match(vehicle_probe, [r"\b(\d(?:\.\d)?)\s*d(?:t)?\b"])
+        if size:
+            details["engine_size"] = f"{size}L"
+        if re.search(r"\bdual\s+cab\s+utility\b", vehicle_probe, flags=re.I):
+            details["body_type"] = "Dual Cab Utility"
+        elif re.search(r"\butility\b", vehicle_probe, flags=re.I):
+            details["body_type"] = "Utility"
+        clean_site_note("for auction in national online", "used 2016 ford ranger")
+
+    elif "pickles" in host:
+        details["auction_name"] = "Pickles"
+
+        # Pickles vehicle-detail tables use clear label/value pairs. Pull those
+        # values directly instead of relying on broad page-wide guesses.
+        pickles_odo = _first_match(text, [
+            r"Odometer\s*\(Showing\s+on\)\s*[:\-]?\s*([\d,]+)\s*(?:km|kms)\b",
+            r"Odometer(?:\s*\([^)]*\))?\s*[:\-]?\s*([\d,]{3,})\s*(?:km|kms)\b",
+            r"\b([\d,]{4,})\s*(?:km|kms)\b",
+        ])
+        v = _number(pickles_odo, integer=True)
+        if v is not None:
+            details["odometer_km"] = v
+
+        pickles_vin = _first_match(text, [r"\bVIN\s*[:\-]?\s*([A-HJ-NPR-Z0-9]{17})\b"])
+        if pickles_vin:
+            details["vin"] = pickles_vin.upper()
+
+        pickles_colour = _first_match(text, [
+            r"(?:Keys|Spare\s+Keys)\s+(?:[^ ]+\s+){0,4}(White\s*-\s*Artic\s+White|[A-Za-z]+\s*-\s*[A-Za-z ]{2,30})(?=\s+(?:Compliance\s+Date|Build\s+Date))",
+            r"(?:Colour|Color)\s*[:\-]?\s*([A-Za-z][A-Za-z /-]{1,40}?)(?=\s+(?:Compliance\s+Date|Build\s+Date|Odometer))",
+        ])
+        if pickles_colour:
+            details["colour"] = re.sub(r"\s+", " ", pickles_colour).strip()
+
+        pickles_trans = _first_match(text, [
+            r"Transmission\s*[:\-]?\s*((?:\d+\s*Spd\s*)?(?:Sports\s+Automatic|Automatic|Manual|CVT|DCT))\b",
+        ])
+        if pickles_trans:
+            details["transmission"] = "Sports Automatic" if re.search(r"sports\s+automatic", pickles_trans, re.I) else re.sub(r"^\d+\s*Spd\s*", "", pickles_trans, flags=re.I).strip().title()
+
+        pickles_drive = _first_match(text, [r"Drive\s+Type\s*[:\-]?\s*([^|]{2,40}?)(?=\s+Engine\s+Capacity|\s+Fuel\b|$)"])
+        if pickles_drive:
+            pd = pickles_drive.lower()
+            if "4x4" in pd or "4wd" in pd or "four wheel" in pd:
+                details["drive_type"] = "4WD"
+            elif "awd" in pd or "all wheel" in pd:
+                details["drive_type"] = "AWD"
+            elif "2wd" in pd:
+                details["drive_type"] = "2WD"
+
+        pickles_engine = _first_match(text, [r"Engine\s+Capacity\s*[:\-]?\s*(\d+(?:\.\d+)?)\s*(?:Ltr|Litre|Liter|L)?\b"])
+        if pickles_engine:
+            details["engine_size"] = f"{pickles_engine}L"
+            try:
+                details["engine_cc"] = int(round(float(pickles_engine) * 1000))
+            except ValueError:
+                pass
+
+        pickles_cyl = _first_match(text, [
+            r"Cylinders\s*[:\-]?\s*(\d{1,2})\b",
+            r"\b(\d{1,2})\s+cyl\b",
+        ])
+        if pickles_cyl:
+            details["engine_cylinders"] = pickles_cyl
+        if not details.get("engine_size"):
+            search_litre = _first_match(text, [r"\b(\d+(?:\.\d+)?)\s+L\s+(?:Diesel|Petrol)\b"])
+            if search_litre:
+                details["engine_size"] = f"{search_litre}L"
+                try:
+                    details["engine_cc"] = int(round(float(search_litre) * 1000))
+                except ValueError:
+                    pass
+
+        if re.search(r"Fuel\s*[:\-]?\s*(?:Direct\s+Injection\s+)?Diesel\b", text, re.I) or re.search(r"\b\d+(?:\.\d+)?\s+L\s+Diesel\b", text, re.I):
+            details["fuel_type"] = "Diesel"
+        elif re.search(r"Fuel\s*[:\-]?\s*(?:Unleaded\s+)?Petrol\b", text, re.I) or re.search(r"\b\d+(?:\.\d+)?\s+L\s+Petrol\b", text, re.I):
+            details["fuel_type"] = "Petrol"
+
+        pickles_trim = _first_match(text, [r"Trim\s*[:\-]?\s*([^|]{2,60}?)(?=\s+Registration\b|\s+No\.\s*of\s+Seats|$)"])
+        if pickles_trim:
+            details["interior"] = re.sub(r"\s+", " ", pickles_trim).strip(" ,.-")
+
+        pickles_seats = _first_match(text, [
+            r"No\.\s*of\s+Seats\s*[:\-]?\s*(\d{1,2})\b",
+            r"\b(\d{1,2})\s+seats?\b",
+        ])
+        if pickles_seats:
+            details["seat_count"] = int(pickles_seats)
+
+        if re.search(r"Registration\s*[:\-]?\s*No\s+Registration\b", text, re.I):
+            details["registration"] = ""
+            details["registration_status"] = "Unregistered"
+        else:
+            preg_candidates = re.findall(r"Registration\s*[:\-]?\s*([A-Z0-9-]{3,12})\b", text, flags=re.I)
+            preg = next((x for x in preg_candidates if plausible_token(x) and x.lower() != "no"), "")
+            if preg:
+                details["registration"] = preg.upper()
+                details.setdefault("registration_status", "Registered")
+            elif not plausible_token(details.get("registration")):
+                details["registration"] = ""
+
+        # Explicit LOT text is the correct auction lot. STOCK is a separate Pickles ID.
+        explicit_lot = _first_match(text, [r"\bLOT\s+(\d{1,8})\b"])
+        if explicit_lot:
+            details["lot_number"] = explicit_lot
+        loc = _first_match(text, [
+            r"\blocated\s+at\s+([A-Za-z][A-Za-z .'-]+,\s*(?:VIC|NSW|QLD|SA|WA|TAS|NT|ACT))\b",
+            r"(?:location|branch)\s*[:\-]?\s*([A-Za-z][A-Za-z .'-]+,\s*(?:VIC|NSW|QLD|SA|WA|TAS|NT|ACT))\b",
+            r"\b([A-Za-z][A-Za-z .'-]+,\s*(?:VIC|NSW|QLD|SA|WA|TAS|NT|ACT))\b(?=\s+(?:Pickles|Add a note|National|Sale Info))",
+        ])
+        if loc:
+            details["auction_location"] = re.sub(r"\s+", " ", loc).strip()
+        elif details.get("auction_location") and any(x in details["auction_location"].lower() for x in ("contact us", "media complaints", "technical")):
+            details.pop("auction_location", None)
+
+        # Pickles description shorthand: Spts Auto, 4x4, 3.2DT, Pick-up/Super Cab.
+        if re.search(r"\bspts?\s+auto\b", vehicle_probe, flags=re.I):
+            details["transmission"] = "Sports Automatic"
+        if re.search(r"\b4x4\b|\b4wd\b", vehicle_probe, flags=re.I):
+            details["drive_type"] = "4WD"
+        eng = _first_match(vehicle_probe, [r"\b(\d(?:\.\d)?)\s*DT\b", r"\b(\d(?:\.\d)?)\s*D\b"])
+        if eng:
+            details["engine_size"] = f"{eng}L"
+            details["fuel_type"] = "Diesel"
+        elif re.search(r"\bdiesel\b", vehicle_probe, flags=re.I):
+            details["fuel_type"] = "Diesel"
+        elif re.search(r"\bpetrol\b", vehicle_probe, flags=re.I):
+            details["fuel_type"] = "Petrol"
+        elif not re.search(r"\b(?:hybrid|electric|phev|ev)\b", vehicle_probe, flags=re.I):
+            details.pop("fuel_type", None)
+        if re.search(r"\bpick[- ]?up\b", vehicle_probe, flags=re.I):
+            details["body_type"] = "Pick-up"
+        elif re.search(r"\b(?:ute|utility)\b", vehicle_probe, flags=re.I):
+            details["body_type"] = "Utility"
+        # Exact Pickles table overrides.
+        pv = labelled_value("Odometer (Showing on)") or labelled_value("Odometer")
+        m = re.search(r"([\d,]+)\s*(?:km|kms)\b", pv, re.I)
+        if m: details["odometer_km"] = int(m.group(1).replace(",", ""))
+        pv = labelled_value("Engine Capacity")
+        m = re.search(r"(\d+(?:\.\d+)?)", pv)
+        if m: details["engine_size"] = f"{m.group(1)}L"
+        pv = labelled_value("Fuel")
+        if re.search(r"diesel", pv, re.I): details["fuel_type"] = "Diesel"
+        elif re.search(r"petrol", pv, re.I): details["fuel_type"] = "Petrol"
+        pv = labelled_value("Registration")
+        if re.search(r"no\s+registration", pv, re.I):
+            details["registration"] = ""; details["registration_status"] = "Unregistered"
+        elif pv and plausible_token(pv): details["registration"] = pv.upper()
+        if (details.get("registration") or "").lower() in {"number", "expiry", "expirydate"}: details["registration"] = ""
+
+        # v25.11.5 - exact Pickles client-state fallbacks.
+        raw_reg = jsonish_value("registrationNumber", "regoNumber", "registrationNo")
+        if raw_reg and raw_reg.lower() not in {"null", "none", "undefined", "false"}:
+            m = re.search(r"\b([A-Z0-9-]{3,10})\b", raw_reg, re.I)
+            if m and plausible_token(m.group(1)):
+                details["registration"] = m.group(1).upper()
+                details["registration_status"] = "Registered"
+        reg_now = str(details.get("registration") or "")
+        if any(tok in reg_now.lower() for tok in ("expirydate", "registrationdate", "registr", "odometer", "capacity")):
+            details["registration"] = ""
+        if re.search(r"\bNo\s+Registration\b", text, re.I) or re.search(r"registration(?:Number|No)?\s*[:=]\s*(?:null|none|undefined|false|\"\")", text, re.I):
+            details["registration"] = ""
+            details["registration_status"] = "Unregistered"
+        elif not details.get("registration") and details.get("registration_status") == "Registered":
+            details.pop("registration_status", None)
+
+        jodo = jsonish_number("odometer", "odometerKm", "odometerReading", "kilometres", "kilometers")
+        if jodo:
+            try:
+                km = int(float(jodo))
+                if 100 <= km < 10_000_000: details["odometer_km"] = km
+            except ValueError:
+                pass
+
+        jeng = jsonish_number("engineCapacity", "engineSize", "capacity")
+        if jeng:
+            try:
+                ev = float(jeng)
+                if ev >= 100:
+                    details["engine_cc"] = int(round(ev))
+                    details["engine_size"] = f"{ev/1000.0:.1f}L"
+                elif 0.5 <= ev <= 10:
+                    details["engine_size"] = f"{ev:g}L"
+                    details["engine_cc"] = int(round(ev * 1000))
+            except ValueError:
+                pass
+
+        jf = jsonish_value("fuelType", "fuel")
+        if re.search(r"diesel", jf, re.I): details["fuel_type"] = "Diesel"
+        elif re.search(r"petrol|unleaded", jf, re.I): details["fuel_type"] = "Petrol"
+
+        jb = jsonish_value("bodyType", "bodyStyle")
+        if jb and plausible_token(jb):
+            details["body_type"] = re.sub(r"[^A-Za-z0-9 /-].*$", "", jb).strip().title()
+        elif re.search(r"\bPick[- ]?up\b", text, re.I):
+            details["body_type"] = "Pick-up"
+
+        clean_site_note("located at sunshine", "buy 2022 ford ranger")
+
+    elif "slattery" in host:
+        details["auction_name"] = "Slattery Auctions"
+
+        # Slattery exposes an Item Details table. These labelled values are more
+        # reliable than generic matches elsewhere on the auction page.
+        sy = _first_match(text, [r"Year\s+Of\s+Manufacture\s*[:\-]?\s*((?:19|20)\d{2})\b"])
+        if sy:
+            details["year"] = int(sy)
+
+        smake = _first_match(text, [r"\bMake\s*[:\-]?\s*([A-Za-z][A-Za-z0-9 .'-]{1,30}?)(?=\s+Model\b|\s+Colour\b)"])
+        if smake:
+            details["make"] = re.sub(r"\s+", " ", smake).strip()
+        smodel = _first_match(text, [r"\bModel\s*[:\-]?\s*([A-Za-z0-9][A-Za-z0-9 .'-]{1,40}?)(?=\s+Colour\b|\s+VIN\b|\s+Series\b)"])
+        if smodel:
+            details["model"] = re.sub(r"\s+", " ", smodel).strip()
+
+        scolour = _first_match(text, [r"\bColour\s*[:\-]?\s*([A-Za-z][A-Za-z /-]{1,30}?)(?=\s+VIN\b|\s+Series\b)"])
+        if scolour:
+            details["colour"] = re.sub(r"\s+", " ", scolour).strip()
+        svin = _first_match(text, [r"\bVIN\s*[:\-]?\s*([A-HJ-NPR-Z0-9]{17})\b"])
+        if svin:
+            details["vin"] = svin.upper()
+        sreg_candidates = re.findall(r"Registration\s+Number\s*[:\-]?\s*([A-Z0-9-]{3,12})\b", text, flags=re.I)
+        sreg = next((x for x in sreg_candidates if plausible_token(x) and not x.isdigit()), "")
+        if sreg:
+            details["registration"] = sreg.upper()
+        elif not plausible_token(details.get("registration")):
+            details["registration"] = ""
+
+        strans = _first_match(text, [r"Transmission\s*[:\-]?\s*(Sports\s+Automatic|Automatic|Manual|CVT|DCT)\b"])
+        if strans:
+            details["transmission"] = strans.title() if strans.lower() != "sports automatic" else "Sports Automatic"
+
+        sdrive = _first_match(text, [r"Drive\s+Type\s*[:\-]?\s*(Four\s+Wheel\s+Drive|All\s+Wheel\s+Drive|Front\s+Wheel\s+Drive|Rear\s+Wheel\s+Drive|4WD|AWD|2WD)\b"])
+        if sdrive:
+            dl = sdrive.lower()
+            details["drive_type"] = "4WD" if ("four" in dl or "4wd" in dl) else ("AWD" if ("all" in dl or "awd" in dl) else ("2WD" if "2wd" in dl else ("FWD" if "front" in dl else "RWD")))
+
+        sbody = _first_match(text, [r"Body\s+Type\s*[:\-]?\s*(SUV|Sedan|Wagon|Hatchback|Utility|Ute|Coupe|Van|Bus|Truck|Convertible|Cab Chassis|Dual Cab(?: Utility)?)\b"])
+        if sbody:
+            details["body_type"] = re.sub(r"\s+", " ", sbody).strip().upper() if len(sbody.strip()) <= 4 else re.sub(r"\s+", " ", sbody).strip().title()
+
+        sodo = _first_match(text, [r"Odometer(?:\s*\([^)]*\))?\s*[:\-]?\s*([\d,]{3,})\s*(?:KMs?|Kilometres?|KM)\b"])
+        ov = _number(sodo, integer=True)
+        if ov is not None:
+            details["odometer_km"] = ov
+
+        sfuel = _first_match(text, [r"Fuel\s+Type\s*[:\-]?\s*(Diesel|Petrol|Electric|Hybrid|LPG)\b"])
+        if sfuel:
+            details["fuel_type"] = sfuel.title()
+
+        scc = _first_match(text, [r"\bCapacity\s*[:\-]?\s*([\d,]{3,5})(?:\s*(?:cc|CC))?\b"])
+        ccv = _number(scc, integer=True)
+        if ccv:
+            details["engine_cc"] = ccv
+            details["engine_size"] = f"{ccv/1000.0:.1f}L"
+
+        sseats = _first_match(text, [r"No\s+of\s+Seats\s*[:\-]?\s*(\d{1,2})\b"])
+        if sseats:
+            details["seat_count"] = int(sseats)
+
+        # Slattery represents the sale-registration flag as a labelled boolean.
+        # Preserve the useful business meaning in BAM instead of storing True/False.
+        if re.search(r"Sold\s+Registered,?\s+Sold\s+on\s+Consignment\s*[:\-]?\s*True\b", text, re.I):
+            details["registration_status"] = "Sold Registered, Sold on Consignment"
+        elif re.search(r"Sold\s+Registered\s*[:\-]?\s*True\b", text, re.I):
+            details["registration_status"] = "Sold Registered"
+
+        loc = details.get("auction_location") or ""
+        if any(x in loc.lower() for x in ("category", "contact", "about", "services")):
+            details.pop("auction_location", None)
+        better_loc = _first_match(text, [
+            r"(?:location|yard|branch)\s*[:\-]?\s*([A-Za-z][A-Za-z .'-]+,\s*(?:VIC|NSW|QLD|SA|WA|TAS|NT|ACT))\b",
+        ])
+        if better_loc:
+            details["auction_location"] = re.sub(r"\s+", " ", better_loc).strip()
+        # Exact Slattery Item Details overrides.
+        exact_map = {
+            "Registration Number": "registration", "Body Type": "body_type",
+            "Fuel Type": "fuel_type", "Transmission": "transmission"
+        }
+        for lab, key in exact_map.items():
+            val = labelled_value(lab)
+            if val and plausible_token(val): details[key] = val
+        val = labelled_value("Odometer")
+        m = re.search(r"([\d,]+)\s*(?:km|kms)", val, re.I)
+        if m: details["odometer_km"] = int(m.group(1).replace(",", ""))
+        val = labelled_value("Capacity")
+        m = re.search(r"([\d,]{3,5})", val)
+        if m:
+            cc=int(m.group(1).replace(",", "")); details["engine_cc"]=cc; details["engine_size"]=f"{cc/1000:.3f}L".rstrip("0").rstrip(".")+"L" if False else f"{cc/1000:.3f}L".rstrip("0").rstrip(".")
+        val = labelled_value("No of Seats")
+        m = re.search(r"\d{1,2}", val)
+        if m: details["seat_count"] = int(m.group())
+        sold = labelled_value("Sold Registered, Sold on Consignment")
+        if sold.lower().startswith("true"): details["registration_status"] = "Sold Registered, Sold on Consignment"
+
+        # v25.11.5 - exact Slattery client-state fallbacks.
+        jy = jsonish_number("yearOfManufacture", "manufactureYear")
+        if jy and re.fullmatch(r"(?:19|20)\d{2}", jy): details["year"] = int(jy)
+
+        jr = jsonish_value("registrationNumber", "regoNumber")
+        if jr:
+            m = re.search(r"\b([A-Z0-9-]{3,10})\b", jr, re.I)
+            if m and plausible_token(m.group(1)): details["registration"] = m.group(1).upper()
+
+        jo = jsonish_number("odometer", "odometerKm", "kilometres", "kilometers")
+        if jo:
+            try:
+                km = int(float(jo))
+                if 100 <= km < 10_000_000: details["odometer_km"] = km
+            except ValueError:
+                pass
+
+        jfuel = jsonish_value("fuelType", "fuel")
+        if re.search(r"diesel", jfuel, re.I): details["fuel_type"] = "Diesel"
+        elif re.search(r"petrol", jfuel, re.I): details["fuel_type"] = "Petrol"
+
+        jbody = jsonish_value("bodyType", "bodyStyle")
+        if jbody:
+            b = re.sub(r"[^A-Za-z0-9 /-].*$", "", jbody).strip()
+            if b: details["body_type"] = b.upper() if len(b) <= 4 else b.title()
+
+        jseats = jsonish_number("noOfSeats", "numberOfSeats", "seatCount", "seats")
+        if jseats:
+            try:
+                n = int(float(jseats))
+                if 1 <= n <= 99: details["seat_count"] = n
+            except ValueError:
+                pass
+
+        jtrans = jsonish_value("transmission")
+        if re.search(r"sports\s+automatic", jtrans, re.I) or re.search(r"sports\s+automatic", text, re.I): details["transmission"] = "Sports Automatic"
+        elif re.search(r"automatic", jtrans, re.I): details["transmission"] = "Automatic"
+        elif re.search(r"manual", jtrans, re.I): details["transmission"] = "Manual"
+
+        jcap = jsonish_number("capacity", "engineCapacity")
+        if jcap:
+            try:
+                cc = int(round(float(jcap)))
+                if 500 <= cc <= 10000:
+                    details["engine_cc"] = cc
+                    details["engine_size"] = f"{cc/1000.0:.3f}".rstrip("0").rstrip(".") + "L"
+            except ValueError:
+                pass
+
+        sold_reg = jsonish_value("soldRegistered")
+        sold_cons = jsonish_value("soldOnConsignment", "onConsignment")
+        if re.search(r"true|1", sold_reg, re.I) and re.search(r"true|1", sold_cons, re.I):
+            details["registration_status"] = "Sold Registered, Sold on Consignment"
+        elif re.search(r"true|1", sold_reg, re.I):
+            details["registration_status"] = "Sold Registered"
+
+        if (details.get("lot_number") or "").lower() in {"number", "expiry", "expirydate"}: details.pop("lot_number", None)
+        clean_site_note("professional auctioneers and valuers", "wide variety of general & specialised auction sales")
+        if re.search(r"\bdiesel\b", vehicle_probe, flags=re.I):
+            details["fuel_type"] = "Diesel"
+        elif re.search(r"\bpetrol\b", vehicle_probe, flags=re.I):
+            details["fuel_type"] = "Petrol"
+        elif details.get("fuel_type") in {"Hybrid", "Plug-in Hybrid", "Electric"} and not re.search(r"\b(?:hybrid|phev|electric|ev)\b", vehicle_probe, flags=re.I):
+            details.pop("fuel_type", None)
+
+    elif "gumtree" in host:
+        details["listing_source"] = "Gumtree"
+        if details.get("auction_location") and not details.get("seller_location"):
+            details["seller_location"] = details.pop("auction_location")
+
+        # Gumtree Australia publishes a very regular Listing Info table. Prefer
+        # those exact labels over generic page-wide matches so navigation/spec
+        # text cannot contaminate vehicle fields.
+        gum_loc = _first_match(text, [
+            r"(?:^|\s)Location\s+([A-Za-z][A-Za-z .'-]+,\s*(?:VIC|NSW|QLD|SA|WA|TAS|NT|ACT))\b",
+            r"(?:location|located\s+in)\s*[:\-]?\s*([A-Za-z][A-Za-z .'-]+,\s*(?:VIC|NSW|QLD|SA|WA|TAS|NT|ACT))\b",
+        ], flags=re.I)
+        if gum_loc:
+            details["seller_location"] = re.sub(r"\s+", " ", gum_loc).strip()
+
+        seller = _first_match(text, [
+            r"(?:^|\s)Listed\s+By\s+(.+?)(?=\s+(?:Views|Last\s+Edited|Date\s+Listed|Listing\s+ID|Private\s+seller|Dealer\s+used)\b|$)",
+        ], flags=re.I | re.S)
+        if seller and len(seller.strip()) <= 80:
+            details["seller_name"] = re.sub(r"\s+", " ", seller).strip(" ,-:")
+
+        exact_patterns = {
+            "variant": [r"(?:^|\s)Variant\s+(.+?)(?=\s+Body\s+Type\b)"],
+            "body_type": [r"(?:^|\s)Body\s+Type\s+(.+?)(?=\s+Year\b)"],
+            "odometer_km": [r"(?:^|\s)Odometer\s+([\d,]+)\s*km\b"],
+            "transmission": [r"(?:^|\s)Transmission\s+(.+?)(?=\s+Drive\s+Train\b)"],
+            "drive_type": [r"(?:^|\s)Drive\s+Train\s+(.+?)(?=\s+Fuel\s+Type\b)"],
+            "fuel_type": [r"(?:^|\s)Fuel\s+Type\s+(.+?)(?=\s+(?:Engine\s+Capacity|Cylinder\s+Configuration|Colour|Color|Air\s+conditioning|Is\s+your\s+car\s+registered)\b)"],
+            "engine_size": [r"(?:^|\s)Engine\s+Capacity\s+([\d.]+\s*[Ll]|[\d,]{3,5})\b"],
+            "engine_cylinders": [r"(?:^|\s)Cylinder\s+Configuration\s+([0-9]{1,2})(?:\s*cyl)?\b"],
+            "colour": [r"(?:^|\s)Colour\s+(.+?)(?=\s+(?:Air\s+conditioning|Is\s+your\s+car\s+registered|Registration\s+number|VIN|Stock\s+Number|Location)\b)"],
+            "registration": [r"(?:^|\s)Registration\s+number\s+([A-Z0-9-]{2,10})\b"],
+            "vin": [r"(?:^|\s)VIN\s+([A-HJ-NPR-Z0-9]{17})\b"],
+        }
+        for key, patterns in exact_patterns.items():
+            val = _first_match(text, patterns, flags=re.I | re.S)
+            if not val:
+                continue
+            val = re.sub(r"\s+", " ", str(val)).strip(" ,-:")
+            if key == "odometer_km":
+                num = _number(val, integer=True)
+                if num is not None: details[key] = num
+            elif key == "engine_size":
+                raw = val.replace(",", "").strip()
+                if re.fullmatch(r"\d{3,5}", raw):
+                    cc = int(raw)
+                    details["engine_cc"] = cc
+                    details[key] = f"{cc/1000.0:.1f}L"
+                else:
+                    details[key] = re.sub(r"\s+", "", val).upper().replace("L", "L")
+            elif key == "transmission":
+                if re.search(r"sports?\s+automatic|spts?\s+auto", val, re.I): details[key] = "Sports Automatic"
+                elif re.search(r"automatic", val, re.I): details[key] = "Automatic"
+                elif re.search(r"manual", val, re.I): details[key] = "Manual"
+            elif key == "drive_type":
+                if re.search(r"four\s+wheel|4wd|4x4", val, re.I): details[key] = "4WD"
+                elif re.search(r"all[ -]?wheel|awd", val, re.I): details[key] = "AWD"
+                elif re.search(r"front[ -]?wheel|fwd", val, re.I): details[key] = "FWD"
+                elif re.search(r"rear[ -]?wheel|rwd", val, re.I): details[key] = "RWD"
+                else: details[key] = val
+            elif key == "fuel_type":
+                if re.search(r"diesel", val, re.I): details[key] = "Diesel"
+                elif re.search(r"petrol|unleaded", val, re.I): details[key] = "Petrol"
+                elif re.search(r"hybrid", val, re.I): details[key] = "Hybrid"
+                elif re.search(r"electric", val, re.I): details[key] = "Electric"
+                elif re.search(r"lpg", val, re.I): details[key] = "LPG"
+            elif key == "colour":
+                details[key] = val.title()
+            elif key == "vin":
+                details[key] = val.upper()
+            elif key == "registration":
+                details[key] = val.upper()
+            else:
+                details[key] = val
+
+        reg_yes = _first_match(text, [r"Is\s+your\s+car\s+registered\?\s+(Yes|No)\b"], flags=re.I)
+        if reg_yes:
+            details["registration_status"] = "Registered" if reg_yes.lower() == "yes" else "Unregistered"
+            if reg_yes.lower() == "no":
+                details.pop("registration", None)
+
+        listing_id = _first_match(text, [r"Listing\s+ID\s+(\d{6,15})\b"], flags=re.I)
+        if listing_id:
+            details["lot_number"] = listing_id
+
+        # v25.12.5 - Gumtree copied-text fallbacks. Gumtree's copyable ad text
+        # is not always laid out like the live Listing Info table, so scan the
+        # pasted advert itself for common dealer/private-sale wording. Keep
+        # these rules Gumtree-only so the working auction/Facebook importers
+        # are not affected.
+        if not details.get("seller_location"):
+            gum_loc2 = _first_match(text, [
+                r"(?:located\s+(?:at|in)|location|suburb)\s*[:\-]?\s*([A-Za-z][A-Za-z .'-]+,\s*(?:VIC|NSW|QLD|SA|WA|TAS|NT|ACT))\b",
+                r"\b([A-Za-z][A-Za-z .'-]{2,40},\s*(?:VIC|NSW|QLD|SA|WA|TAS|NT|ACT))\b",
+            ], flags=re.I)
+            if gum_loc2:
+                details["seller_location"] = re.sub(r"\s+", " ", gum_loc2).strip()
+
+        if not details.get("seller_phone"):
+            gum_phone = _first_match(text, [
+                r"(?:phone|mobile|call|contact)\s*[:\-]?\s*((?:\+?61\s*4|04)\d(?:[ \-]?\d){7,8})",
+                r"\b((?:\+?61\s*4|04)\d(?:[ \-]?\d){7,8})\b",
+            ], flags=re.I)
+            if gum_phone:
+                details["seller_phone"] = re.sub(r"[^0-9+]", "", gum_phone)
+
+        # Exact or near-exact specification labels commonly present when a
+        # Gumtree dealer listing is copied from the browser.
+        if not details.get("body_type"):
+            gum_body = _first_match(text, [
+                r"(?:body\s*(?:type|style)|vehicle\s*type)\s*[:\-]?\s*(SUV|Sedan|Wagon|Hatchback|Hatch|Ute|Utility|Dual Cab|Single Cab|Extra Cab|Cab Chassis|Van|Coupe|Convertible|People Mover|Pickup|Pick-up)",
+            ], flags=re.I)
+            if gum_body:
+                details["body_type"] = gum_body.title()
+
+        if not details.get("seat_count"):
+            gum_seats = _first_match(text, [
+                r"(?:no\.?\s*of\s*seats|number\s*of\s*seats|seats)\s*[:\-]?\s*(\d{1,2})\b",
+                r"\b(\d{1,2})\s*seater\b",
+            ], flags=re.I)
+            if gum_seats:
+                try:
+                    n = int(gum_seats)
+                    if 1 <= n <= 20:
+                        details["seat_count"] = n
+                except ValueError:
+                    pass
+
+        if not details.get("engine_cylinders"):
+            gum_cyl = _first_match(text, [
+                r"(?:cylinders?|cylinder\s*configuration)\s*[:\-]?\s*(\d{1,2})\b",
+                r"\b(\d{1,2})\s*cyl(?:inder)?s?\b",
+            ], flags=re.I)
+            if gum_cyl:
+                details["engine_cylinders"] = gum_cyl
+
+        if not details.get("fuel_type"):
+            if re.search(r"\bdiesel\b", text, flags=re.I):
+                details["fuel_type"] = "Diesel"
+            elif re.search(r"\b(?:petrol|unleaded)\b", text, flags=re.I):
+                details["fuel_type"] = "Petrol"
+            elif re.search(r"\bhybrid\b", text, flags=re.I):
+                details["fuel_type"] = "Hybrid"
+            elif re.search(r"\belectric\b", text, flags=re.I):
+                details["fuel_type"] = "Electric"
+
+        if not details.get("registration"):
+            gum_reg = _first_match(text, [
+                r"(?:registration\s*(?:number|no\.?)?|rego)\s*[:#\-]?\s*([A-Z0-9-]{2,10})\b",
+            ], flags=re.I)
+            if gum_reg and gum_reg.lower() not in {"status", "number", "expiry", "expires", "date"}:
+                details["registration"] = gum_reg.upper()
+
+        if not details.get("registration_status"):
+            if re.search(r"\b(?:unregistered|no\s+registration|not\s+registered)\b", text, flags=re.I):
+                details["registration_status"] = "Unregistered"
+                details.pop("registration", None)
+            elif re.search(r"\bregistered\b", text, flags=re.I):
+                details["registration_status"] = "Registered"
+
+        # A copied Gumtree description may state interior trim without a formal
+        # label. Only map conservative material names supported by BAM.
+        if not details.get("interior"):
+            gum_int = _first_match(text, [
+                r"(?:interior|trim)\s*[:\-]?\s*(black\s*/\s*grey\s+cloth|black\s+cloth|grey\s+cloth|gray\s+cloth|cloth|leather)",
+            ], flags=re.I)
+            if gum_int:
+                details["interior"] = "Leather" if "leather" in gum_int.lower() else "Cloth"
+
+        # Keep the whole copied Gumtree advert in Condition / Inspection Notes,
+        # matching the Facebook workflow, while individual fields are extracted
+        # above for searching and valuation.
+        if text and not (details.get("condition_notes") or "").strip():
+            gum_note = _strip_html(text).strip()
+            if gum_note and not gum_note.lower().startswith(("http://", "https://")):
+                details["condition_notes"] = gum_note[:4000]
+
+        # Gumtree listings are fixed-price marketplace ads, never auctions.
+        if details.get("current_bid") and not details.get("asking_price"):
+            details["asking_price"] = details.pop("current_bid")
+        details.pop("auction_location", None)
+        details.pop("auction_name", None)
+
+    elif "facebook.com" in host or "fb.com" in host:
+        details["listing_source"] = "Facebook Marketplace"
+
+        # Facebook commonly blocks server-side requests, so this branch is also
+        # used for the user's pasted Marketplace text. Handle the labels Facebook
+        # shows in the copyable listing panel and About this vehicle section.
+        fb_loc = _first_match(text, [
+            r"(?:listed\s+in|location)\s*[:\-]?\s*([A-Za-z][A-Za-z .'-]+,\s*(?:VIC|NSW|QLD|SA|WA|TAS|NT|ACT))\b",
+            r"\b([A-Za-z][A-Za-z .'-]+,\s*(?:VIC|NSW|QLD|SA|WA|TAS|NT|ACT))\b",
+        ], flags=re.I)
+        if fb_loc:
+            details["seller_location"] = re.sub(r"\s+", " ", fb_loc).strip()
+
+        seller = _first_match(text, [
+            r"(?:seller(?:\s+information)?|listed\s+by|seller\s+details)\s*[:\-]?\s*([A-Za-z][A-Za-z .'-]{1,60})",
+        ], flags=re.I)
+        if seller:
+            details["seller_name"] = seller.strip(" ,-:")
+
+        fb_odo = _first_match(text, [
+            r"(?:driven|mileage|odometer|kilometres|kilometers)\s*[:\-]?\s*([\d,]+)\s*(?:km|kms|kilometres|kilometers)?\b",
+            r"([\d,]{3,})\s*(?:km|kms)\s+(?:driven|mileage)\b",
+        ], flags=re.I)
+        if fb_odo:
+            num = _number(fb_odo, integer=True)
+            if num is not None and num < 10_000_000: details["odometer_km"] = num
+
+        fb_trans = _first_match(text, [
+            r"(automatic|manual|cvt|sports?\s+automatic)\s+transmission\b",
+            r"transmission\s*[:\-]?\s*(sports?\s+automatic|automatic|manual|cvt)\b",
+        ], flags=re.I)
+        if fb_trans:
+            t = fb_trans.lower()
+            details["transmission"] = "Sports Automatic" if "sport" in t else ("CVT" if "cvt" in t else t.title())
+
+        fb_colour = _first_match(text, [r"(?:exterior\s+colour|exterior\s+color|colour|color)\s*[:\-]?\s*([A-Za-z][A-Za-z -]{1,25})"], flags=re.I)
+        if fb_colour:
+            details["colour"] = re.split(r"\s+(?:interior|fuel|transmission|driven|mileage)\b", fb_colour, maxsplit=1, flags=re.I)[0].strip().title()
+
+        fb_fuel = _first_match(text, [r"fuel(?:\s+type)?\s*[:\-]?\s*(diesel|petrol|gasoline|hybrid|electric|lpg)\b"], flags=re.I)
+        if fb_fuel:
+            f = fb_fuel.lower()
+            details["fuel_type"] = "Petrol" if f == "gasoline" else f.title()
+
+        fb_body = _first_match(text, [r"body\s+(?:type|style)\s*[:\-]?\s*([A-Za-z][A-Za-z ()/-]{1,30})"], flags=re.I)
+        if fb_body:
+            details["body_type"] = re.split(r"\s+(?:fuel|transmission|colour|color|driven|mileage)\b", fb_body, maxsplit=1, flags=re.I)[0].strip().title()
+
+        fb_reg = _first_match(text, [r"(?:registration|rego)(?:\s+number)?\s*[:#\-]?\s*([A-Z0-9-]{2,10})\b"], flags=re.I)
+        if fb_reg and fb_reg.lower() not in {"status", "expiry", "expires", "number"}:
+            details["registration"] = fb_reg.upper()
+
+        # Marketplace ads are fixed-price listings, not auctions.
+        details.pop("auction_location", None)
+        details.pop("auction_name", None)
+        details.pop("lot_number", None)
+
+    elif "carsales.com" in host:
+        details["listing_source"] = "Carsales"
+        if details.get("auction_location") and not details.get("seller_location"):
+            details["seller_location"] = details.pop("auction_location")
+        details.pop("auction_name", None)
+        details.pop("lot_number", None)
+
+    # Common cleanup: an auction/location field should never contain obvious site chrome.
+    loc = details.get("auction_location") or ""
+    if len(loc) > 100 or any(x in loc.lower() for x in ("category", "contact us", "privacy", "terms & conditions", "site links", "media complaints", "technical support")):
+        details.pop("auction_location", None)
+
+    return details
+
+def _jsonld_blocks(page_html):
+    objects = []
+    text_blocks = []
+    for block in re.findall(
+        r'<script[^>]+type=["\']application/ld\+json["\'][^>]*>(.*?)</script>',
+        page_html or "",
+        flags=re.I | re.S,
+    ):
+        cleaned = html.unescape(block).strip()
+        try:
+            obj = json.loads(cleaned)
+            objects.append(obj)
+            text_blocks.append(json.dumps(obj, ensure_ascii=False))
+        except Exception:
+            text_blocks.append(_strip_html(cleaned))
+    return objects, text_blocks
+
+
+def _collect_json_values(root, wanted_keys):
+    """Iterative traversal avoids recursion failures on deeply nested site data."""
+    wanted = {key.lower() for key in wanted_keys}
+    found = []
+    stack = [root]
+    seen = 0
+    while stack and seen < 50000:
+        current = stack.pop()
+        seen += 1
+        if isinstance(current, dict):
+            for key, value in current.items():
+                if str(key).lower() in wanted:
+                    found.append(value)
+                if isinstance(value, (dict, list)):
+                    stack.append(value)
+        elif isinstance(current, list):
+            for value in current:
+                if isinstance(value, (dict, list)):
+                    stack.append(value)
+    return found
+
+
+def _normalise_image_url(value):
+    if not value:
+        return ""
+    if isinstance(value, dict):
+        for key in ("url", "contentUrl", "thumbnailUrl"):
+            if value.get(key):
+                return _normalise_image_url(value.get(key))
+        return ""
+    value = html.unescape(str(value).strip()).replace("\\/", "/")
+    if value.startswith("//"):
+        value = "https:" + value
+    if not value.startswith(("http://", "https://")):
+        return ""
+    return value
+
+
+def _extract_photo_urls(page_html, jsonld_objects):
+    candidates = []
+
+    def add(value):
+        if isinstance(value, list):
+            for item in value:
+                add(item)
+            return
+        url = _normalise_image_url(value)
+        if not url:
+            return
+        lowered = url.lower()
+        # Avoid common site chrome/logos where possible.
+        if any(token in lowered for token in ("logo", "favicon", "sprite", "avatar", "icon-")):
+            return
+        if url not in candidates:
+            candidates.append(url)
+
+    for prop in ("og:image", "og:image:url", "twitter:image", "twitter:image:src"):
+        add(_meta_content(page_html, prop))
+
+    # Multiple metadata images.
+    for match in re.findall(
+        r'<meta[^>]+(?:property|name)=["\'](?:og:image|og:image:url|twitter:image|twitter:image:src)["\'][^>]+content=["\']([^"\']+)["\']',
+        page_html or "",
+        flags=re.I,
+    ):
+        add(match)
+
+    for obj in jsonld_objects:
+        for value in _collect_json_values(obj, ("image", "images", "photo", "photos", "thumbnailUrl", "contentUrl")):
+            add(value)
+
+    # Auction sites often embed image URLs in application state instead of JSON-LD.
+    decoded = html.unescape(page_html or "").replace("\\/", "/")
+    for match in re.findall(r'https?://[^\s"\'<>]+?\.(?:jpe?g|png|webp)(?:\?[^\s"\'<>]*)?', decoded, flags=re.I):
+        add(match)
+        if len(candidates) >= 20:
+            break
+
+    return candidates[:10]
+
+
+def _auction_datetime_value(text, default_year=None):
+    """Convert common Australian auction date text to datetime-local format."""
+    if not text:
+        return ""
+    value = str(text).replace(".", ":")
+    value = re.sub(r"\s+(?:AEST|AEDT|EST|EDT)\b", "", value, flags=re.I).strip(" ()")
+    value = re.sub(r"^(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)\s*,?\s*", "", value, flags=re.I)
+    value = re.sub(r"\s+", " ", value).strip(" ,")
+    formats = (
+        "%d %B %Y %H:%M", "%d %b %Y %H:%M", "%d %B %y %H:%M", "%d %b %y %H:%M",
+        "%d %B %Y %I:%M %p", "%d %b %Y %I:%M %p", "%d %B %y %I:%M %p", "%d %b %y %I:%M %p",
+        "%d/%m/%Y %H:%M", "%d/%m/%Y %I:%M %p", "%d-%m-%Y %H:%M", "%d-%m-%Y %I:%M %p",
+    )
+    for fmt in formats:
+        try:
+            return datetime.strptime(value, fmt).strftime("%Y-%m-%dT%H:%M")
+        except ValueError:
+            pass
+    if default_year:
+        for fmt in ("%d %B %H:%M", "%d %b %H:%M", "%d %B %I:%M %p", "%d %b %I:%M %p"):
+            try:
+                dt = datetime.strptime(value, fmt).replace(year=int(default_year))
+                return dt.strftime("%Y-%m-%dT%H:%M")
+            except ValueError:
+                pass
+    return ""
+
+
+def _grays_sale_times(page_html, lot_url, headers):
+    """Read Grays lot close time and, when available, its parent sale start time."""
+    decoded = _strip_html(page_html or "")
+    year = datetime.now().year
+    finish_text = _first_match(decoded, [
+        r"Closes\s*:\s*\(?\s*(\d{1,2}\s+[A-Za-z]+(?:\s+\d{2,4})?\s+\d{1,2}:\d{2}\s*(?:AEST|AEDT)?)",
+        r"End\s+time\s*[:\-]?\s*(\d{1,2}\s+[A-Za-z]+(?:\s+\d{2,4})?\s+\d{1,2}[.:]\d{2}\s*(?:AM|PM)?\s*(?:AEST|AEDT)?)",
+    ])
+    finish = _auction_datetime_value((finish_text or "").replace(".", ":"), year)
+    start = ""
+
+    sale_match = re.search(r'href=["\']([^"\']*/sale/\d+/[^"\']*)["\']', page_html or "", flags=re.I)
+    if sale_match:
+        sale_url = urllib.parse.urljoin(lot_url, html.unescape(sale_match.group(1)).replace("\\/", "/"))
+        try:
+            _validate_public_http_url(sale_url)
+            req = urllib.request.Request(sale_url, headers=headers)
+            with urllib.request.urlopen(req, timeout=12) as response:
+                sale_html = response.read(2_000_000).decode(response.headers.get_content_charset() or "utf-8", errors="ignore")
+            sale_text = _strip_html(sale_html)
+            start_text = _first_match(sale_text, [
+                r"Start\s+time\s*[:\-]?\s*(\d{1,2}\s+[A-Za-z]+(?:\s+\d{2,4})?\s+\d{1,2}[.:]\d{2}\s*(?:AM|PM)?\s*(?:AEST|AEDT)?)",
+            ])
+            end_text = _first_match(sale_text, [
+                r"End\s+time\s*[:\-]?\s*(\d{1,2}\s+[A-Za-z]+(?:\s+\d{2,4})?\s+\d{1,2}[.:]\d{2}\s*(?:AM|PM)?\s*(?:AEST|AEDT)?)",
+            ])
+            start = _auction_datetime_value((start_text or "").replace(".", ":"), year)
+            finish = _auction_datetime_value((end_text or "").replace(".", ":"), year) or finish
+        except Exception:
+            pass
+    return start, finish
+
+
+
+
+def _embedded_label_windows(page_html, labels, before=180, after=1200):
+    """Return readable text around important labels even when specs live in JS state.
+
+    Some auction sites render their specification tables client-side. The values are
+    still present in the downloaded HTML, but inside a large script block that normal
+    visible-text extraction deliberately removes. Pulling small windows around known
+    labels lets BAM read those values without treating the whole script as page text.
+    """
+    if not page_html:
+        return ""
+    raw = html.unescape(str(page_html))
+    # Decode the common escaping used by React/Next/Salesforce state blobs.
+    raw = (raw.replace("\\/", "/")
+              .replace("\\u0026", "&")
+              .replace("\\u003c", "<")
+              .replace("\\u003e", ">")
+              .replace("\\u0022", '"')
+              .replace("\\n", " ")
+              .replace("\\r", " ")
+              .replace("\\t", " "))
+    windows = []
+    low = raw.lower()
+    for label in labels:
+        needle = str(label).lower()
+        start = 0
+        hits = 0
+        while hits < 8:
+            idx = low.find(needle, start)
+            if idx < 0:
+                break
+            chunk = raw[max(0, idx-before): min(len(raw), idx+len(needle)+after)]
+            # Keep script content, remove only markup/punctuation noise.
+            chunk = re.sub(r"<[^>]+>", " ", chunk)
+            chunk = re.sub(r"[{}\[\]\"']+", " ", chunk)
+            # Client-side state often stores rows as label/value objects. Remove
+            # the structural key names so the result reads like the visible table.
+            chunk = re.sub(r"\b(?:label|displayValue|display_value|fieldName|field_name|value)\b\s*[:=]\s*", " ", chunk, flags=re.I)
+            chunk = re.sub(r"\s+", " ", chunk).strip()
+            if chunk:
+                windows.append(chunk)
+            hits += 1
+            start = idx + len(needle)
+    return " ".join(windows)
+
+
+def _fetch_pickles_search_card(stock_id, request_headers):
+    """Fetch Pickles' server-rendered search card for a stock number.
+
+    Pickles' detail page currently renders many specs in browser JavaScript, while
+    the search results expose odometer/seats/cylinders/engine/fuel/transmission/drive
+    in normal HTML. This provides a reliable fallback for those fields.
+    """
+    stock_id = re.sub(r"\D", "", str(stock_id or ""))
+    if not stock_id:
+        return ""
+    candidates = [
+        f"https://www.pickles.com.au/used/search/lob/cars-motorcycles/cars?search={stock_id}",
+        f"https://www.pickles.com.au/used/search/items?search={stock_id}",
+    ]
+    needle = f"Stock {stock_id}".lower()
+    for candidate in candidates:
+        try:
+            req = urllib.request.Request(candidate, headers=request_headers)
+            with urllib.request.urlopen(req, timeout=12) as response:
+                ctype = (response.headers.get("Content-Type") or "").lower()
+                if "html" not in ctype:
+                    continue
+                charset = response.headers.get_content_charset() or "utf-8"
+                raw = response.read(4_000_000).decode(charset, errors="ignore")
+            text = _strip_html(raw)
+            idx = text.lower().find(needle)
+            if idx >= 0:
+                # The useful specs occur before the Stock marker on the result card.
+                return text[max(0, idx-1600): min(len(text), idx+350)]
+        except Exception:
+            continue
+    return ""
+
+
+def _fetch_listing_page(url):
+    parsed = _validate_public_http_url(url)
+    source = _detect_listing_source(url)
+    site_name = _listing_site_name(url)
+
+    request_headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0 Safari/537.36",
+        "Accept-Language": "en-AU,en;q=0.9",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Cache-Control": "no-cache",
+    }
+    req = urllib.request.Request(url, headers=request_headers)
+
+    try:
+        with urllib.request.urlopen(req, timeout=18) as response:
+            ctype = (response.headers.get("Content-Type") or "").lower()
+            if "text/html" not in ctype and "application/xhtml" not in ctype:
+                raise ValueError("That link did not return a normal web listing page.")
+            charset = response.headers.get_content_charset() or "utf-8"
+            raw = response.read(4_000_000)
+    except urllib.error.HTTPError as exc:
+        if source == "Facebook Marketplace":
+            raise ValueError("Facebook blocked automatic import. Copy the Marketplace listing title, price and description and use Import from Text.")
+        raise ValueError(f"{site_name or 'The listing site'} blocked automatic import (HTTP {exc.code}). Copy the listing text and use Import from Text.")
+    except urllib.error.URLError as exc:
+        raise ValueError(f"BAM could not connect to that listing: {exc.reason}")
+    except TimeoutError:
+        raise ValueError("The listing site took too long to respond. Try again or use Import from Text.")
+
+    page_html = raw.decode(charset, errors="ignore")
+    title = _meta_content(page_html, "og:title") or _meta_content(page_html, "twitter:title")
+    description = _meta_content(page_html, "og:description") or _meta_content(page_html, "description") or _meta_content(page_html, "twitter:description")
+    if not title:
+        match = re.search(r"<title[^>]*>(.*?)</title>", page_html, flags=re.I | re.S)
+        title = _strip_html(match.group(1)) if match else ""
+
+    jsonld_objects, jsonld_text = _jsonld_blocks(page_html)
+    visible_text = _strip_html(page_html)
+
+    # Pull small readable windows from the *entire* HTML around the labels used by
+    # Pickles and Slattery. Their spec tables can be rendered from JavaScript state
+    # well after the first few hundred KB of the document.
+    label_windows = _embedded_label_windows(page_html, [
+        "Odometer", "Odometer (Showing on)", "VIN", "Registration",
+        "Registration Number", "Registration Expiry", "Registration Status",
+        "Transmission", "Drive Type", "Body Type", "Fuel Type", "Fuel",
+        "Engine Capacity", "Capacity", "Cylinders", "No of Seats",
+        "No. of Seats", "Colour", "Color", "Trim", "Year Of Manufacture",
+        "Sold Registered", "Sold on Consignment", "Item Details",
+    ])
+
+    # Pickles exposes the most useful specs in its server-rendered search result
+    # card even when the detail page hides them behind client-side JavaScript.
+    pickles_card = ""
+    if "pickles.com" in (parsed.netloc or "").lower():
+        stock_match = re.search(r"/(\d{6,12})(?:[/?#]|$)", urllib.parse.urlparse(url).path + "/")
+        if stock_match:
+            pickles_card = _fetch_pickles_search_card(stock_match.group(1), request_headers)
+
+    # Keep a modest raw prefix as a generic fallback, then add targeted windows and
+    # any Pickles card text. This avoids loading megabytes of unrelated script data.
+    embedded_text = html.unescape(page_html).replace("\\/", "/")[:350000]
+    combined = " ".join(part for part in (
+        title, description, " ".join(jsonld_text), visible_text,
+        label_windows, pickles_card, embedded_text
+    ) if part)
+
+    details = _extract_listing_details(combined, url=url, title=title, description=description)
+    details["listing_url"] = url
+    if source == "Auction":
+        details["auction_url"] = url
+        if site_name:
+            details.setdefault("auction_name", site_name)
+    details["photo_urls"] = _extract_photo_urls(page_html, jsonld_objects)
+
+    if "grays.com" in (parsed.netloc or "").lower():
+        auction_start, auction_finish = _grays_sale_times(page_html, url, request_headers)
+        if auction_start:
+            details["auction_start"] = auction_start
+        if auction_finish:
+            details["auction_finish"] = auction_finish
+
+    # If Facebook returns a login/generic shell, do not pretend it imported.
+    if source == "Facebook Marketplace":
+        useful = any(details.get(key) for key in ("year", "make", "model", "asking_price", "odometer_km", "vin"))
+        if not useful:
+            raise ValueError("Facebook did not provide the actual Marketplace listing to BAM. Copy the listing title, price and description and use Import from Text.")
+
+    return details
+
+
+def _parse_imported_photo_urls(raw_value):
+    if not raw_value:
+        return []
+    try:
+        values = json.loads(raw_value)
+    except (TypeError, json.JSONDecodeError):
+        values = [x.strip() for x in str(raw_value).splitlines() if x.strip()]
+    if not isinstance(values, list):
+        return []
+    result = []
+    for value in values:
+        url = _normalise_image_url(value)
+        if url and url not in result:
+            result.append(url)
+    return result[:10]
+
+
+def _download_listing_photo(url, referer=""):
+    _validate_public_http_url(url)
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/129.0 Safari/537.36",
+        "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+    }
+    if referer:
+        headers["Referer"] = referer
+    req = urllib.request.Request(url, headers=headers)
+    try:
+        with urllib.request.urlopen(req, timeout=15) as response:
+            ctype = (response.headers.get("Content-Type") or "").split(";", 1)[0].lower().strip()
+            if ctype not in {"image/jpeg", "image/jpg", "image/png", "image/webp"}:
+                return None
+            data = response.read(12 * 1024 * 1024 + 1)
+            if not data or len(data) > 12 * 1024 * 1024:
+                return None
+    except Exception:
+        return None
+
+    ext_map = {"image/jpeg": "jpg", "image/jpg": "jpg", "image/png": "png", "image/webp": "webp"}
+    ext = ext_map.get(ctype, "jpg")
+    filename = f"{datetime.now().strftime('%Y%m%d%H%M%S%f')}_listing.{ext}"
+    (UPLOAD_DIR / filename).write_bytes(data)
+    return filename
+
+
+def _save_imported_listing_photos(conn, auction_vehicle_id, raw_urls, referer="", limit=10):
+    saved = 0
+    for url in _parse_imported_photo_urls(raw_urls):
+        if saved >= limit:
+            break
+        filename = _download_listing_photo(url, referer=referer)
+        if not filename:
+            continue
+        conn.execute("INSERT INTO auction_photos(auction_vehicle_id,filename,caption) VALUES(?,?,?)", (auction_vehicle_id, filename, "Imported from listing"))
+        saved += 1
+    return saved
+
+
+# BAM Auction Watch - Version 25.3
+# -----------------------------------------------------------------------------
+AUCTION_TYPES = ("Car", "Boat", "Caravan", "Trailer", "Motorcycle", "Other")
+AUCTION_STATUSES = ("Watching", "Contacted", "Negotiating", "Bidding", "Won", "Bought", "Lost", "Sold", "Passed In", "Removed")
+BUYING_SOURCES = ("Auction", "Facebook Marketplace", "Gumtree", "Carsales", "Dealer", "Private Seller", "Other")
+AUCTION_CONDITIONS = ("Excellent", "Good", "Average", "Poor", "Damaged", "BER", "Unknown")
+
+# Version 25.3 - Quick Select catalog.
+# These are suggestions only: Make and Model remain free-typing fields so an
+# uncommon vehicle can still be entered without changing the program.
+VEHICLE_MODEL_CATALOG = {
+    "Toyota": ["86", "Camry", "Corolla", "C-HR", "Fortuner", "HiAce", "Hilux", "Kluger", "LandCruiser", "LandCruiser Prado", "Prius", "RAV4", "Yaris"],
+    "Ford": ["Everest", "Falcon", "Focus", "Mustang", "Ranger", "Territory", "Transit"],
+    "Holden": ["Astra", "Colorado", "Commodore", "Cruze", "Trax"],
+    "Mazda": ["2", "3", "6", "BT-50", "CX-3", "CX-30", "CX-5", "CX-60", "CX-8", "CX-9", "MX-5"],
+    "Nissan": ["370Z", "Dualis", "Juke", "Navara", "Patrol", "Pathfinder", "Qashqai", "X-Trail"],
+    "Mitsubishi": ["ASX", "Eclipse Cross", "Lancer", "Outlander", "Pajero", "Pajero Sport", "Triton"],
+    "Hyundai": ["Accent", "i30", "iLoad", "iMax", "Kona", "Santa Fe", "Sonata", "Tucson"],
+    "Kia": ["Carnival", "Cerato", "Picanto", "Rio", "Sorento", "Sportage", "Stinger"],
+    "Subaru": ["BRZ", "Forester", "Impreza", "Liberty", "Outback", "WRX", "XV"],
+    "Volkswagen": ["Amarok", "Caddy", "Golf", "Passat", "Polo", "Tiguan", "Touareg", "Transporter"],
+    "Isuzu": ["D-MAX", "MU-X"],
+    "Suzuki": ["Baleno", "Grand Vitara", "Ignis", "Jimny", "Swift", "Vitara"],
+    "Honda": ["Accord", "City", "Civic", "CR-V", "HR-V", "Jazz"],
+    "Jeep": ["Cherokee", "Compass", "Gladiator", "Grand Cherokee", "Renegade", "Wrangler"],
+    "Land Rover": ["Defender", "Discovery", "Discovery Sport", "Range Rover", "Range Rover Evoque", "Range Rover Sport"],
+    "Lexus": ["ES", "GS", "IS", "LX", "NX", "RX", "UX"],
+    "BMW": ["1 Series", "2 Series", "3 Series", "4 Series", "5 Series", "X1", "X3", "X5"],
+    "Mercedes-Benz": ["A-Class", "C-Class", "E-Class", "GLA", "GLC", "GLE", "Sprinter", "Vito"],
+    "Audi": ["A1", "A3", "A4", "A5", "Q2", "Q3", "Q5", "Q7"],
+    "MG": ["MG3", "HS", "ZS"],
+    "GWM": ["Cannon", "Ora", "Tank 300", "Tank 500"],
+    "Haval": ["H2", "H6", "Jolion"],
+    "LDV": ["D90", "Deliver 9", "G10", "T60"],
+    "Ram": ["1500", "2500", "3500"],
+    "Tesla": ["Model 3", "Model S", "Model X", "Model Y"],
+    "Volvo": ["S60", "V60", "XC40", "XC60", "XC90"],
+    "Skoda": ["Fabia", "Karoq", "Kodiaq", "Octavia", "Superb"],
+    "Renault": ["Captur", "Kangoo", "Koleos", "Master", "Trafic"],
+    "Peugeot": ["2008", "3008", "308", "5008", "Partner"],
+}
+
+# Version 25.4 - linked Variant suggestions.
+# Variant remains free-typing so BAM can still accept any trim/grade not listed.
+VEHICLE_VARIANT_CATALOG = {
+    "Land Rover": {
+        "Range Rover": ["Vogue", "Vogue SE", "HSE", "Autobiography", "Supercharged"],
+        "Range Rover Sport": ["SE", "HSE", "HSE Dynamic", "Autobiography", "SVR"],
+        "Range Rover Evoque": ["Pure", "Prestige", "Dynamic", "SE", "HSE"],
+        "Discovery": ["S", "SE", "HSE", "HSE Luxury"],
+        "Defender": ["S", "SE", "HSE", "X-Dynamic", "X"],
+    },
+    "Toyota": {
+        "LandCruiser": ["GX", "GXL", "VX", "Sahara", "Sahara ZX", "GR Sport"],
+        "LandCruiser Prado": ["GX", "GXL", "VX", "Kakadu"],
+        "Hilux": ["WorkMate", "SR", "SR5", "Rogue", "GR Sport"],
+        "RAV4": ["GX", "GXL", "Cruiser", "Edge"],
+        "Camry": ["Ascent", "Ascent Sport", "SX", "SL"],
+        "Corolla": ["Ascent Sport", "SX", "ZR"],
+    },
+    "Ford": {
+        "Ranger": ["XL", "XLS", "XLT", "Sport", "Wildtrak", "Raptor"],
+        "Everest": ["Ambiente", "Trend", "Sport", "Platinum"],
+    },
+    "Mazda": {
+        "CX-5": ["Maxx", "Maxx Sport", "Touring", "GT", "Akera"],
+        "BT-50": ["XS", "XT", "XTR", "GT", "SP", "Thunder"],
+    },
+    "Nissan": {
+        "Patrol": ["Ti", "Ti-L", "Warrior"],
+        "Navara": ["SL", "ST", "ST-X", "PRO-4X", "Warrior"],
+        "X-Trail": ["ST", "ST-L", "Ti", "Ti-L"],
+    },
+    "Mitsubishi": {
+        "Triton": ["GLX", "GLX+", "GLS", "GSR"],
+        "Pajero Sport": ["GLX", "GLS", "Exceed", "GSR"],
+        "Outlander": ["ES", "LS", "Aspire", "Exceed", "Exceed Tourer"],
+    },
+    "Isuzu": {
+        "D-MAX": ["SX", "LS-M", "LS-U", "X-Terrain"],
+        "MU-X": ["LS-M", "LS-U", "LS-T"],
+    },
+    "Volkswagen": {
+        "Amarok": ["Core", "Life", "Style", "PanAmericana", "Aventura"],
+        "Golf": ["Trendline", "Comfortline", "Highline", "GTI", "R"],
+    },
+    "Subaru": {
+        "Forester": ["2.5i", "2.5i-L", "2.5i Premium", "2.5i-S", "Sport"],
+        "Outback": ["AWD", "AWD Sport", "AWD Touring", "XT Sport", "XT Touring"],
+    },
+}
+
+
+# Version 25.5 - Auction Watch make/model suggestions by asset type.
+# Every field still accepts manual typing, so uncommon makes/models are supported.
+AUCTION_ASSET_MODEL_CATALOG = {
+    "Car": VEHICLE_MODEL_CATALOG,
+    "Motorcycle": {
+        "Honda": ["CB125E", "CB500F", "CBR500R", "CBR600RR", "CBR1000RR", "CRF250", "CRF300L", "CRF450R", "Gold Wing", "Rebel"],
+        "Yamaha": ["MT-03", "MT-07", "MT-09", "MT-10", "R3", "R6", "R7", "R1", "Tenere 700", "WR450F"],
+        "Kawasaki": ["Ninja 400", "Ninja 500", "Ninja 650", "Ninja ZX-6R", "Ninja ZX-10R", "Z400", "Z650", "Z900", "KLR650"],
+        "Suzuki": ["GSX-R600", "GSX-R750", "GSX-R1000", "GSX-8R", "SV650", "V-Strom 650", "V-Strom 800", "DR-Z400"],
+        "Harley-Davidson": ["Sportster", "Street Bob", "Fat Bob", "Fat Boy", "Low Rider", "Road King", "Street Glide"],
+        "BMW": ["G 310", "F 750 GS", "F 850 GS", "R 1250 GS", "R 1300 GS", "S 1000 RR"],
+        "KTM": ["390 Duke", "690 Enduro", "790 Duke", "890 Adventure", "1290 Super Adventure"],
+        "Triumph": ["Bonneville", "Street Triple", "Speed Triple", "Tiger 900", "Tiger 1200"],
+        "Ducati": ["Monster", "Panigale V2", "Panigale V4", "Multistrada", "Scrambler"],
+    },
+    "Caravan": {
+        "Jayco": ["Journey", "Silverline", "Starcraft", "Expanda", "Discovery", "All-Terrain", "CrossTrak"],
+        "New Age": ["Manta Ray", "Road Owl", "Desert Rose", "Big Red", "Wayfinder"],
+        "Coromal": ["Element", "Princeton", "Lifestyle", "Magnum"],
+        "Windsor": ["Genesis", "Rapid", "Statesman", "Silhouette"],
+        "Avan": ["Aspire", "Infinity", "Frances", "Cruiseliner"],
+        "Lotus": ["Freelander", "Trooper", "Off Grid", "Tremor"],
+        "Zone RV": ["Sojourn", "Expedition", "Summit", "Peregrine"],
+        "Kedron": ["Top Ender", "XC5", "Compact", "TE7"],
+    },
+    "Boat": {
+        "Quintrex": ["Explorer", "Renegade", "Top Ender", "Fishabout", "Freestyler", "Trident"],
+        "Stacer": ["Proline", "Sea Master", "Crossfire", "Ocean Ranger", "Wild Rider"],
+        "Savage": ["Kestrel", "Scorpion", "Raptor", "Mako"],
+        "Haines Hunter": ["V17L", "V19R", "SF535", "SF600", "675 Offshore"],
+        "Cruise Craft": ["Explorer", "Outsider", "Resort", "F360"],
+        "Bar Crusher": ["490", "535", "575", "615", "670", "730"],
+        "Sea-Doo": ["Spark", "GTI", "GTR", "GTX", "RXP-X", "FishPro"],
+        "Yamaha": ["FX", "VX", "WaveRunner", "AR195", "SX190"],
+    },
+    "Trailer": {
+        "Custom": ["Box Trailer", "Car Trailer", "Plant Trailer", "Boat Trailer", "Enclosed Trailer", "Tipper Trailer"],
+        "Mackay": ["Boat Trailer", "Car Trailer"],
+        "Dunbier": ["Boat Trailer", "Jetski Trailer"],
+        "Redco": ["Boat Trailer", "Box Trailer"],
+    },
+    "Other": {},
+}
+
+VEHICLE_MAKES = tuple(VEHICLE_MODEL_CATALOG.keys())
+FUEL_TYPES = ("Petrol", "Diesel", "Hybrid", "Plug-in Hybrid", "Electric", "LPG", "Other")
+TRANSMISSION_TYPES = ("Automatic", "Sports Automatic", "Manual", "CVT", "DCT", "Other")
+DRIVE_TYPES = ("2WD", "4WD", "AWD", "FWD", "RWD", "Other")
+
+
+def _auction_num(name, integer=False):
+    raw = (request.form.get(name) or "").strip().replace(",", "").replace("$", "")
+    if not raw:
+        return None if integer else 0.0
+    return int(float(raw)) if integer else float(raw)
+
+
+def _auction_payload():
+    make = (request.form.get("make") or "").strip()
+    model = (request.form.get("model") or "").strip()
+    if not make or not model:
+        raise ValueError("Make and model are required.")
+    asset_type = request.form.get("asset_type") or "Car"
+    status = request.form.get("status") or "Watching"
+    return {
+        "status": status if status in AUCTION_STATUSES else "Watching",
+        "asset_type": asset_type if asset_type in AUCTION_TYPES else "Other",
+        "listing_source": (request.form.get("listing_source") or "Auction").strip() or "Auction",
+        "seller_name": (request.form.get("seller_name") or "").strip() or None,
+        "seller_phone": (request.form.get("seller_phone") or "").strip() or None,
+        "seller_location": (request.form.get("seller_location") or "").strip() or None,
+        "listing_url": (request.form.get("listing_url") or "").strip() or None,
+        "date_first_seen": request.form.get("date_first_seen") or None,
+        "last_checked": request.form.get("last_checked") or None,
+        "asking_price": _auction_num("asking_price"),
+        "negotiated_price": _auction_num("negotiated_price"),
+        "auction_name": (request.form.get("auction_name") or "").strip() or None,
+        "auction_location": (request.form.get("auction_location") or "").strip() or None,
+        "auction_url": (request.form.get("auction_url") or "").strip() or None,
+        "lot_number": (request.form.get("lot_number") or "").strip() or None,
+        "auction_start": request.form.get("auction_start") or None,
+        "auction_finish": request.form.get("auction_finish") or None,
+        "year": _auction_num("year", True), "make": make, "model": model,
+        "variant": (request.form.get("variant") or "").strip() or None,
+        "vin": (request.form.get("vin") or "").strip().upper() or None,
+        "registration": (request.form.get("registration") or "").strip().upper() or None,
+        "registration_status": (request.form.get("registration_status") or "").strip() or None,
+        "reserve_status": (request.form.get("reserve_status") or "Unknown").strip() or "Unknown",
+        "body_type": (request.form.get("body_type") or "").strip() or None,
+        "seat_count": _auction_num("seat_count", True) if (request.form.get("seat_count") or "").strip() else None,
+        "odometer_km": _auction_num("odometer_km", True),
+        "engine_hours": _auction_num("engine_hours") if (request.form.get("engine_hours") or "").strip() else None,
+        "engine_size": (request.form.get("engine_size") or "").strip() or None,
+        "engine_cc": _auction_num("engine_cc", True) if (request.form.get("engine_cc") or "").strip() else None,
+        "engine_cylinders": (request.form.get("engine_cylinders") or "").strip() or None,
+        "length_m": _auction_num("length_m") if (request.form.get("length_m") or "").strip() else None,
+        "berths": _auction_num("berths", True) if (request.form.get("berths") or "").strip() else None,
+        "axles": _auction_num("axles", True) if (request.form.get("axles") or "").strip() else None,
+        "tare_weight_kg": _auction_num("tare_weight_kg") if (request.form.get("tare_weight_kg") or "").strip() else None,
+        "atm_kg": _auction_num("atm_kg") if (request.form.get("atm_kg") or "").strip() else None,
+        "gtm_kg": _auction_num("gtm_kg") if (request.form.get("gtm_kg") or "").strip() else None,
+        "ball_weight_kg": _auction_num("ball_weight_kg") if (request.form.get("ball_weight_kg") or "").strip() else None,
+        "width_m": _auction_num("width_m") if (request.form.get("width_m") or "").strip() else None,
+        "height_m": _auction_num("height_m") if (request.form.get("height_m") or "").strip() else None,
+        "caravan_features": (request.form.get("caravan_features") or "").strip() or None,
+        "boat_type": (request.form.get("boat_type") or "").strip() or None,
+        "hull_material": (request.form.get("hull_material") or "").strip() or None,
+        "engine_make": (request.form.get("engine_make") or "").strip() or None,
+        "engine_model": (request.form.get("engine_model") or "").strip() or None,
+        "horsepower": _auction_num("horsepower") if (request.form.get("horsepower") or "").strip() else None,
+        "trailer_included": 1 if request.form.get("trailer_included") else 0,
+        "trailer_registration": (request.form.get("trailer_registration") or "").strip().upper() or None,
+        "capacity_people": _auction_num("capacity_people", True) if (request.form.get("capacity_people") or "").strip() else None,
+        "boat_features": (request.form.get("boat_features") or "").strip() or None,
+        "trailer_features": (request.form.get("trailer_features") or "").strip() or None,
+        "colour": (request.form.get("colour") or "").strip() or None,
+        "interior": (request.form.get("interior") or "").strip() or None,
+        "transmission": (request.form.get("transmission") or "").strip() or None,
+        "drive_type": (request.form.get("drive_type") or "").strip() or None,
+        "fuel_type": (request.form.get("fuel_type") or "").strip() or None,
+        "tow_bar": 1 if request.form.get("tow_bar") else 0,
+        "condition_grade": (request.form.get("condition_grade") or "Unknown").strip(),
+        "condition_notes": (request.form.get("condition_notes") or "").strip() or None,
+        "current_bid": _auction_num("current_bid"), "max_bid": _auction_num("max_bid"),
+        "sold_price": _auction_num("sold_price"), "auction_fees": _auction_num("auction_fees"),
+        "transport_cost": _auction_num("transport_cost"), "other_costs": _auction_num("other_costs"),
+    }
+
+
+def _auction_market_value(conn, item):
+    rows = conn.execute("""
+        SELECT sold_price FROM auction_vehicles
+        WHERE sold_price>0 AND LOWER(make)=LOWER(?) AND LOWER(model)=LOWER(?) AND id<>?
+        ORDER BY COALESCE(auction_finish,created_at) DESC LIMIT 30
+    """, (item["make"], item["model"], item["id"])).fetchall()
+    auction_prices = sorted(float(r["sold_price"]) for r in rows if float(r["sold_price"] or 0)>0)
+    retail = conn.execute("""
+        SELECT s.sale_price_inc_gst AS price FROM sales s JOIN vehicles v ON v.id=s.vehicle_id
+        WHERE s.sale_price_inc_gst>0 AND LOWER(v.make)=LOWER(?) AND LOWER(v.model)=LOWER(?)
+        ORDER BY s.sale_date DESC LIMIT 20
+    """, (item["make"], item["model"])).fetchall()
+    retail_prices = sorted(float(r["price"]) for r in retail if float(r["price"] or 0)>0)
+    if auction_prices:
+        mid = statistics.median(auction_prices)
+        low = auction_prices[max(0, int((len(auction_prices)-1)*.25))]
+        high = auction_prices[min(len(auction_prices)-1, int((len(auction_prices)-1)*.75))]
+        source = "BAM Auction Watch sold history"
+        if retail_prices:
+            high = max(high, statistics.median(retail_prices)); source += " + BAM retail sales"
+    elif retail_prices:
+        retail_mid = statistics.median(retail_prices)
+        low, mid, high = retail_mid*.78, retail_mid*.86, retail_mid
+        source = "BAM retail sales converted to an auction estimate"
+    else:
+        base = float(item["max_bid"] or item["current_bid"] or 0)
+        low, mid, high = base, base*1.10 if base else 0, base*1.20 if base else 0
+        source = "Entered bid only - no comparable BAM history yet"
+    return round(low,2), round(mid,2), round(high,2), source, len(auction_prices), len(retail_prices)
+
+
+AUCTION_PAGE = r"""
+<!doctype html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>BAM Buying Watch</title>
+<style>body{font-family:Arial;background:#0f172a;color:#e5e7eb;margin:0}.wrap{max-width:1450px;margin:auto;padding:24px}.top{display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap}.brand{font-size:30px;font-weight:800}.sub,.muted{color:#94a3b8}.btn{display:inline-block;padding:10px 14px;border-radius:9px;background:#2563eb;color:white;text-decoration:none;border:0;font-weight:700;cursor:pointer}.secondary{background:#334155}.panel,.card{background:#111827;border:1px solid #334155;border-radius:14px}.panel{padding:16px;margin-top:16px}.filters{display:grid;grid-template-columns:2fr repeat(5,1fr) auto;gap:10px}.filters input,.filters select{padding:10px;border-radius:8px;border:1px solid #475569;background:#0b1220;color:white}.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:14px;margin-top:16px}.card{overflow:hidden}.thumb{height:190px;background:#020617;display:flex;align-items:center;justify-content:center;color:#64748b}.thumb img{width:100%;height:100%;object-fit:cover}.cardbody{padding:14px}.title{font-size:20px;font-weight:800}.pill{display:inline-block;background:#1e293b;border:1px solid #475569;border-radius:999px;padding:4px 8px;margin:3px 2px;font-size:12px}.price{font-size:18px;font-weight:800;margin-top:8px}.actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}.flash{background:#1e3a8a;padding:10px;border-radius:8px;margin:10px 0}@media(max-width:900px){.filters{grid-template-columns:1fr 1fr}}@media(max-width:550px){.filters{grid-template-columns:1fr}}</style>
+</head><body><div class='wrap'><div class='top'><div><div class='brand'>🔎 BAM Buying Watch</div><div class='sub'>Cars • Boats • Caravans • Trailers • Motorcycles • Other</div></div><div><a class='btn secondary' href='{{url_for("dashboard")}}'>← BAM Dashboard</a> <a class='btn' href='{{url_for("auction_add")}}'>+ Add Watch Vehicle</a></div></div>
+{% with messages=get_flashed_messages(with_categories=true) %}{% for cat,msg in messages %}<div class='flash'>{{msg}}</div>{% endfor %}{% endwith %}
+<div class='panel'><form class='filters' method='get'><input name='q' value='{{q}}' placeholder='Search make, model, source, seller, auction, location...'><select name='asset_type'><option value=''>All types</option>{% for x in types %}<option {{'selected' if asset_type==x else ''}}>{{x}}</option>{% endfor %}</select><select name='source'><option value=''>All sources</option>{% for x in sources %}<option {{'selected' if source_filter==x else ''}}>{{x}}</option>{% endfor %}</select><select name='status'><option value=''>All status</option>{% for x in statuses %}<option {{'selected' if status==x else ''}}>{{x}}</option>{% endfor %}</select><input name='make' value='{{make}}' placeholder='Make'><input name='model' value='{{model}}' placeholder='Model'><button class='btn'>Search</button></form></div>
+<div class='cards'>{% for v in rows %}<div class='card'><div class='thumb'>{% if v.thumbnail %}<img src='{{url_for("uploaded_file",filename=v.thumbnail)}}'>{% else %}No photo yet{% endif %}</div><div class='cardbody'><div class='title'>{{v.year or ''}} {{v.make}} {{v.model}}</div><div class='muted'>{{v.variant or ''}} • {{v.listing_source or 'Auction'}}{% if (v.listing_source or 'Auction')=='Auction' %} • {{v.auction_name or 'Auction not set'}} • Lot {{v.lot_number or '-'}}{% else %} • {{v.seller_location or 'Location not set'}}{% endif %}</div><div><span class='pill'>{{v.asset_type}}</span><span class='pill'>{{v.status}}</span>{% if v.odometer_km %}<span class='pill'>{{'{:,}'.format(v.odometer_km)}} km</span>{% endif %}{% if v.transmission %}<span class='pill'>{{v.transmission}}</span>{% endif %}{% if v.drive_type %}<span class='pill'>{{v.drive_type}}</span>{% endif %}</div><div class='price'>{% if (v.listing_source or 'Auction')=='Auction' %}Current ${{'{:,.0f}'.format(v.current_bid or 0)}} · Sold ${{'{:,.0f}'.format(v.sold_price or 0)}}{% else %}Asking ${{'{:,.0f}'.format(v.asking_price or 0)}} · Negotiated ${{'{:,.0f}'.format(v.negotiated_price or 0)}}{% endif %}</div><div class='muted'>Finishes: {{v.auction_finish or 'Not set'}} · {{v.colour or 'Colour not set'}} · {{v.condition_grade or 'Unknown'}}</div><div class='actions'><a class='btn' href='{{url_for("auction_detail",auction_id=v.id)}}'>Open</a><a class='btn secondary' href='{{url_for("auction_watch",make=v.make,model=v.model)}}'>Same Model History</a></div></div></div>{% else %}<div class='panel'>No Buying Watch vehicles match these filters yet.</div>{% endfor %}</div></div></body></html>
+"""
+
+AUCTION_FORM = r"""
+<!doctype html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>Buying Watch Vehicle</title><style>body{font-family:Arial;background:#0f172a;color:#e5e7eb;margin:0}.wrap{max-width:1150px;margin:auto;padding:24px}.panel{background:#111827;border:1px solid #334155;border-radius:14px;padding:18px;margin-top:14px}.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}.full{grid-column:1/-1}label{display:block;font-size:12px;color:#94a3b8;margin-bottom:4px}input,select,textarea{width:100%;box-sizing:border-box;padding:10px;border-radius:8px;border:1px solid #475569;background:#0b1220;color:#fff}textarea{min-height:100px}.btn{padding:10px 14px;border:0;border-radius:9px;background:#2563eb;color:white;text-decoration:none;font-weight:700;cursor:pointer}.secondary{background:#334155}.danger{background:#b91c1c}.good{background:#15803d}.top,.actions{display:flex;gap:8px;justify-content:space-between;align-items:center;flex-wrap:wrap}.actions{justify-content:flex-start;margin-top:14px}.photos{display:grid;grid-template-columns:repeat(5,1fr);gap:10px}.photos img{width:100%;height:120px;object-fit:cover;border-radius:8px}.notice{background:#1e3a8a;padding:10px;border-radius:8px;margin:10px 0}.value{font-size:24px;font-weight:800}.asset-field.hidden,.auction-field.hidden,.market-field.hidden,.gumtree-description-field.hidden{display:none}.valuation-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:10px}.valuation-card{background:#0b1220;border:1px solid #334155;border-radius:10px;padding:12px}.valuation-card span{display:block;color:#94a3b8;font-size:12px;margin-bottom:6px}.valuation-card strong{font-size:18px}@media(max-width:900px){.valuation-grid{grid-template-columns:repeat(2,1fr)}}@media(max-width:800px){.grid{grid-template-columns:1fr 1fr}.photos{grid-template-columns:repeat(2,1fr)}}@media(max-width:520px){.grid{grid-template-columns:1fr}}</style></head><body><div class='wrap'><div class='top'><h1>{{'Edit' if item else 'Add'}} Watch Vehicle</h1><a class='btn secondary' href='{{url_for("auction_watch")}}'>← Buying Watch</a></div>{% with messages=get_flashed_messages(with_categories=true) %}{% for cat,msg in messages %}<div class='notice'>{{msg}}</div>{% endfor %}{% endwith %}<div class='panel'><h2>🔗 Import Listing Details</h2><div class='grid'>
+<div class='full'><label>Facebook Marketplace / Auction / Carsales / Gumtree Link</label><div style='display:flex;gap:8px'><input id='import_url' placeholder='Paste the listing link here'><button type='button' class='btn good' id='import_link_btn' style='width:auto;white-space:nowrap'>Import from Link</button></div></div>
+<div class='full'><label>Facebook / Gumtree Listing Text <span class='muted'>(not the link)</span></label><textarea id='import_text' placeholder='Open the ad and copy the actual listing text here — title, price, kilometres, location, vehicle details and description. Keep the link in the box above.'></textarea><div class='muted' style='margin-top:6px'>Facebook and Gumtree can block automatic link reading. BAM will keep the link above and use this pasted text to fill the vehicle.</div><button type='button' class='btn secondary' id='import_text_btn' style='margin-top:8px'>Import Listing Text</button></div>
+<div class='full'><div id='import_status' class='notice' style='display:none'></div></div>
+</div></div>
+<div class='panel'><form method='post' enctype='multipart/form-data'><input type='hidden' id='imported_photo_urls' name='imported_photo_urls' value=''><div class='grid'>
+<div><label>Vehicle Type</label><select id='auction_asset_type' name='asset_type'>{% for x in types %}<option {{'selected' if item and item.asset_type==x else ''}}>{{x}}</option>{% endfor %}</select></div><div><label>Source</label><select id='listing_source' name='listing_source'>{% for x in sources %}<option {{'selected' if item and item.listing_source==x else ''}}>{{x}}</option>{% endfor %}</select></div><div><label>Status</label><select name='status'>{% for x in statuses %}<option {{'selected' if item and item.status==x else ''}}>{{x}}</option>{% endfor %}</select></div><div class='market-field'><label>Seller Name</label><input name='seller_name' value='{{item.seller_name or "" if item else ""}}'></div><div class='market-field'><label>Seller Phone</label><input name='seller_phone' value='{{item.seller_phone or "" if item else ""}}'></div><div class='market-field'><label>Seller / Listing Location</label><input name='seller_location' value='{{item.seller_location or "" if item else ""}}'></div><div class='market-field full'><label>Listing URL</label><input id='listing_url' name='listing_url' placeholder='Facebook Marketplace, Carsales, Gumtree or other link' value='{{item.listing_url or "" if item else ""}}'></div><div class='market-field'><label>Date First Seen</label><input type='date' name='date_first_seen' value='{{item.date_first_seen or "" if item else ""}}'></div><div class='market-field'><label>Last Checked</label><input type='date' name='last_checked' value='{{item.last_checked or "" if item else ""}}'></div><div></div><div class='auction-field'><label>Lot Number</label><input id='lot_number' name='lot_number' value='{{item.lot_number or "" if item else ""}}'></div>
+<div class='auction-field'><label>Auction Name</label><input name='auction_name' value='{{item.auction_name or "" if item else ""}}'></div><div class='auction-field'><label>Auction Location</label><input name='auction_location' value='{{item.auction_location or "" if item else ""}}'></div><div class='auction-field'><label>Auction Web Link</label><input name='auction_url' value='{{item.auction_url or "" if item else ""}}'></div>
+<div class='auction-field'><label>Auction Starts</label><input type='datetime-local' name='auction_start' value='{{item.auction_start or "" if item else ""}}'></div><div class='auction-field'><label>Auction Finishes</label><input type='datetime-local' name='auction_finish' value='{{item.auction_finish or "" if item else ""}}'></div><div></div>
+<div><label>Year</label><input type='number' id='year' name='year' value='{{item.year or "" if item else ""}}'></div><div><label>Make *</label><input id='auction_make' name='make' list='make_options' autocomplete='off' required value='{{item.make or "" if item else ""}}'><datalist id='make_options'></datalist></div><div><label>Model *</label><input id='auction_model' name='model' list='model_options' autocomplete='off' required value='{{item.model or "" if item else ""}}'><datalist id='model_options'></datalist></div><div><label>Variant</label><input id='auction_variant' name='variant' list='variant_options' autocomplete='off' value='{{item.variant or "" if item else ""}}'><datalist id='variant_options'></datalist></div><div><label>VIN / Chassis</label><input id='vin' name='vin' value='{{item.vin or "" if item else ""}}'></div><div><label>Registration</label><input id='registration' name='registration' value='{{item.registration or "" if item else ""}}'></div><div><label>Registration Status</label><input id='registration_status' name='registration_status' list='registration_status_options' autocomplete='off' value='{{item.registration_status or "" if item else ""}}' placeholder='e.g. Sold Registered, Sold on Consignment'><datalist id='registration_status_options'><option value='Sold Registered, Sold on Consignment'><option value='Sold Registered'><option value='Sold Unregistered'><option value='Registered'><option value='Unregistered'></datalist></div>
+<div class='asset-field car'><label>Body Type</label><input id='body_type' name='body_type' list='body_type_options' value='{{item.body_type or "" if item else ""}}'><datalist id='body_type_options'><option value='SUV'><option value='Sedan'><option value='Wagon'><option value='Hatchback'><option value='Ute'><option value='Van'><option value='Coupe'><option value='Convertible'><option value='Cab Chassis'></datalist></div><div class='asset-field car'><label>No. of Seats</label><input type='number' min='1' max='99' id='seat_count' name='seat_count' value='{{item.seat_count or "" if item else ""}}'></div>
+<div class='asset-field car motorcycle'><label>Kilometres</label><input type='number' id='odometer_km' name='odometer_km' value='{{item.odometer_km or "" if item else ""}}'></div><div class='asset-field boat'><label>Engine Hours</label><input type='number' step='0.1' name='engine_hours' value='{{item.engine_hours or "" if item else ""}}'></div><div><label>Colour</label><input id='colour' name='colour' value='{{item.colour or "" if item else ""}}'></div>
+<div class='asset-field car boat'><label>Engine Size</label><input id='engine_size' name='engine_size' list='engine_size_options' placeholder='e.g. 3.0L, 4.4L' value='{{item.engine_size or "" if item else ""}}'><datalist id='engine_size_options'><option value='1.0L'><option value='1.2L'><option value='1.5L'><option value='1.6L'><option value='1.8L'><option value='2.0L'><option value='2.2L'><option value='2.4L'><option value='2.5L'><option value='2.8L'><option value='3.0L'><option value='3.2L'><option value='3.5L'><option value='4.0L'><option value='4.4L'><option value='4.5L'><option value='4.6L'><option value='5.0L'><option value='5.7L'><option value='6.2L'></datalist></div>
+<div class='asset-field motorcycle'><label>Engine Size (cc)</label><input type='number' id='engine_cc' name='engine_cc' placeholder='e.g. 650' value='{{item.engine_cc or "" if item else ""}}'></div>
+<div class='asset-field car motorcycle'><label>Cylinders</label><input name='engine_cylinders' list='cylinder_options' value='{{item.engine_cylinders or "" if item else ""}}'><datalist id='cylinder_options'><option value='1'><option value='2'><option value='3'><option value='4'><option value='5'><option value='6'><option value='8'><option value='10'><option value='12'></datalist></div>
+<div class='asset-field car'><label>Interior</label><select name='interior'><option></option>{% for x in ['Cloth','Leather','Vinyl','Other'] %}<option {{'selected' if item and item.interior==x else ''}}>{{x}}</option>{% endfor %}</select></div><div class='asset-field car motorcycle'><label>Transmission</label><select id='transmission' name='transmission'><option></option>{% for x in transmissions %}<option {{'selected' if item and item.transmission==x else ''}}>{{x}}</option>{% endfor %}</select></div><div class='asset-field car'><label>Drive</label><select id='drive_type' name='drive_type'><option></option>{% for x in drives %}<option {{'selected' if item and item.drive_type==x else ''}}>{{x}}</option>{% endfor %}</select></div>
+<div class='asset-field car boat motorcycle'><label>Fuel Type</label><select id='fuel_type' name='fuel_type'><option></option>{% for x in fuels %}<option {{'selected' if item and item.fuel_type==x else ''}}>{{x}}</option>{% endfor %}</select></div><div><label>Condition</label><select name='condition_grade'>{% for x in conditions %}<option {{'selected' if (item and item.condition_grade==x) or (not item and x=='Unknown') else ''}}>{{x}}</option>{% endfor %}</select></div><div class='asset-field car' style='padding-top:24px'><label><input type='checkbox' name='tow_bar' style='width:auto' {{'checked' if item and item.tow_bar else ''}}> Tow bar fitted</label></div>
+<div class='asset-field caravan trailer boat'><label>Length (metres)</label><input type='number' step='0.01' name='length_m' value='{{item.length_m or "" if item else ""}}'></div>
+<div class='asset-field caravan'><label>Berths</label><input type='number' name='berths' value='{{item.berths or "" if item else ""}}'></div>
+<div class='asset-field caravan trailer'><label>Axles</label><input type='number' name='axles' value='{{item.axles or "" if item else ""}}'></div>
+<div class='asset-field caravan trailer'><label>Tare Weight (kg)</label><input type='number' step='0.1' name='tare_weight_kg' value='{{item.tare_weight_kg or "" if item else ""}}'></div>
+<div class='asset-field caravan trailer'><label>ATM (kg)</label><input type='number' step='0.1' name='atm_kg' value='{{item.atm_kg or "" if item else ""}}'></div>
+<div class='asset-field caravan trailer'><label>GTM (kg)</label><input type='number' step='0.1' name='gtm_kg' value='{{item.gtm_kg or "" if item else ""}}'></div>
+<div class='asset-field caravan trailer'><label>Ball Weight (kg)</label><input type='number' step='0.1' name='ball_weight_kg' value='{{item.ball_weight_kg or "" if item else ""}}'></div>
+<div class='asset-field caravan trailer'><label>Width (metres)</label><input type='number' step='0.01' name='width_m' value='{{item.width_m or "" if item else ""}}'></div>
+<div class='asset-field caravan trailer'><label>Height (metres)</label><input type='number' step='0.01' name='height_m' value='{{item.height_m or "" if item else ""}}'></div>
+<div class='asset-field caravan full'><label>Caravan Features</label><textarea name='caravan_features' placeholder='Ensuite, air conditioning, solar, batteries, fridge, suspension...'>{{item.caravan_features or "" if item else ""}}</textarea></div>
+<div class='asset-field boat'><label>Boat Type</label><select name='boat_type'><option></option>{% for x in ['Fishing','Runabout','Bowrider','Cabin','Centre Console','PWC / Jet Ski','Ski / Wake','Sailing','Other'] %}<option {{'selected' if item and item.boat_type==x else ''}}>{{x}}</option>{% endfor %}</select></div>
+<div class='asset-field boat'><label>Hull Material</label><select name='hull_material'><option></option>{% for x in ['Aluminium','Fibreglass','Steel','Wood','Inflatable','Other'] %}<option {{'selected' if item and item.hull_material==x else ''}}>{{x}}</option>{% endfor %}</select></div>
+<div class='asset-field boat'><label>Engine Make</label><input name='engine_make' placeholder='e.g. Yamaha' value='{{item.engine_make or "" if item else ""}}'></div>
+<div class='asset-field boat'><label>Engine Model</label><input name='engine_model' value='{{item.engine_model or "" if item else ""}}'></div>
+<div class='asset-field boat'><label>Horsepower</label><input type='number' step='0.1' name='horsepower' value='{{item.horsepower or "" if item else ""}}'></div>
+<div class='asset-field boat'><label>Capacity (people)</label><input type='number' name='capacity_people' value='{{item.capacity_people or "" if item else ""}}'></div>
+<div class='asset-field boat'><label>Trailer Registration</label><input name='trailer_registration' value='{{item.trailer_registration or "" if item else ""}}'></div>
+<div class='asset-field boat' style='padding-top:24px'><label><input type='checkbox' name='trailer_included' style='width:auto' {{'checked' if item and item.trailer_included else ''}}> Trailer included</label></div>
+<div class='asset-field boat full'><label>Boat Features</label><textarea name='boat_features' placeholder='Sounder, GPS, canopy, electric anchor, safety gear...'>{{item.boat_features or "" if item else ""}}</textarea></div>
+<div class='asset-field trailer full'><label>Trailer Features</label><textarea name='trailer_features' placeholder='Brakes, dimensions, ramps, winch, cage, tipping...'>{{item.trailer_features or "" if item else ""}}</textarea></div>
+<div class='market-field'><label>Asking Price</label><input type='number' step='.01' id='asking_price' name='asking_price' value='{{item.asking_price or 0 if item else 0}}'></div><div class='market-field'><label>Negotiated Price</label><input type='number' step='.01' name='negotiated_price' value='{{item.negotiated_price or 0 if item else 0}}'></div><div class='auction-field'><label>Reserve Status</label><select id='reserve_status' name='reserve_status'><option {{'selected' if not item or not item.reserve_status or item.reserve_status=='Unknown' else ''}}>Unknown</option><option {{'selected' if item and item.reserve_status=='No Reserve' else ''}}>No Reserve</option><option {{'selected' if item and item.reserve_status=='Reserve' else ''}}>Reserve</option></select></div><div class='auction-field'><label>Current Bid</label><input type='number' step='.01' id='current_bid' name='current_bid' value='{{item.current_bid or 0 if item else 0}}'></div><div class='auction-field'><label>My Maximum Bid</label><input type='number' step='.01' name='max_bid' value='{{item.max_bid or 0 if item else 0}}'></div><div class='auction-field'><label>Sold Price</label><input type='number' step='.01' name='sold_price' value='{{item.sold_price or 0 if item else 0}}'></div><div class='auction-field'><label>Auction Fees</label><input type='number' step='.01' name='auction_fees' value='{{item.auction_fees or 0 if item else 0}}'></div><div><label>Transport Cost</label><input type='number' step='.01' name='transport_cost' value='{{item.transport_cost or 0 if item else 0}}'></div><div><label>Other Costs</label><input type='number' step='.01' name='other_costs' value='{{item.other_costs or 0 if item else 0}}'></div>
+<div class='full gumtree-description-field hidden'><label>Gumtree Description <span class='muted'>(paste the ad description here)</span></label><textarea id='gumtree_description' placeholder='Paste the Gumtree description here. BAM will copy it straight into Condition / Inspection Notes below.'></textarea><div class='muted' style='margin-top:6px'>This box is only for Gumtree. Anything you paste here will be copied into Condition / Inspection Notes.</div></div>
+<div class='full'><label>Condition / Inspection Notes</label><textarea id='condition_notes' name='condition_notes'>{{item.condition_notes or "" if item else ""}}</textarea></div><div class='full'><label>Add Listing Photos (maximum 10 total)</label><input id='listing_photo_files' type='file' name='photos' accept='image/*' multiple><div class='actions' style='margin-top:8px'><button type='button' class='btn secondary' id='paste_photo_btn'>📋 Paste Copied Photo</button></div><div class='muted' style='margin-top:6px'>Facebook / Gumtree: right-click a listing photo and choose Copy image, then click Paste Copied Photo. Repeat for more photos, or use Choose Files to select several at once.</div><div id='local_photo_preview' class='photos' style='margin-top:10px'></div><div id='imported_photo_preview' class='photos' style='margin-top:10px'></div></div></div><div class='actions'><button class='btn'>Save Watch Vehicle</button>{% if item %}<a class='btn secondary' href='{{url_for("auction_value",auction_id=item.id)}}'>Get Valuation</a>{% endif %}</div></form></div>
+{% if item %}<div class='panel'><h2>🇦🇺 BAM Valuation Hub</h2><div class='valuation-grid'><div class='valuation-card'><span>Private Sale</span><strong>${{'{:,.0f}'.format(item.private_value_low or 0)}} – ${{'{:,.0f}'.format(item.private_value_high or 0)}}</strong></div><div class='valuation-card'><span>Wholesale</span><strong>${{'{:,.0f}'.format(item.wholesale_value_low or 0)}} – ${{'{:,.0f}'.format(item.wholesale_value_high or 0)}}</strong></div><div class='valuation-card'><span>Trade-In</span><strong>${{'{:,.0f}'.format(item.trade_value_low or 0)}} – ${{'{:,.0f}'.format(item.trade_value_high or 0)}}</strong></div><div class='valuation-card'><span>Dealer Retail</span><strong>${{'{:,.0f}'.format(item.dealer_value_low or 0)}} – ${{'{:,.0f}'.format(item.dealer_value_high or 0)}}</strong></div><div class='valuation-card'><span>Suggested Buy / Max Bid</span><strong>${{'{:,.0f}'.format(item.suggested_buy_price or 0)}}</strong></div></div><div style='margin-top:12px'><b>Provider:</b> {{item.valuation_provider or 'BAM internal history'}} &nbsp; <b>Confidence:</b> {{item.valuation_confidence or 'Not calculated'}}</div><div class='muted' style='margin-top:6px'>{{item.valuation_source or 'Click Get Valuation for BAM internal pricing, or use the Carsales buttons for a live Australian market check.'}}</div><div class='actions'><a class='btn good' target='_blank' rel='noopener' href='{{carsales_valuation_url}}'>Carsales Free Valuation ↗</a><a class='btn secondary' target='_blank' rel='noopener' href='{{carsales_search_url}}'>Carsales Comparable Search ↗</a></div></div><div class='panel'><h2>Photos ({{photos|length}} / 10)</h2><div class='photos'>{% for p in photos %}<div><img src='{{url_for("uploaded_file",filename=p.filename)}}'><form method='post' action='{{url_for("auction_delete_photo",auction_id=item.id,photo_id=p.id)}}'><button class='btn danger' style='margin-top:5px'>Delete</button></form></div>{% else %}<div>No photos yet.</div>{% endfor %}</div></div><div class='panel'><h2>Bought / won this vehicle?</h2>{% if item.won_vehicle_id %}<div class='notice'>Already transferred to BAM Vehicle Stock.</div><a class='btn' href='{{url_for("vehicle_detail",vehicle_id=item.won_vehicle_id)}}'>Open Vehicle Stock Record</a>{% else %}<form method='post' action='{{url_for("auction_transfer",auction_id=item.id)}}'><div class='grid'><div><label>Purchased By / Ownership</label><select name='sale_ownership'><option>BAM Joint</option><option>Barry</option><option>Matt</option></select></div><div><label>Purchase Date</label><input type='date' name='purchase_date' value='{{today}}'></div></div><div class='actions'><button class='btn good'>✓ Add to BAM Vehicle Stock</button></div></form>{% endif %}</div><div class='panel'><form method='post' action='{{url_for("auction_delete",auction_id=item.id)}}' onsubmit='return confirm("Delete this auction vehicle?")'><button class='btn danger'>Delete Watch Vehicle</button></form></div>{% endif %}</div><script>
+const BAM_MODELS = {{ model_catalog_json|safe }};
+const BAM_VARIANTS = {{ variant_catalog_json|safe }};
+const BAM_ASSET_MODELS = {{ asset_model_catalog_json|safe }};
+const assetTypeInput = document.getElementById('auction_asset_type');
+const makeInput = document.getElementById('auction_make');
+const modelInput = document.getElementById('auction_model');
+const variantInput = document.getElementById('auction_variant');
+const makeList = document.getElementById('make_options');
+const modelList = document.getElementById('model_options');
+const variantList = document.getElementById('variant_options');
+
+function catalogueKey(obj, value){
+  const typed=(value||'').trim().toLowerCase();
+  return Object.keys(obj||{}).find(k=>k.toLowerCase()===typed);
+}
+function refreshVariants(){
+  if(!makeInput || !modelInput || !variantList) return;
+  const makeKey=catalogueKey(BAM_VARIANTS, makeInput.value);
+  const models=makeKey ? BAM_VARIANTS[makeKey] : {};
+  const modelKey=catalogueKey(models, modelInput.value);
+  variantList.innerHTML='';
+  (modelKey ? models[modelKey] : []).forEach(v=>{const o=document.createElement('option');o.value=v;variantList.appendChild(o);});
+}
+function currentAssetCatalog(){
+  const type=(assetTypeInput && assetTypeInput.value) || 'Car';
+  return BAM_ASSET_MODELS[type] || {};
+}
+function refreshMakes(){
+  if(!makeList) return;
+  const catalog=currentAssetCatalog();
+  makeList.innerHTML='';
+  Object.keys(catalog).forEach(m=>{const o=document.createElement('option');o.value=m;makeList.appendChild(o);});
+  refreshModels();
+}
+function refreshModels(){
+  if(!makeInput || !modelList) return;
+  const catalog=currentAssetCatalog();
+  const key=catalogueKey(catalog, makeInput.value);
+  modelList.innerHTML='';
+  (key ? catalog[key] : []).forEach(m=>{const o=document.createElement('option');o.value=m;modelList.appendChild(o);});
+  refreshVariants();
+}
+function refreshSourceFields(){
+  const sourceInput=document.getElementById('listing_source');
+  const source=(sourceInput && sourceInput.value) || 'Auction';
+  const isAuction=source==='Auction';
+  document.querySelectorAll('.auction-field').forEach(el=>el.classList.toggle('hidden', !isAuction));
+  document.querySelectorAll('.market-field').forEach(el=>el.classList.toggle('hidden', isAuction));
+  document.querySelectorAll('.gumtree-description-field').forEach(el=>el.classList.toggle('hidden', source!=='Gumtree'));
+}
+function refreshAssetFields(){
+  const type=((assetTypeInput && assetTypeInput.value) || 'Car').toLowerCase();
+  document.querySelectorAll('.asset-field').forEach(el=>{
+    const show=el.classList.contains(type);
+    el.classList.toggle('hidden', !show);
+  });
+  refreshMakes();
+  refreshSourceFields();
+}
+if(assetTypeInput){
+  assetTypeInput.addEventListener('change', refreshAssetFields);
+}
+const listingSourceInput=document.getElementById('listing_source');
+if(listingSourceInput){listingSourceInput.addEventListener('change', refreshSourceFields);}
+if(makeInput){
+  makeInput.addEventListener('input', refreshModels);
+  makeInput.addEventListener('change', refreshModels);
+}
+if(modelInput){
+  modelInput.addEventListener('input', refreshVariants);
+  modelInput.addEventListener('change', refreshVariants);
+}
+
+function setImportedField(name, value){
+  if(value === undefined || value === null || value === '') return;
+  const el=document.getElementById(name) || document.querySelector(`[name="${name}"]`);
+  if(!el) return;
+  el.value=value;
+  el.dispatchEvent(new Event('input',{bubbles:true}));
+  el.dispatchEvent(new Event('change',{bubbles:true}));
+}
+function showImportStatus(message, good=false){
+  const box=document.getElementById('import_status');
+  if(!box) return;
+  box.style.display='block';
+  box.textContent=message;
+  box.style.background=good ? '#14532d' : '#7f1d1d';
+}
+function renderImportedPhotos(urls){
+  const hidden=document.getElementById('imported_photo_urls');
+  const preview=document.getElementById('imported_photo_preview');
+  const list=Array.isArray(urls) ? urls.slice(0,10) : [];
+  if(hidden) hidden.value=JSON.stringify(list);
+  if(!preview) return;
+  preview.innerHTML='';
+  list.forEach(url=>{
+    const img=document.createElement('img');
+    img.src=url;
+    img.alt='Imported listing photo';
+    img.referrerPolicy='no-referrer';
+    preview.appendChild(img);
+  });
+}
+async function importListing(payload){
+  showImportStatus('Reading listing…', true);
+  try{
+    const response=await fetch('{{url_for("auction_import_listing")}}',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify(payload)
+    });
+    const data=await response.json();
+    if(!data.ok){
+      showImportStatus(data.error || 'Could not import listing.');
+      return;
+    }
+    const d=data.details || {};
+    [
+      'listing_source','listing_url','seller_name','seller_phone','seller_location',
+      'auction_name','auction_location','auction_url','lot_number','auction_start','auction_finish',
+      'year','make','model','variant','vin','registration','registration_status','body_type','seat_count','reserve_status','odometer_km','engine_size','engine_cc',
+      'engine_cylinders','colour','interior','transmission','drive_type','fuel_type',
+      'asking_price','current_bid','sold_price','status','condition_grade','condition_notes',
+      'asset_type','length_m','width_m','height_m','berths','axles','tare_weight_kg','atm_kg','gtm_kg','ball_weight_kg','caravan_features'
+    ].forEach(k=>setImportedField(k,d[k]));
+    renderImportedPhotos(d.photo_urls || []);
+    refreshAssetFields();
+    refreshModels();
+    refreshVariants();
+    const count=(d.photo_urls || []).length;
+    showImportStatus(`Details imported${count ? ` with ${count} photo${count===1?'':'s'}` : ''}. Please check them before saving.`, true);
+  }catch(e){
+    showImportStatus('Could not import listing. Paste the listing text instead.');
+  }
+}
+function marketplaceSourceFromUrl(url){
+  const u=(url||'').toLowerCase();
+  if(u.includes('facebook.com') || u.includes('fb.com')) return 'Facebook Marketplace';
+  if(u.includes('gumtree.com')) return 'Gumtree';
+  if(u.includes('carsales.com')) return 'Carsales';
+  return '';
+}
+function rememberMarketplaceLink(url){
+  const source=marketplaceSourceFromUrl(url);
+  if(source){
+    setImportedField('listing_source',source);
+    setImportedField('listing_url',url);
+    refreshSourceFields();
+  }
+  return source;
+}
+const importUrlInput=document.getElementById('import_url');
+if(importUrlInput){
+  importUrlInput.addEventListener('input',()=>rememberMarketplaceLink((importUrlInput.value||'').trim()));
+  importUrlInput.addEventListener('paste',()=>setTimeout(()=>rememberMarketplaceLink((importUrlInput.value||'').trim()),0));
+}
+const importLinkBtn=document.getElementById('import_link_btn');
+if(importLinkBtn){
+  importLinkBtn.addEventListener('click',()=>{
+    const url=(document.getElementById('import_url').value||'').trim();
+    if(!url){ showImportStatus('Paste a listing link first.'); return; }
+    rememberMarketplaceLink(url);
+    importListing({url:url});
+  });
+}
+const gumtreeDescription=document.getElementById('gumtree_description');
+const conditionNotes=document.getElementById('condition_notes');
+if(gumtreeDescription && conditionNotes){
+  gumtreeDescription.addEventListener('input',()=>{
+    const sourceEl=document.getElementById('listing_source');
+    if(sourceEl && sourceEl.value==='Gumtree') conditionNotes.value=gumtreeDescription.value;
+  });
+  gumtreeDescription.addEventListener('paste',()=>setTimeout(()=>{
+    const sourceEl=document.getElementById('listing_source');
+    if(sourceEl && sourceEl.value==='Gumtree') conditionNotes.value=gumtreeDescription.value;
+  },0));
+}
+
+const importTextBtn=document.getElementById('import_text_btn');
+if(importTextBtn){
+  importTextBtn.addEventListener('click',()=>{
+    const pasted=(document.getElementById('import_text').value||'').trim();
+    const url=(document.getElementById('import_url').value||'').trim();
+    const source=rememberMarketplaceLink(url);
+    if(!pasted){ showImportStatus('Paste the actual advertisement text into the lower box first.'); return; }
+    if(/^https?:\/\//i.test(pasted)){
+      showImportStatus('The lower box needs the advertisement text, not another link. Keep the link in the top box, then copy the title, price, kilometres, location and description from the ad.');
+      return;
+    }
+    importListing({text:pasted,url:'',source_url:url,source_hint:source});
+  });
+}
+
+
+const listingPhotoFiles=document.getElementById('listing_photo_files');
+const localPhotoPreview=document.getElementById('local_photo_preview');
+let copiedListingPhotos=[];
+function refreshLocalPhotoPreview(){
+  if(!localPhotoPreview) return;
+  localPhotoPreview.innerHTML='';
+  const files=listingPhotoFiles ? Array.from(listingPhotoFiles.files || []) : [];
+  files.slice(0,10).forEach(file=>{
+    const img=document.createElement('img');
+    img.src=URL.createObjectURL(file);
+    img.alt='Listing photo ready to save';
+    img.onload=()=>URL.revokeObjectURL(img.src);
+    localPhotoPreview.appendChild(img);
+  });
+}
+function rebuildListingPhotoInput(){
+  if(!listingPhotoFiles) return;
+  const dt=new DataTransfer();
+  copiedListingPhotos.slice(0,10).forEach(file=>dt.items.add(file));
+  listingPhotoFiles.files=dt.files;
+  refreshLocalPhotoPreview();
+}
+if(listingPhotoFiles){
+  listingPhotoFiles.addEventListener('change',()=>{
+    copiedListingPhotos=Array.from(listingPhotoFiles.files || []).slice(0,10);
+    rebuildListingPhotoInput();
+  });
+}
+const pastePhotoBtn=document.getElementById('paste_photo_btn');
+if(pastePhotoBtn){
+  pastePhotoBtn.addEventListener('click',async()=>{
+    if(copiedListingPhotos.length>=10){ showImportStatus('Maximum 10 photos reached.'); return; }
+    if(!navigator.clipboard || !navigator.clipboard.read){
+      showImportStatus('This browser cannot paste copied images here. Use Choose Files instead.');
+      return;
+    }
+    try{
+      const items=await navigator.clipboard.read();
+      let added=0;
+      for(const item of items){
+        const type=item.types.find(t=>t.startsWith('image/'));
+        if(!type || copiedListingPhotos.length>=10) continue;
+        const blob=await item.getType(type);
+        const ext=(type.split('/')[1] || 'png').replace('jpeg','jpg');
+        copiedListingPhotos.push(new File([blob],`listing-photo-${Date.now()}-${added+1}.${ext}`,{type:type}));
+        added++;
+      }
+      if(!added){ showImportStatus('No copied photo was found. Right-click the listing photo, choose Copy image, then try again.'); return; }
+      rebuildListingPhotoInput();
+      showImportStatus(`${added} copied photo${added===1?'':'s'} added. ${copiedListingPhotos.length}/10 ready to save.`,true);
+    }catch(e){
+      showImportStatus('The browser could not read the copied photo. Allow clipboard access, or use Choose Files instead.');
+    }
+  });
+}
+
+refreshAssetFields();
+refreshVariants();
+</script></body></html>
+"""
+
+
+@app.get("/auction-watch")
+@login_required
+def auction_watch():
+    conn=db(); q=(request.args.get("q") or "").strip(); asset_type=(request.args.get("asset_type") or "").strip(); status=(request.args.get("status") or "").strip(); source=(request.args.get("source") or "").strip(); make=(request.args.get("make") or "").strip(); model=(request.args.get("model") or "").strip()
+    sql="SELECT a.*,(SELECT p.filename FROM auction_photos p WHERE p.auction_vehicle_id=a.id ORDER BY p.id LIMIT 1) AS thumbnail FROM auction_vehicles a WHERE 1=1"; params=[]
+    if q:
+        like=f"%{q}%"; sql+=" AND (make LIKE ? OR model LIKE ? OR variant LIKE ? OR auction_name LIKE ? OR auction_location LIKE ? OR lot_number LIKE ? OR listing_source LIKE ? OR seller_name LIKE ? OR seller_location LIKE ?)"; params += [like]*9
+    if asset_type: sql+=" AND asset_type=?"; params.append(asset_type)
+    if status: sql+=" AND status=?"; params.append(status)
+    if source: sql+=" AND listing_source=?"; params.append(source)
+    if make: sql+=" AND LOWER(make)=LOWER(?)"; params.append(make)
+    if model: sql+=" AND LOWER(model)=LOWER(?)"; params.append(model)
+    sql+=" ORDER BY CASE WHEN status IN ('Watching','Bidding') THEN 0 ELSE 1 END,COALESCE(auction_finish,'9999-12-31T23:59'),id DESC"
+    rows=conn.execute(sql,params).fetchall(); conn.close()
+    return render_template_string(AUCTION_PAGE,rows=rows,q=q,asset_type=asset_type,status=status,source_filter=source,make=make,model=model,types=AUCTION_TYPES,statuses=AUCTION_STATUSES,sources=BUYING_SOURCES)
+
+
+
+@app.post("/auction-watch/import-listing")
+@login_required
+def auction_import_listing():
+    data = request.get_json(silent=True) or {}
+    url = (data.get("url") or "").strip()
+    source_url = (data.get("source_url") or "").strip()
+    source_hint = (data.get("source_hint") or "").strip()
+    pasted = (data.get("text") or "").strip()
+    try:
+        if url:
+            details = _fetch_listing_page(url)
+
+        elif pasted:
+            # The fallback box is for copied advertisement text. If a second URL
+            # is pasted there, do not hit the blocked site again; explain what BAM needs.
+            if pasted.lower().startswith(("http://", "https://")):
+                if source_url:
+                    raise ValueError("The lower box needs the advertisement text, not another link. Keep the link in the top box and paste the ad title, price, kilometres, location and description below.")
+                details = _fetch_listing_page(pasted)
+            else:
+                # Keep the original listing URL as a source hint for pasted
+                # Facebook/Gumtree/Carsales text without trying to fetch it again.
+                details = _extract_listing_details(pasted, url=source_url)
+                if source_hint in BUYING_SOURCES and source_hint != "Auction":
+                    details["listing_source"] = source_hint
+                if source_url:
+                    details["listing_url"] = source_url
+                    if details.get("listing_source") == "Auction":
+                        details["auction_url"] = source_url
+                elif details.get("listing_source") == "Other":
+                    details["listing_source"] = "Facebook Marketplace"
+        else:
+            return jsonify(ok=False, error="Paste a listing link or listing text first."), 400
+        return jsonify(ok=True, details=details)
+    except ValueError as exc:
+        return jsonify(ok=False, error=str(exc)), 400
+    except Exception as exc:
+        return jsonify(ok=False, error=f"Import error: {exc}"), 400
+
+
+@app.route("/auction-watch/add",methods=["GET","POST"])
+@login_required
+def auction_add():
+    if request.method=="POST":
+        conn=db()
+        try:
+            d=_auction_payload(); cols=list(d); cur=conn.execute(f"INSERT INTO auction_vehicles({','.join(cols)},created_by) VALUES({','.join(['?']*len(cols))},?)",list(d.values())+[session.get("display_name")]); aid=cur.lastrowid
+            added=0
+            for f in request.files.getlist("photos")[:10]:
+                if f and f.filename:
+                    fn=save_upload(f)
+                    if fn:
+                        conn.execute("INSERT INTO auction_photos(auction_vehicle_id,filename) VALUES(?,?)",(aid,fn))
+                        added += 1
+            if added < 10:
+                _save_imported_listing_photos(conn, aid, request.form.get("imported_photo_urls"), referer=d.get("listing_url") or d.get("auction_url") or "", limit=10-added)
+            conn.commit(); log_action("Auction vehicle added","auction_vehicle",aid,f"{d['make']} {d['model']}"); flash("Buying Watch vehicle saved.","success"); return redirect(url_for("auction_detail",auction_id=aid))
+        except (ValueError,sqlite3.Error) as exc: conn.rollback(); flash(str(exc),"error")
+        finally: conn.close()
+    return render_template_string(AUCTION_FORM,item=None,photos=[],types=AUCTION_TYPES,statuses=AUCTION_STATUSES,sources=BUYING_SOURCES,conditions=AUCTION_CONDITIONS,today=date.today().isoformat(),makes=VEHICLE_MAKES,fuels=FUEL_TYPES,transmissions=TRANSMISSION_TYPES,drives=DRIVE_TYPES,model_catalog_json=json.dumps(VEHICLE_MODEL_CATALOG),variant_catalog_json=json.dumps(VEHICLE_VARIANT_CATALOG),asset_model_catalog_json=json.dumps(AUCTION_ASSET_MODEL_CATALOG))
+
+
+@app.route("/auction-watch/<int:auction_id>",methods=["GET","POST"])
+@login_required
+def auction_detail(auction_id):
+    conn=db(); item=conn.execute("SELECT * FROM auction_vehicles WHERE id=?",(auction_id,)).fetchone()
+    if not item: conn.close(); return "Auction vehicle not found",404
+    if request.method=="POST":
+        try:
+            d=_auction_payload(); conn.execute("UPDATE auction_vehicles SET "+",".join(f"{k}=?" for k in d)+",updated_at=? WHERE id=?",list(d.values())+[datetime.now().isoformat(timespec="seconds"),auction_id]); count=conn.execute("SELECT COUNT(*) c FROM auction_photos WHERE auction_vehicle_id=?",(auction_id,)).fetchone()["c"]
+            added=0
+            for f in request.files.getlist("photos")[:max(0,10-int(count))]:
+                if f and f.filename:
+                    fn=save_upload(f)
+                    if fn:
+                        conn.execute("INSERT INTO auction_photos(auction_vehicle_id,filename) VALUES(?,?)",(auction_id,fn))
+                        added += 1
+                        # If this auction vehicle has already been transferred to stock,
+                        # keep newly-added Auction Watch photos in sync with that vehicle.
+                        if item["won_vehicle_id"]:
+                            ph=conn.execute("INSERT INTO vehicle_photos(vehicle_id,filename,caption) VALUES(?,?,?)",(item["won_vehicle_id"],fn,"Synced from Auction Watch"))
+                            vehicle=conn.execute("SELECT featured_photo_id FROM vehicles WHERE id=?",(item["won_vehicle_id"],)).fetchone()
+                            if vehicle and not vehicle["featured_photo_id"]:
+                                conn.execute("UPDATE vehicles SET featured_photo_id=? WHERE id=?",(ph.lastrowid,item["won_vehicle_id"]))
+            remaining=max(0,10-int(count)-added)
+            if remaining:
+                _save_imported_listing_photos(conn, auction_id, request.form.get("imported_photo_urls"), referer=d.get("listing_url") or d.get("auction_url") or "", limit=remaining)
+            conn.commit(); log_action("Auction vehicle updated","auction_vehicle",auction_id,f"{d['make']} {d['model']}"); flash("Buying Watch vehicle updated.","success"); return redirect(url_for("auction_detail",auction_id=auction_id))
+        except (ValueError,sqlite3.Error) as exc: conn.rollback(); flash(str(exc),"error")
+    item=conn.execute("SELECT * FROM auction_vehicles WHERE id=?",(auction_id,)).fetchone(); photos=conn.execute("SELECT * FROM auction_photos WHERE auction_vehicle_id=? ORDER BY id",(auction_id,)).fetchall(); conn.close()
+    market_query = " ".join(str(x) for x in (item["year"], item["make"], item["model"], item["variant"], item["fuel_type"], item["transmission"], item["drive_type"], (f"{item['odometer_km']}km" if item["odometer_km"] else "")) if x)
+    carsales_valuation_url = "https://www.carsales.com.au/car-valuations/"
+    carsales_search_url = "https://www.carsales.com.au/cars/?q=" + urllib.parse.quote(market_query)
+    return render_template_string(AUCTION_FORM,item=item,photos=photos,types=AUCTION_TYPES,statuses=AUCTION_STATUSES,sources=BUYING_SOURCES,conditions=AUCTION_CONDITIONS,today=date.today().isoformat(),makes=VEHICLE_MAKES,fuels=FUEL_TYPES,transmissions=TRANSMISSION_TYPES,drives=DRIVE_TYPES,model_catalog_json=json.dumps(VEHICLE_MODEL_CATALOG),variant_catalog_json=json.dumps(VEHICLE_VARIANT_CATALOG),asset_model_catalog_json=json.dumps(AUCTION_ASSET_MODEL_CATALOG),carsales_valuation_url=carsales_valuation_url,carsales_search_url=carsales_search_url)
+
+
+@app.get("/auction-watch/<int:auction_id>/market-value")
+@login_required
+def auction_value(auction_id):
+    conn=db(); item=conn.execute("SELECT * FROM auction_vehicles WHERE id=?",(auction_id,)).fetchone()
+    if not item: conn.close(); return "Auction vehicle not found",404
+    low,mid,high,source,ac,rc=_auction_market_value(conn,item)
+    dealer_low,dealer_high=low,high
+    private_low,private_high=round(low*0.92,2),round(high*0.97,2)
+    trade_low,trade_high=round(low*0.68,2),round(mid*0.78,2)
+    wholesale_low,wholesale_high=round(low*0.62,2),round(mid*0.72,2)
+    fees=float(item["auction_fees"] or 0)+float(item["transport_cost"] or 0)+float(item["other_costs"] or 0)
+    suggested=max(0,round(wholesale_high-fees,2))
+    confidence="Good" if (ac+rc)>=5 else "Limited" if (ac+rc)>0 else "Estimate only"
+    provider="BAM internal history"
+    detail=f"{source} ({ac} Buying Watch / {rc} retail comparables). Licensed live Australian provider not connected yet."
+    conn.execute("""UPDATE auction_vehicles SET market_low=?,market_mid=?,market_high=?,private_value_low=?,private_value_high=?,wholesale_value_low=?,wholesale_value_high=?,trade_value_low=?,trade_value_high=?,dealer_value_low=?,dealer_value_high=?,suggested_buy_price=?,valuation_provider=?,valuation_confidence=?,valuation_source=?,valuation_checked_at=? WHERE id=?""",(low,mid,high,private_low,private_high,wholesale_low,wholesale_high,trade_low,trade_high,dealer_low,dealer_high,suggested,provider,confidence,detail,datetime.now().isoformat(timespec="seconds"),auction_id))
+    conn.commit(); conn.close()
+    flash("Valuation Hub updated. These figures use BAM history until your licensed live Australian valuation API is connected.","success")
+    return redirect(url_for("auction_detail",auction_id=auction_id))
+
+
+@app.post("/auction-watch/<int:auction_id>/photos/<int:photo_id>/delete")
+@login_required
+def auction_delete_photo(auction_id,photo_id):
+    conn=db(); conn.execute("DELETE FROM auction_photos WHERE id=? AND auction_vehicle_id=?",(photo_id,auction_id)); conn.commit(); conn.close(); flash("Auction photo removed.","success"); return redirect(url_for("auction_detail",auction_id=auction_id))
+
+
+@app.post("/auction-watch/<int:auction_id>/delete")
+@login_required
+def auction_delete(auction_id):
+    conn=db(); item=conn.execute("SELECT * FROM auction_vehicles WHERE id=?",(auction_id,)).fetchone()
+    if not item: conn.close(); return "Auction vehicle not found",404
+    conn.execute("DELETE FROM auction_vehicles WHERE id=?",(auction_id,)); conn.commit(); conn.close(); log_action("Auction vehicle deleted","auction_vehicle",auction_id,f"{item['make']} {item['model']}"); flash("Auction vehicle deleted.","success"); return redirect(url_for("auction_watch"))
+
+
+@app.post("/auction-watch/<int:auction_id>/transfer-to-stock")
+@login_required
+def auction_transfer(auction_id):
+    conn=db(); item=conn.execute("SELECT * FROM auction_vehicles WHERE id=?",(auction_id,)).fetchone()
+    if not item: conn.close(); return "Auction vehicle not found",404
+    if item["won_vehicle_id"]: conn.close(); flash("This auction vehicle is already in BAM Vehicle Stock.","error"); return redirect(url_for("auction_detail",auction_id=auction_id))
+    try:
+        ownership=(request.form.get("sale_ownership") or "BAM Joint").strip(); ownership=ownership if ownership in {"BAM Joint","Barry","Matt"} else "BAM Joint"; purchase_date=request.form.get("purchase_date") or date.today().isoformat(); price=float(item["sold_price"] or item["negotiated_price"] or item["current_bid"] or item["asking_price"] or item["max_bid"] or 0); landed=price+float(item["auction_fees"] or 0)+float(item["transport_cost"] or 0)+float(item["other_costs"] or 0); gst=round(landed/11,2) if landed else 0; stock=next_stock_number(conn); barry=landed if ownership=="Barry" else landed/2 if ownership=="BAM Joint" else 0; matt=landed if ownership=="Matt" else landed/2 if ownership=="BAM Joint" else 0; notes=f"Transferred from BAM Buying Watch. Source: {item['listing_source'] or 'Auction'}; Auction: {item['auction_name'] or '-'}; Lot: {item['lot_number'] or '-'}; Purchase price: ${price:,.2f}; Fees/transport/other included in landed cost."
+        cur=conn.execute("""INSERT INTO vehicles(stock_no,status,purchase_date,make,model,variant,year,vin,registration,odometer_km,colour,purchase_price_inc_gst,purchase_gst,barry_contribution,matt_contribution,sale_ownership,notes,asset_type,engine_hours,fuel_type,drive_type,transmission_style) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",(stock,"In Stock",purchase_date,item["make"],item["model"],item["variant"],item["year"],item["vin"],item["registration"],item["odometer_km"],item["colour"],landed,gst,barry,matt,ownership,notes,item["asset_type"],item["engine_hours"],item["fuel_type"],item["drive_type"],item["transmission"])); vid=cur.lastrowid; featured=None
+        for p in conn.execute("SELECT * FROM auction_photos WHERE auction_vehicle_id=? ORDER BY id",(auction_id,)).fetchall():
+            ph=conn.execute("INSERT INTO vehicle_photos(vehicle_id,filename,caption) VALUES(?,?,?)",(vid,p["filename"],"Transferred from Auction Watch")); featured=featured or ph.lastrowid
+        if featured: conn.execute("UPDATE vehicles SET featured_photo_id=? WHERE id=?",(featured,vid))
+        conn.execute("UPDATE auction_vehicles SET status='Won',won_vehicle_id=?,updated_at=? WHERE id=?",(vid,datetime.now().isoformat(timespec="seconds"),auction_id)); conn.commit(); log_action("Auction vehicle transferred to stock","vehicle",vid,f"Auction #{auction_id} -> {stock}"); flash(f"Vehicle added to BAM stock as {stock}. Auction details and photos were carried across.","success"); return redirect(url_for("vehicle_detail",vehicle_id=vid))
+    except (ValueError,sqlite3.Error) as exc: conn.rollback(); flash(f"Could not transfer vehicle: {exc}","error"); return redirect(url_for("auction_detail",auction_id=auction_id))
+    finally: conn.close()
 
 
 @app.get("/health")
