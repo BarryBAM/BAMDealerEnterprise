@@ -63,7 +63,7 @@ app.config.update(
     PERMANENT_SESSION_LIFETIME=timedelta(hours=int(os.environ.get("BAM_SESSION_HOURS", "12"))),
 )
 
-APP_VERSION = "25.14.0"
+APP_VERSION = "25.14.1"
 APP_NAME = "BAM Dealer Enterprise Cloud"
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "").strip()
 OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-5").strip() or "gpt-5"
@@ -8400,6 +8400,49 @@ if(pastePhotoBtn){
     if(e.key==='ArrowLeft') show(index-1);
     if(e.key==='ArrowRight') show(index+1);
   });
+})();
+
+// v25.14.1 - live Auction Buy Calculator / Deal Score.
+(function(){
+  const byName=name=>document.querySelector(`[name="${name}"]`);
+  const num=name=>{const el=byName(name);const n=parseFloat(el && el.value);return Number.isFinite(n)?n:0;};
+  const money=n=>'$'+Math.max(0,n).toLocaleString('en-AU',{maximumFractionDigits:0});
+  const quickEl=byName('quick_sale_value');
+  const calcBtn=document.getElementById('calculate_bid_btn');
+  const marketBtn=document.getElementById('use_market_quick_btn');
+  const marketMid={{ (item.market_mid or 0) if item else 0 }};
+
+  function calculate(){
+    if(!quickEl) return;
+    const quick=num('quick_sale_value');
+    const isBoat=((assetTypeInput && assetTypeInput.value)||'').toLowerCase()==='boat';
+    const costs=num('auction_fees')+num('transport_cost')+num('repair_allowance')+num('rego_ppsr_cost')+num('other_costs')
+      +(isBoat ? num('boat_engine_cost')+num('boat_hull_cost')+num('boat_trailer_cost') : 0);
+    const target=num('target_profit');
+    const maxBid=Math.max(0,quick-costs-target);
+    const source=((document.getElementById('listing_source')||{}).value||'Auction');
+    let current=source==='Auction' ? num('current_bid') : (num('negotiated_price') || num('asking_price'));
+    const profit=quick-current-costs;
+    let score='—', message='Enter a Quick-Sale Value and BAM will calculate the deal.';
+    if(quick>0){
+      const margin=maxBid>0 ? (maxBid-current)/maxBid : -1;
+      if(current<=0){score='READY';message='Maximum recommended bid: '+money(maxBid)+'. Enter the current bid/asking price to score the deal.';}
+      else if(current<=maxBid && margin>=0.15){score='🟢 GOOD BUY';message='Good buying margin. BAM estimates '+money(Math.max(0,profit))+' profit before the target-profit reserve.';}
+      else if(current<=maxBid){score='🟠 CAUTION';message='Still under BAM maximum, but the buying margin is getting tight.';}
+      else {score='🔴 DO NOT BID';message='Current price is '+money(current-maxBid)+' above BAM maximum recommended bid.';}
+    }
+    document.getElementById('calc_quick').textContent=money(quick);
+    document.getElementById('calc_costs').textContent=money(costs);
+    document.getElementById('calc_max').textContent=money(maxBid);
+    document.getElementById('calc_profit').textContent=quick>0 ? (profit<0?'-':'')+money(Math.abs(profit)) : '$0';
+    document.getElementById('calc_score').textContent=score;
+    document.getElementById('calc_message').textContent=message;
+    const maxInput=byName('max_bid'); if(maxInput && quick>0) maxInput.value=maxBid.toFixed(2);
+  }
+  if(calcBtn) calcBtn.addEventListener('click',calculate);
+  if(marketBtn) marketBtn.addEventListener('click',()=>{if(quickEl && marketMid>0){quickEl.value=marketMid;calculate();}});
+  ['quick_sale_value','auction_fees','transport_cost','repair_allowance','rego_ppsr_cost','other_costs','target_profit','boat_engine_cost','boat_hull_cost','boat_trailer_cost','current_bid','asking_price','negotiated_price'].forEach(name=>{const el=byName(name);if(el)el.addEventListener('input',calculate);});
+  if(quickEl && num('quick_sale_value')>0) calculate();
 })();
 
 refreshAssetFields();
