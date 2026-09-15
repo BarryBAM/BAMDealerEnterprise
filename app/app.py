@@ -63,7 +63,7 @@ app.config.update(
     PERMANENT_SESSION_LIFETIME=timedelta(hours=int(os.environ.get("BAM_SESSION_HOURS", "12"))),
 )
 
-APP_VERSION = "25.18.1"
+APP_VERSION = "25.18.2"
 APP_NAME = "BAM Dealer Enterprise Cloud"
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "").strip()
 OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-5").strip() or "gpt-5"
@@ -6720,6 +6720,99 @@ def _extract_listing_details(raw_text, url="", title="", description=""):
 
     details = _apply_site_specific_details(details, source_text, url=url, title=title, description=description)
 
+    # v25.18.2 - final Grays boat pass.  Run this after the generic/site-specific
+    # cleanup so Grays' flattened label/value text cannot overwrite boat fields.
+    host = (urllib.parse.urlparse(url or "").netloc or "").lower()
+    if "grays.com" in host and details.get("asset_type") == "Boat":
+        flat = re.sub(r"\s+", " ", source_text or " " ).strip()
+
+        def grays_boat_value(label, stops):
+            stop_alt = "|".join(re.escape(x) for x in stops)
+            m = re.search(rf"\b{label}\s*[:\-]?\s*(.+?)(?=\s+(?:{stop_alt})\s*[:\-]?|$)", flat, re.I)
+            return re.sub(r"\s+", " ", m.group(1)).strip(" :;,-") if m else ""
+
+        # The Grays page exposes these as labelled fields.
+        boat_make = grays_boat_value(r"Make", ["Model", "Asset Sub Category", "Boat Details", "HIN"])
+        boat_model = grays_boat_value(r"Model", ["Asset Sub Category", "Boat Details", "HIN", "Rego"])
+        if boat_make and len(boat_make) <= 40:
+            details["make"] = boat_make
+        if boat_model:
+            boat_model = re.split(r"\s+(?:Auction\b|\|\s*Grays\b|Grays Australia\b)", boat_model, maxsplit=1, flags=re.I)[0].strip(" -|,")
+            if boat_model and len(boat_model) <= 80:
+                details["model"] = boat_model
+
+        # Also clean model text derived from the HTML title, e.g.
+        # "Seaway 429 Auction (0001-...) | Grays Australia".
+        if details.get("model"):
+            cleaned_model = re.split(r"\s+(?:Auction\b|\|\s*Grays\b|Grays Australia\b)", str(details["model"]), maxsplit=1, flags=re.I)[0].strip(" -|,")
+            if cleaned_model:
+                details["model"] = cleaned_model
+
+        hin = grays_boat_value(r"HIN", ["Rego", "State", "Rego Expiry", "Sold Unregistered", "Beam", "Length"])
+        rego = grays_boat_value(r"Rego", ["State", "Rego Expiry", "Sold Unregistered", "Beam", "Length"])
+        if hin and re.fullmatch(r"[A-Z0-9-]{6,30}", hin, re.I): details["vin"] = hin.upper()
+        if rego and len(rego) <= 20: details["registration"] = rego.upper()
+
+        eng_make = grays_boat_value(r"Engine Make", ["Horsepower", "Engine Type", "Fuel Type", "Engine SN", "Engine Hours", "Engine Turns Over"])
+        hp = _first_match(flat, [r"Horsepower\s*[:\-]?\s*(\d+(?:\.\d+)?)\s*HP?\b"], flags=re.I)
+        eng_type = grays_boat_value(r"Engine Type", ["Fuel Type", "Engine SN", "Engine Hours", "Engine Turns Over", "Boat Accessories"])
+        fuel = grays_boat_value(r"Fuel Type", ["Engine SN", "Engine Hours", "Engine Turns Over", "Boat Accessories"])
+        eng_sn = grays_boat_value(r"Engine SN", ["Engine Hours", "Engine Turns Over", "Boat Accessories"])
+        hours = _first_match(flat, [r"Engine Hours\s*[:\-]?\s*(?:Not\s+sure\s+)?(\d+(?:\.\d+)?)"], flags=re.I)
+        if eng_make and len(eng_make) <= 50: details["engine_make"] = eng_make
+        if hp: details["horsepower"] = _number(hp)
+        if hours: details["engine_hours"] = _number(hours)
+        if fuel:
+            fuel_low = fuel.lower()
+            if "2 stroke" in fuel_low: details["fuel_type"] = "2 Stroke"
+            elif "4 stroke" in fuel_low: details["fuel_type"] = "4 Stroke"
+            elif "diesel" in fuel_low: details["fuel_type"] = "Diesel"
+            elif "petrol" in fuel_low or "gasoline" in fuel_low: details["fuel_type"] = "Petrol"
+            else: details["fuel_type"] = "Other"
+
+        beam = _first_match(flat, [r"Beam\s*[:\-]?\s*(\d+(?:\.\d+)?)\s*m"], flags=re.I)
+        length = _first_match(flat, [r"Length\s*[:\-]?\s*(\d+(?:\.\d+)?)\s*m"], flags=re.I)
+        depth = _first_match(flat, [r"Depth\s*[:\-]?\s*(\d+(?:\.\d+)?)\s*m"], flags=re.I)
+        rego_expiry = _first_match(flat, [r"Rego Expiry\s*[:\-]?\s*(\d{1,2}/\d{1,2}/\d{4})"], flags=re.I)
+        if beam: details["width_m"] = _number(beam)
+        if length: details["length_m"] = _number(length)
+
+        # A Grays boat listing that contains trailer details means a trailer is included.
+        if re.search(r"\bTrailer Make\b|\bJockey Wheel\b|\bSpare Wheel\b", flat, re.I):
+            details["trailer_included"] = 1
+
+        feature_names = [
+            "Bimini", "Windscreen", "Bow Rail", "Bait Boards", "Rod Holders",
+            "Live/Kill Bait Tank", "Fuel Tank", "Battery", "Rear End Seats",
+            "Anchor", "Chain", "Rope", "Garmin", "VHF/27 Meg", "Winch",
+            "Jockey Wheel", "Lights", "Spare Wheel"
+        ]
+        found_features = [name for name in feature_names if re.search(re.escape(name).replace(r"/", r"[/ ]"), flat, re.I)]
+        feature_lines = []
+        if eng_type: feature_lines.append(f"Engine Type: {eng_type}")
+        if fuel: feature_lines.append(f"Fuel Type: {fuel}")
+        if eng_sn: feature_lines.append(f"Engine Serial: {eng_sn}")
+        if re.search(r"Engine Turns Over\s*[:\-]?\s*Yes", flat, re.I): feature_lines.append("Engine Turns Over: Yes")
+        if beam: feature_lines.append(f"Beam: {beam} m")
+        if depth: feature_lines.append(f"Depth: {depth} m")
+        if rego_expiry: feature_lines.append(f"Rego Expiry: {rego_expiry}")
+        feature_lines.extend(found_features)
+        if feature_lines:
+            details["boat_features"] = "\n".join(dict.fromkeys(feature_lines))[:6000]
+
+        # Preserve a concise inspection record even when Grays' meta description is sparse.
+        note_lines = []
+        if description and description.strip(): note_lines.append(description.strip())
+        if rego_expiry: note_lines.append(f"Rego Expiry: {rego_expiry}")
+        if re.search(r"\bSold Unregistered\b", flat, re.I): note_lines.append("Sold Unregistered")
+        if hours and re.search(r"Engine Hours\s*[:\-]?\s*Not\s+sure", flat, re.I): note_lines.append(f"Engine Hours: Not sure {hours}")
+        if eng_sn: note_lines.append(f"Engine Serial: {eng_sn}")
+        if re.search(r"Trailer Has No VIN", flat, re.I): note_lines.append("Trailer has no VIN - check registration requirements.")
+        existing = (details.get("condition_notes") or "").strip()
+        combined_notes = [existing] if existing else []
+        combined_notes.extend(x for x in note_lines if x and x.lower() not in existing.lower())
+        if combined_notes: details["condition_notes"] = "\n\n".join(combined_notes)[:8000]
+
     # v25.13.1 - Caravan equipment / fit-out notes.
     # Grays and Slattery often place the useful caravan equipment in the lot
     # description rather than in structured fields. Keep that information in
@@ -8013,7 +8106,7 @@ AUCTION_ASSET_MODEL_CATALOG = {
 }
 
 VEHICLE_MAKES = tuple(VEHICLE_MODEL_CATALOG.keys())
-FUEL_TYPES = ("Petrol", "Diesel", "Hybrid", "Plug-in Hybrid", "Electric", "LPG", "Other")
+FUEL_TYPES = ("Petrol", "Diesel", "2 Stroke", "4 Stroke", "Hybrid", "Plug-in Hybrid", "Electric", "LPG", "Other")
 TRANSMISSION_TYPES = ("Automatic", "Sports Automatic", "Manual", "CVT", "DCT", "Other")
 DRIVE_TYPES = ("2WD", "4WD", "AWD", "FWD", "RWD", "Other")
 
@@ -8347,8 +8440,16 @@ async function importListing(payload){
       'year','make','model','variant','vin','registration','registration_status','body_type','seat_count','reserve_status','odometer_km','engine_size','engine_cc',
       'engine_cylinders','colour','interior','transmission','drive_type','fuel_type',
       'asking_price','current_bid','sold_price','status','condition_grade','condition_notes',
-      'asset_type','length_m','width_m','height_m','berths','axles','tare_weight_kg','atm_kg','gtm_kg','ball_weight_kg','caravan_features'
+      'asset_type','length_m','width_m','height_m','berths','axles','tare_weight_kg','atm_kg','gtm_kg','ball_weight_kg','caravan_features',
+      'engine_hours','boat_type','hull_material','engine_make','engine_model','horsepower','capacity_people','trailer_registration','boat_features','trailer_features'
     ].forEach(k=>setImportedField(k,d[k]));
+    const trailerIncluded=document.getElementById('trailer_included') || document.querySelector('[name="trailer_included"]');
+    if(trailerIncluded && d.trailer_included !== undefined && d.trailer_included !== null){
+      trailerIncluded.checked=Boolean(Number(d.trailer_included) || d.trailer_included === true);
+      trailerIncluded.dispatchEvent(new Event('change',{bubbles:true}));
+    }
+    const importedDescription=document.getElementById('listing_description');
+    if(importedDescription && d.condition_notes){ importedDescription.value=d.condition_notes; }
     renderImportedPhotos(d.photo_urls || []);
     refreshAssetFields();
     refreshModels();
