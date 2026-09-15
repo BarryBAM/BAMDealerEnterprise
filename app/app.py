@@ -63,7 +63,7 @@ app.config.update(
     PERMANENT_SESSION_LIFETIME=timedelta(hours=int(os.environ.get("BAM_SESSION_HOURS", "12"))),
 )
 
-APP_VERSION = "25.16.0"
+APP_VERSION = "25.16.1"
 APP_NAME = "BAM Dealer Enterprise Cloud"
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "").strip()
 OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-5").strip() or "gpt-5"
@@ -8090,7 +8090,7 @@ AUCTION_FORM = r"""
 </div></div>
 <div class='panel'><form method='post' enctype='multipart/form-data'><input type='hidden' id='imported_photo_urls' name='imported_photo_urls' value=''><div class='grid'>
 <div><label>Vehicle Type</label><select id='auction_asset_type' name='asset_type'>{% for x in types %}<option {{'selected' if item and item.asset_type==x else ''}}>{{x}}</option>{% endfor %}</select></div><div><label>Source</label><select id='listing_source' name='listing_source'>{% for x in sources %}<option {{'selected' if item and item.listing_source==x else ''}}>{{x}}</option>{% endfor %}</select></div><div><label>Status</label><select name='status'>{% for x in statuses %}<option {{'selected' if item and item.status==x else ''}}>{{x}}</option>{% endfor %}</select></div><div class='market-field'><label>Seller Name</label><input name='seller_name' value='{{item.seller_name or "" if item else ""}}'></div><div class='market-field'><label>Seller Phone</label><input name='seller_phone' value='{{item.seller_phone or "" if item else ""}}'></div><div class='market-field'><label>Seller / Listing Location</label><input name='seller_location' value='{{item.seller_location or "" if item else ""}}'></div><div class='market-field full'><label>Listing URL</label><input id='listing_url' name='listing_url' placeholder='Facebook Marketplace, Carsales, Gumtree or other link' value='{{item.listing_url or "" if item else ""}}'></div><div class='market-field'><label>Date First Seen</label><input type='date' name='date_first_seen' value='{{item.date_first_seen or "" if item else ""}}'></div><div class='market-field'><label>Last Checked</label><input type='date' name='last_checked' value='{{item.last_checked or "" if item else ""}}'></div><div></div><div class='auction-field'><label>Lot Number</label><input id='lot_number' name='lot_number' value='{{item.lot_number or "" if item else ""}}'></div>
-<div class='auction-field'><label>Auction Name</label><input name='auction_name' value='{{item.auction_name or "" if item else ""}}'></div><div class='auction-field'><label>Auction Location</label><input name='auction_location' value='{{item.auction_location or "" if item else ""}}'></div><div class='auction-field'><label>Auction Web Link</label><input name='auction_url' value='{{item.auction_url or "" if item else ""}}'></div>
+<div class='auction-field'><label>Auction Name</label><input name='auction_name' value='{{item.auction_name or "" if item else ""}}'></div><div class='auction-field'><label>Auction Location</label><input name='auction_location' value='{{item.auction_location or "" if item else ""}}'></div><div class='auction-field'><label>Auction Web Link</label><div style='display:flex;gap:8px'><input id='auction_url' name='auction_url' placeholder='Paste auction webpage link' value='{{item.auction_url or "" if item else ""}}'><button type='button' class='btn secondary' id='open_auction_url_btn' style='width:auto;white-space:nowrap'>🌐 Open Webpage</button></div></div>
 <div class='auction-field'><label>Auction Starts</label><input type='datetime-local' name='auction_start' value='{{item.auction_start or "" if item else ""}}'></div><div class='auction-field'><label>Auction Finishes</label><input type='datetime-local' name='auction_finish' value='{{item.auction_finish or "" if item else ""}}'></div><div></div>
 <div><label>Year</label><input type='number' id='year' name='year' value='{{item.year or "" if item else ""}}'></div><div><label>Make *</label><input id='auction_make' name='make' list='make_options' autocomplete='off' required value='{{item.make or "" if item else ""}}'><datalist id='make_options'></datalist></div><div><label>Model *</label><input id='auction_model' name='model' list='model_options' autocomplete='off' required value='{{item.model or "" if item else ""}}'><datalist id='model_options'></datalist></div><div><label>Variant</label><input id='auction_variant' name='variant' list='variant_options' autocomplete='off' value='{{item.variant or "" if item else ""}}'><datalist id='variant_options'></datalist></div><div><label>VIN / Chassis</label><input id='vin' name='vin' value='{{item.vin or "" if item else ""}}'></div><div><label>Registration</label><input id='registration' name='registration' value='{{item.registration or "" if item else ""}}'></div><div><label>Registration Status</label><input id='registration_status' name='registration_status' list='registration_status_options' autocomplete='off' value='{{item.registration_status or "" if item else ""}}' placeholder='e.g. Sold Registered, Sold on Consignment'><datalist id='registration_status_options'><option value='Sold Registered, Sold on Consignment'><option value='Sold Registered'><option value='Sold Unregistered'><option value='Registered'><option value='Unregistered'></datalist></div>
 <div class='asset-field car'><label>Body Type</label><input id='body_type' name='body_type' list='body_type_options' value='{{item.body_type or "" if item else ""}}'><datalist id='body_type_options'><option value='SUV'><option value='Sedan'><option value='Wagon'><option value='Hatchback'><option value='Ute'><option value='Van'><option value='Coupe'><option value='Convertible'><option value='Cab Chassis'></datalist></div><div class='asset-field car'><label>No. of Seats</label><input type='number' min='1' max='99' id='seat_count' name='seat_count' value='{{item.seat_count or "" if item else ""}}'></div>
@@ -8135,6 +8135,16 @@ const makeList = document.getElementById('make_options');
 const modelList = document.getElementById('model_options');
 const variantList = document.getElementById('variant_options');
 const googleMarketBtn = document.getElementById('google_market_valuation_btn');
+const openAuctionUrlBtn = document.getElementById('open_auction_url_btn');
+if(openAuctionUrlBtn){
+  openAuctionUrlBtn.addEventListener('click',()=>{
+    const el=document.getElementById('auction_url');
+    let url=(el && el.value ? el.value.trim() : '');
+    if(!url){ alert('Enter the auction webpage link first.'); return; }
+    if(!/^https?:\/\//i.test(url)) url='https://'+url;
+    window.open(url,'_blank','noopener,noreferrer');
+  });
+}
 if(googleMarketBtn){
   googleMarketBtn.addEventListener('click',()=>{
     const value=(name)=>{const el=document.querySelector(`[name="${name}"]`); return el ? (el.value||'').trim() : '';};
@@ -8646,13 +8656,15 @@ def auction_comparable_value(auction_id):
     if str(item["asset_type"] or "").lower() == "boat":
         costs += sum(float(item[k] or 0) for k in ("boat_engine_cost", "boat_hull_cost", "boat_trailer_cost"))
     suggested = max(0, wholesale_high - costs - float(item["target_profit"] or 0))
+    # v25.16.1: automatically feed the comparable-market median into the Buy Calculator.
+    quick_sale_value = round(market_mid, 2)
     confidence = "Good" if len(prices) >= 4 else "Limited" if len(prices) >= 2 else "Single comparable"
     detail = f"BAM estimate from {len(prices)} user-entered Australian advertised comparable price{'s' if len(prices) != 1 else ''}. Asking prices are not confirmed sale prices."
-    conn.execute("""UPDATE auction_vehicles SET comparable_price_1=?,comparable_price_2=?,comparable_price_3=?,comparable_price_4=?,comparable_price_5=?,market_low=?,market_mid=?,market_high=?,private_value_low=?,private_value_high=?,wholesale_value_low=?,wholesale_value_high=?,trade_value_low=?,trade_value_high=?,dealer_value_low=?,dealer_value_high=?,suggested_buy_price=?,valuation_provider=?,valuation_confidence=?,valuation_source=?,valuation_checked_at=? WHERE id=?""",
-        (*stored, round(dealer_low,2), round(market_mid,2), round(dealer_high,2), round(private_low,2), round(private_high,2), round(wholesale_low,2), round(wholesale_high,2), round(trade_low,2), round(trade_high,2), round(dealer_low,2), round(dealer_high,2), round(suggested,2), "BAM comparable market analysis", confidence, detail, datetime.now().isoformat(timespec="seconds"), auction_id))
+    conn.execute("""UPDATE auction_vehicles SET comparable_price_1=?,comparable_price_2=?,comparable_price_3=?,comparable_price_4=?,comparable_price_5=?,market_low=?,market_mid=?,market_high=?,private_value_low=?,private_value_high=?,wholesale_value_low=?,wholesale_value_high=?,trade_value_low=?,trade_value_high=?,dealer_value_low=?,dealer_value_high=?,suggested_buy_price=?,quick_sale_value=?,valuation_provider=?,valuation_confidence=?,valuation_source=?,valuation_checked_at=? WHERE id=?""",
+        (*stored, round(dealer_low,2), round(market_mid,2), round(dealer_high,2), round(private_low,2), round(private_high,2), round(wholesale_low,2), round(wholesale_high,2), round(trade_low,2), round(trade_high,2), round(dealer_low,2), round(dealer_high,2), round(suggested,2), quick_sale_value, "BAM comparable market analysis", confidence, detail, datetime.now().isoformat(timespec="seconds"), auction_id))
     conn.commit()
     conn.close()
-    flash(f"Market valuation calculated from {len(prices)} comparable price{'s' if len(prices) != 1 else ''}.", "success")
+    flash(f"Market valuation calculated from {len(prices)} comparable price{'s' if len(prices) != 1 else ''}. Quick-Sale Value set automatically to ${quick_sale_value:,.0f}.", "success")
     return redirect(url_for("auction_detail", auction_id=auction_id))
 
 
