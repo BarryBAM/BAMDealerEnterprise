@@ -63,7 +63,7 @@ app.config.update(
     PERMANENT_SESSION_LIFETIME=timedelta(hours=int(os.environ.get("BAM_SESSION_HOURS", "12"))),
 )
 
-APP_VERSION = "25.18.0"
+APP_VERSION = "25.18.1"
 APP_NAME = "BAM Dealer Enterprise Cloud"
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "").strip()
 OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-5").strip() or "gpt-5"
@@ -6625,13 +6625,43 @@ def _extract_listing_details(raw_text, url="", title="", description=""):
         if fuel: details["fuel_type"] = fuel.strip()
         length = _first_match(source_text, [r"Length\s*[:\-]?\s*(\d+(?:\.\d+)?)\s*m(?:etres?)?"], flags=re.I)
         if length: details["length_m"] = _number(length)
+        # v25.18.1 - Grays boat identity and mechanical details.
+        # Boat titles such as "2016 Stacer Seaway 429" do not use the car
+        # make/model catalogue, so capture the make/model directly from the title.
+        clean_boat_title = _strip_html(title or "").strip()
+        boat_title_match = re.search(r"\b(?:19|20)\d{2}\s+([A-Za-z][A-Za-z0-9&.'-]{1,30})\s+(.+?)(?=\s+-\s+|,|$)", clean_boat_title, re.I)
+        if boat_title_match:
+            boat_make = boat_title_match.group(1).strip()
+            boat_model = re.sub(r"\s+", " ", boat_title_match.group(2)).strip(" -,")
+            if boat_make:
+                details["make"] = boat_make.title()
+            if boat_model and len(boat_model) <= 80:
+                details["model"] = boat_model
+
+        beam = _first_match(source_text, [r"Beam\s*[:\-]?\s*(\d+(?:\.\d+)?)\s*m(?:etres?)?"], flags=re.I)
+        if beam:
+            details["width_m"] = _number(beam)
+        engine_type = _first_match(source_text, [r"Engine\s+Type\s*[:\-]?\s*([A-Za-z0-9 .&/-]{2,40})"], flags=re.I)
+        engine_sn = _first_match(source_text, [r"Engine\s+(?:SN|Serial(?:\s+Number)?)\s*[:#\-]?\s*([A-Z0-9-]{4,40})"], flags=re.I)
+        engine_turns = _first_match(source_text, [r"Engine\s+Turns\s+Over\s*[:\-]?\s*([A-Za-z]+)"], flags=re.I)
+        rego_expiry = _first_match(source_text, [r"Rego\s+Expiry\s*[:\-]?\s*([0-9]{1,2}/[0-9]{1,2}/[0-9]{4})"], flags=re.I)
+        depth = _first_match(source_text, [r"Depth\s*[:\-]?\s*(\d+(?:\.\d+)?)\s*m(?:etres?)?"], flags=re.I)
+
         # Keep the useful auction/seller description and equipment list in notes/features.
         feature_terms = re.compile(r"\b(bimini|windscreen|bow rail|bait board|rod holder|live.?bait|fuel tank|battery|anchor|chain|rope|garmin|navigation|radio|VHF|winch|jockey wheel|lights|spare wheel|sounder|GPS)\b", re.I)
         feature_lines=[]
         for m in re.finditer(r"[^\r\n]{0,100}(?:bimini|windscreen|bow rail|bait board|rod holder|live.?bait|fuel tank|battery|anchor|chain|rope|garmin|navigation|radio|VHF|winch|jockey wheel|lights|spare wheel|sounder|GPS)[^\r\n]{0,180}", source_text or "", re.I):
             line=re.sub(r"\s+"," ",m.group(0)).strip(" -:;,.|")
             if line and line.lower() not in {x.lower() for x in feature_lines}: feature_lines.append(line)
-        if feature_lines: details["boat_features"] = "\n".join(feature_lines)[:6000]
+        mechanical_lines = []
+        if engine_type: mechanical_lines.append("Engine Type: " + engine_type.strip())
+        if engine_sn: mechanical_lines.append("Engine Serial: " + engine_sn.strip())
+        if engine_turns: mechanical_lines.append("Engine Turns Over: " + engine_turns.strip())
+        if beam: mechanical_lines.append("Beam: " + str(beam).strip() + " m")
+        if depth: mechanical_lines.append("Depth: " + str(depth).strip() + " m")
+        if rego_expiry: mechanical_lines.append("Rego Expiry: " + rego_expiry.strip())
+        combined_features = mechanical_lines + feature_lines
+        if combined_features: details["boat_features"] = "\n".join(combined_features)[:6000]
         desc=(description or "").strip()
         if desc:
             existing=(details.get("condition_notes") or "").strip()
