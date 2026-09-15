@@ -63,7 +63,7 @@ app.config.update(
     PERMANENT_SESSION_LIFETIME=timedelta(hours=int(os.environ.get("BAM_SESSION_HOURS", "12"))),
 )
 
-APP_VERSION = "25.18.4"
+APP_VERSION = "25.18.5"
 APP_NAME = "BAM Dealer Enterprise Cloud"
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "").strip()
 OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-5").strip() or "gpt-5"
@@ -399,6 +399,22 @@ def init_db():
     ensure_column(conn, "vehicles", "market_price_mid", "REAL DEFAULT 0")
     ensure_column(conn, "vehicles", "market_price_high", "REAL DEFAULT 0")
     ensure_column(conn, "vehicles", "market_price_checked_at", "TEXT")
+    ensure_column(conn, "vehicles", "comparable_price_1", "REAL DEFAULT 0")
+    ensure_column(conn, "vehicles", "comparable_price_2", "REAL DEFAULT 0")
+    ensure_column(conn, "vehicles", "comparable_price_3", "REAL DEFAULT 0")
+    ensure_column(conn, "vehicles", "comparable_price_4", "REAL DEFAULT 0")
+    ensure_column(conn, "vehicles", "comparable_price_5", "REAL DEFAULT 0")
+    ensure_column(conn, "vehicles", "private_value_low", "REAL DEFAULT 0")
+    ensure_column(conn, "vehicles", "private_value_high", "REAL DEFAULT 0")
+    ensure_column(conn, "vehicles", "wholesale_value_low", "REAL DEFAULT 0")
+    ensure_column(conn, "vehicles", "wholesale_value_high", "REAL DEFAULT 0")
+    ensure_column(conn, "vehicles", "trade_value_low", "REAL DEFAULT 0")
+    ensure_column(conn, "vehicles", "trade_value_high", "REAL DEFAULT 0")
+    ensure_column(conn, "vehicles", "dealer_value_low", "REAL DEFAULT 0")
+    ensure_column(conn, "vehicles", "dealer_value_high", "REAL DEFAULT 0")
+    ensure_column(conn, "vehicles", "valuation_provider", "TEXT")
+    ensure_column(conn, "vehicles", "valuation_confidence", "TEXT")
+    ensure_column(conn, "vehicles", "valuation_source", "TEXT")
 
     # Version 18 - Parts Vehicle / Dismantling
     ensure_column(conn, "vehicles", "vehicle_purpose", "TEXT DEFAULT 'Retail Sale'")
@@ -4122,46 +4138,39 @@ def delete_vehicle_photo(vehicle_id, photo_id):
 def vehicle_valuation(vehicle_id):
     conn = db()
     vehicle = conn.execute("SELECT * FROM vehicles WHERE id=?", (vehicle_id,)).fetchone()
+    if not vehicle:
+        conn.close(); return "Vehicle not found", 404
     expenses = conn.execute("SELECT COALESCE(SUM(cost_inc_gst),0) AS v FROM expenses WHERE vehicle_id=?", (vehicle_id,)).fetchone()["v"]
     jobs = conn.execute("SELECT COALESCE(SUM(CASE WHEN actual_cost_inc_gst>0 THEN actual_cost_inc_gst ELSE estimated_cost END),0) AS v FROM job_cards WHERE vehicle_id=?", (vehicle_id,)).fetchone()["v"]
     services = conn.execute("SELECT COALESCE(SUM(cost_inc_gst),0) AS v FROM service_entries WHERE vehicle_id=?", (vehicle_id,)).fetchone()["v"]
     parts = conn.execute("SELECT COALESCE(SUM(quantity_used*unit_cost_inc_gst),0) AS v FROM part_usage WHERE vehicle_id=?", (vehicle_id,)).fetchone()["v"]
-
-    if not vehicle:
-        conn.close()
-        return "Vehicle not found", 404
-
     if request.method == "POST":
-        conn.execute("""
-            UPDATE vehicles
-            SET estimated_sale_price=?,minimum_sale_price=?,valuation_notes=?
-            WHERE id=?
-        """, (
-            float(request.form.get("estimated_sale_price") or 0),
-            float(request.form.get("minimum_sale_price") or 0),
-            request.form.get("valuation_notes"),
-            vehicle_id,
-        ))
-        conn.commit()
-        vehicle = conn.execute("SELECT * FROM vehicles WHERE id=?", (vehicle_id,)).fetchone()
-        log_action("Vehicle valuation updated", "vehicle", vehicle_id, request.form.get("valuation_notes"))
-        flash("Valuation saved.", "success")
-
+        prices=[]; raw_prices=[]
+        for i in range(1,6):
+            try: value=float((request.form.get(f"comparable_price_{i}") or "0").strip())
+            except ValueError: value=0
+            raw_prices.append(value)
+            if value>0: prices.append(value)
+        if prices:
+            ordered=sorted(prices); n=len(ordered); low=ordered[0]; high=ordered[-1]
+            mid=ordered[n//2] if n%2 else (ordered[n//2-1]+ordered[n//2])/2
+            confidence="Good" if n>=4 else ("Limited" if n>=2 else "Single comparable")
+            conn.execute("""UPDATE vehicles SET comparable_price_1=?,comparable_price_2=?,comparable_price_3=?,comparable_price_4=?,comparable_price_5=?,market_price_low=?,market_price_mid=?,market_price_high=?,private_value_low=?,private_value_high=?,wholesale_value_low=?,wholesale_value_high=?,trade_value_low=?,trade_value_high=?,dealer_value_low=?,dealer_value_high=?,estimated_sale_price=?,minimum_sale_price=?,valuation_provider=?,valuation_confidence=?,valuation_source=?,market_price_checked_at=CURRENT_TIMESTAMP WHERE id=?""", (*raw_prices,low,mid,high,low*.92,high*.97,low*.62,mid*.72,low*.68,mid*.78,low,high,mid,mid*.72,"BAM comparable market analysis",confidence,f"{n} advertised Australian comparable price(s); asking prices are not confirmed sales.",vehicle_id))
+            conn.commit(); flash("Market valuation calculated. Market Mid has been put into Quick-Sale / Estimated Sale Value.","success")
+        else: flash("Enter at least one comparable market price first.","error")
+        vehicle=conn.execute("SELECT * FROM vehicles WHERE id=?",(vehicle_id,)).fetchone()
     conn.close()
-    total_cost = vehicle["purchase_price_inc_gst"] + expenses + jobs + services + parts
-    estimated_profit = vehicle["estimated_sale_price"] - total_cost
-    minimum_profit = vehicle["minimum_sale_price"] - total_cost
-    return render_template(
-        "vehicle_valuation.html",
-        vehicle=vehicle,
-        expenses=expenses,
-        jobs=jobs,
-        services=services,
-        parts=parts,
-        total_cost=total_cost,
-        estimated_profit=estimated_profit,
-        minimum_profit=minimum_profit,
-    )
+    total_cost=float(vehicle["purchase_price_inc_gst"] or 0)+float(expenses or 0)+float(jobs or 0)+float(services or 0)+float(parts or 0)
+    asset=(vehicle["asset_type"] or "Car").strip(); terms=[vehicle["year"],vehicle["make"],vehicle["model"],vehicle["variant"]]
+    if asset.lower()=="boat": terms += [f'{vehicle["length_m"]}m' if vehicle["length_m"] else None,vehicle["engine_make"],f'{vehicle["horsepower"]}hp' if vehicle["horsepower"] else None,f'{vehicle["engine_hours"]} hours' if vehicle["engine_hours"] else None]
+    else: terms += [f'{vehicle["odometer_km"]} km' if vehicle["odometer_km"] else None]
+    google_url="https://www.google.com/search?q="+urllib.parse.quote_plus(" ".join(str(x) for x in terms if x)+f" {asset} for sale Australia price")
+    template='''{% extends "base.html" %}{% block content %}
+<div class="panel"><h1>🇦🇺 BAM Inventory Market Valuation</h1><p><b>{{vehicle.stock_no}}</b> — {{vehicle.year or ''}} {{vehicle.make}} {{vehicle.model}} · {{vehicle.asset_type or 'Car'}}</p><div class="actions"><a class="btn good" target="_blank" rel="noopener" href="{{google_url}}">🔎 Google Market Valuation ↗</a><form method="post" action="{{url_for('vehicle_market_suggestion_save',vehicle_id=vehicle.id)}}" style="display:inline"><button class="btn secondary">BAM Internal Market Suggestion</button></form></div><div class="muted">Use Australian comparable listings for Cars, Boats, Caravans and Trailers. Enter the advertised prices below and BAM calculates the ranges and Quick-Sale Value.</div></div>
+<form method="post"><div class="panel"><h2>📊 Comparable Market Prices</h2><div class="grid">{% for i in range(1,6) %}<div><label>Comparable {{i}} ($)</label><input type="number" step=".01" min="0" name="comparable_price_{{i}}" value="{{ vehicle['comparable_price_' ~ i] or '' }}"></div>{% endfor %}</div><div class="actions"><button class="btn good">Calculate Market Valuation & Put Into Quick-Sale Value</button></div></div></form>
+<div class="panel"><h2>Market Valuation</h2><div class="valuation-grid"><div class="valuation-card"><span>Market Low</span><strong>${{'{:,.0f}'.format(vehicle.market_price_low or 0)}}</strong></div><div class="valuation-card"><span>Market Mid / Quick-Sale</span><strong>${{'{:,.0f}'.format(vehicle.market_price_mid or 0)}}</strong></div><div class="valuation-card"><span>Market High</span><strong>${{'{:,.0f}'.format(vehicle.market_price_high or 0)}}</strong></div><div class="valuation-card"><span>Wholesale</span><strong>${{'{:,.0f}'.format(vehicle.wholesale_value_low or 0)}} – ${{'{:,.0f}'.format(vehicle.wholesale_value_high or 0)}}</strong></div><div class="valuation-card"><span>Trade</span><strong>${{'{:,.0f}'.format(vehicle.trade_value_low or 0)}} – ${{'{:,.0f}'.format(vehicle.trade_value_high or 0)}}</strong></div><div class="valuation-card"><span>Private</span><strong>${{'{:,.0f}'.format(vehicle.private_value_low or 0)}} – ${{'{:,.0f}'.format(vehicle.private_value_high or 0)}}</strong></div></div><p><b>Quick-Sale / Estimated Sale Value:</b> ${{'{:,.0f}'.format(vehicle.estimated_sale_price or 0)}} · <b>Total recorded cost:</b> ${{'{:,.0f}'.format(total_cost)}}</p><div class="muted">Provider: {{vehicle.valuation_provider or 'Not calculated'}} · Confidence: {{vehicle.valuation_confidence or 'Not calculated'}}<br>{{vehicle.valuation_source or ''}}</div><div class="actions"><a class="btn" href="{{url_for('vehicle_detail',vehicle_id=vehicle.id)}}">← Back to Vehicle Inventory</a></div></div>
+{% endblock %}'''
+    return render_template_string(template,vehicle=vehicle,google_url=google_url,total_cost=total_cost)
 
 
 @app.route("/vehicles/<int:vehicle_id>/purchase-agreement")
