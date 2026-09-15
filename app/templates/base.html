@@ -17,6 +17,16 @@
   if(saved === 'dark') document.documentElement.classList.add('dark-mode');
 })();
 </script>
+<style id="bam-photo-viewer-style">
+/* BAM v25.13.2 global large-photo viewer */
+main img:not([data-no-lightbox]){cursor:zoom-in}
+.bam-photo-lightbox{display:none;position:fixed;inset:0;z-index:100000;background:rgba(0,0,0,.94);align-items:center;justify-content:center;padding:30px}
+.bam-photo-lightbox.open{display:flex}
+.bam-photo-lightbox img{max-width:94vw;max-height:90vh;width:auto;height:auto;object-fit:contain;border-radius:8px;box-shadow:0 10px 45px rgba(0,0,0,.6);cursor:default}
+.bam-photo-lightbox button{position:fixed;border:0;background:rgba(15,23,42,.78);color:#fff;cursor:pointer;border-radius:10px;font-size:34px;line-height:1;padding:10px 14px}
+.bam-photo-close{top:16px;right:18px}.bam-photo-prev{left:18px;top:50%;transform:translateY(-50%)}.bam-photo-next{right:18px;top:50%;transform:translateY(-50%)}
+@media(max-width:600px){.bam-photo-lightbox{padding:12px}.bam-photo-lightbox img{max-width:98vw;max-height:88vh}.bam-photo-lightbox button{font-size:28px;padding:9px 12px}}
+</style>
 </head>
 <body class="{% if session.get('user_id') %}app-shell{% endif %}">
 
@@ -112,6 +122,46 @@ document.addEventListener('click', function(event){
   const sidebar=document.getElementById('sidebar');
   if(sidebar && sidebar.classList.contains('open') && !sidebar.contains(event.target) && !event.target.closest('.menu-button')) sidebar.classList.remove('open');
 });
+</script>
+
+<div id="bam-photo-lightbox" class="bam-photo-lightbox" aria-hidden="true">
+  <button type="button" class="bam-photo-close" aria-label="Close photo">×</button>
+  <button type="button" class="bam-photo-prev" aria-label="Previous photo">‹</button>
+  <img id="bam-photo-lightbox-image" alt="Large photo">
+  <button type="button" class="bam-photo-next" aria-label="Next photo">›</button>
+</div>
+<script>
+(function(){
+  const box=document.getElementById('bam-photo-lightbox');
+  const big=document.getElementById('bam-photo-lightbox-image');
+  if(!box || !big) return;
+  let photos=[], index=0;
+  function collect(){
+    photos=Array.from(document.querySelectorAll('main img:not([data-no-lightbox])')).filter(img=>img.src && !img.closest('#bam-photo-lightbox'));
+  }
+  function show(i){
+    collect(); if(!photos.length) return;
+    index=(i+photos.length)%photos.length;
+    big.src=photos[index].currentSrc || photos[index].src;
+    big.alt=photos[index].alt || 'Large photo';
+    box.classList.add('open'); box.setAttribute('aria-hidden','false');
+    document.body.style.overflow='hidden';
+  }
+  function close(){box.classList.remove('open');box.setAttribute('aria-hidden','true');big.removeAttribute('src');document.body.style.overflow='';}
+  document.addEventListener('click',e=>{
+    const img=e.target.closest('main img:not([data-no-lightbox])');
+    if(img && !img.closest('#bam-photo-lightbox')){collect();show(photos.indexOf(img));return;}
+    if(e.target===box || e.target.closest('.bam-photo-close')) close();
+    if(e.target.closest('.bam-photo-prev')) show(index-1);
+    if(e.target.closest('.bam-photo-next')) show(index+1);
+  });
+  document.addEventListener('keydown',e=>{
+    if(!box.classList.contains('open')) return;
+    if(e.key==='Escape') close();
+    if(e.key==='ArrowLeft') show(index-1);
+    if(e.key==='ArrowRight') show(index+1);
+  });
+})();
 </script>
 </body>
 </html>
