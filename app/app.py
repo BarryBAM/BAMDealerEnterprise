@@ -63,7 +63,7 @@ app.config.update(
     PERMANENT_SESSION_LIFETIME=timedelta(hours=int(os.environ.get("BAM_SESSION_HOURS", "12"))),
 )
 
-APP_VERSION = "25.19.0"
+APP_VERSION = "25.19.1"
 APP_NAME = "BAM Dealer Enterprise Cloud"
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "").strip()
 OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-5.6-luna").strip() or "gpt-5.6-luna"
@@ -2354,20 +2354,34 @@ def vehicle_detail(vehicle_id):
         remaining_to_break_even=remaining_to_break_even,
         break_even_status=break_even_status,
     )
-    # v25.19.0 - important sale paperwork and protected vehicle actions on the vehicle record.
+    # v25.19.1 - sales paperwork and protected delete controls are also available in the top action row.
     valuation_button = f"<a href=\"{url_for('vehicle_valuation', vehicle_id=vehicle_id)}\" style=\"position:fixed;right:22px;bottom:22px;z-index:9998;background:#15803d;color:white;padding:14px 18px;border-radius:12px;text-decoration:none;font-weight:800\">Market Valuation &amp; Deal Score</a>"
     if sale:
-        sale_actions = f"<section id='bam-sale-paperwork' style='margin:18px auto;max-width:1200px;padding:18px;border:1px solid #cbd5e1;border-radius:14px;background:#fff;color:#0f172a'><h2>Sales Paperwork</h2><p>Sale recorded for <b>{html.escape(str(sale['buyer_name'] or 'Buyer'))}</b>. Invoice <b>{html.escape(str(sale['invoice_number'] or ''))}</b>.</p><div style='display:flex;gap:10px;flex-wrap:wrap'><a href='{url_for('sale_invoice', vehicle_id=vehicle_id)}' style='background:#2563eb;color:white;padding:11px 15px;border-radius:9px;text-decoration:none;font-weight:800'>View / Print Sales Receipt &amp; Invoice</a><a href='{url_for('sale_bill_of_sale', vehicle_id=vehicle_id)}' style='background:#0f766e;color:white;padding:11px 15px;border-radius:9px;text-decoration:none;font-weight:800'>View / Print Bill of Sale</a><a href='{url_for('sale_contract', vehicle_id=vehicle_id)}' style='background:#475569;color:white;padding:11px 15px;border-radius:9px;text-decoration:none;font-weight:800'>Sales Contract</a></div></section>"
+        sale_actions = f"<section id='bam-sale-paperwork' style='margin:18px auto;max-width:1200px;padding:18px;border:1px solid #cbd5e1;border-radius:14px;background:#fff;color:#0f172a'><h2>Sales Paperwork</h2><p>Sale recorded for <b>{html.escape(str(sale['buyer_name'] or 'Buyer'))}</b>. Invoice <b>{html.escape(str(sale['invoice_number'] or ''))}</b>.</p><div style='display:flex;gap:10px;flex-wrap:wrap'><a href='{url_for('sale_bill_of_sale', vehicle_id=vehicle_id)}' style='background:#0f766e;color:white;padding:11px 15px;border-radius:9px;text-decoration:none;font-weight:800'>Sales Paperwork / Bill of Sale</a><a href='{url_for('sale_invoice', vehicle_id=vehicle_id)}' style='background:#2563eb;color:white;padding:11px 15px;border-radius:9px;text-decoration:none;font-weight:800'>View / Print Sales Receipt &amp; Invoice</a><a href='{url_for('sale_contract', vehicle_id=vehicle_id)}' style='background:#475569;color:white;padding:11px 15px;border-radius:9px;text-decoration:none;font-weight:800'>Sales Contract</a></div></section>"
     else:
-        sale_actions = f"<section id='bam-sale-paperwork' style='margin:18px auto;max-width:1200px;padding:18px;border:1px solid #cbd5e1;border-radius:14px;background:#fff;color:#0f172a'><h2>Sales Paperwork</h2><p>No sale has been recorded yet. You can still prepare and print a Bill of Sale.</p><div style='display:flex;gap:10px;flex-wrap:wrap'><a href='{url_for('sale_bill_of_sale', vehicle_id=vehicle_id)}' style='background:#0f766e;color:white;padding:11px 15px;border-radius:9px;text-decoration:none;font-weight:800'>Prepare Bill of Sale</a><a href='#sale' style='background:#2563eb;color:white;padding:11px 15px;border-radius:9px;text-decoration:none;font-weight:800'>Record Sale</a></div></section>"
-    delete_panel = f"<section style='margin:18px auto 90px;max-width:1200px;padding:18px;border:1px solid #fecaca;border-radius:14px;background:#fff7f7;color:#7f1d1d'><h2>Vehicle Record Actions</h2><p>Delete is permanent. Type <b>{html.escape(str(vehicle['stock_no']))}</b> below to protect against accidental deletion.</p><form method='post' action='{url_for('vehicle_delete', vehicle_id=vehicle_id)}' onsubmit=\"return confirm('Permanently delete this vehicle and its vehicle records? This cannot be undone.')\" style='display:flex;gap:10px;flex-wrap:wrap;align-items:center'><input name='confirm_stock_no' required placeholder='Type {html.escape(str(vehicle['stock_no']))}' autocomplete='off' style='padding:10px;border:1px solid #fca5a5;border-radius:8px;min-width:220px'><button type='submit' style='background:#b91c1c;color:white;border:0;padding:11px 15px;border-radius:9px;font-weight:800;cursor:pointer'>Delete Vehicle</button></form></section>"
-    # Add a sales-document choice to the existing Document Centre without changing its upload workflow.
+        sale_actions = f"<section id='bam-sale-paperwork' style='margin:18px auto;max-width:1200px;padding:18px;border:1px solid #cbd5e1;border-radius:14px;background:#fff;color:#0f172a'><h2>Sales Paperwork</h2><p>No sale has been recorded yet. You can prepare an editable Bill of Sale now, or record the sale when it is final.</p><div style='display:flex;gap:10px;flex-wrap:wrap'><a href='{url_for('sale_bill_of_sale', vehicle_id=vehicle_id)}' style='background:#0f766e;color:white;padding:11px 15px;border-radius:9px;text-decoration:none;font-weight:800'>Prepare Editable Bill of Sale</a><a href='#sale' style='background:#2563eb;color:white;padding:11px 15px;border-radius:9px;text-decoration:none;font-weight:800'>Record Sale</a></div></section>"
+    delete_panel = f"<section id='bam-delete-vehicle' style='margin:18px auto 90px;max-width:1200px;padding:18px;border:1px solid #fecaca;border-radius:14px;background:#fff7f7;color:#7f1d1d'><h2>Vehicle Record Actions</h2><p>Delete is permanent. Type <b>{html.escape(str(vehicle['stock_no']))}</b> below to protect against accidental deletion.</p><form method='post' action='{url_for('vehicle_delete', vehicle_id=vehicle_id)}' onsubmit=\"return confirm('Permanently delete this vehicle and its vehicle records? This cannot be undone.')\" style='display:flex;gap:10px;flex-wrap:wrap;align-items:center'><input id='bam-delete-confirm' name='confirm_stock_no' required placeholder='Type {html.escape(str(vehicle['stock_no']))}' autocomplete='off' style='padding:10px;border:1px solid #fca5a5;border-radius:8px;min-width:220px'><button type='submit' style='background:#b91c1c;color:white;border:0;padding:11px 15px;border-radius:9px;font-weight:800;cursor:pointer'>Delete Vehicle</button></form></section>"
     option_markers = [('<option value="Other">Other</option>', '<option value="Sales Receipt / Invoice">Sales Receipt / Invoice</option>'), ("<option value='Other'>Other</option>", "<option value='Sales Receipt / Invoice'>Sales Receipt / Invoice</option>")]
     for marker, addition in option_markers:
         if marker in vehicle_page and 'Sales Receipt / Invoice' not in vehicle_page:
             vehicle_page = vehicle_page.replace(marker, addition + marker, 1)
             break
-    return vehicle_page.replace("</body>", sale_actions + delete_panel + valuation_button + "</body>")
+    top_actions_script = f"""<script>
+(function(){{
+ function addTopActions(){{
+  var nodes=Array.from(document.querySelectorAll('a,button'));
+  var printBtn=nodes.find(function(el){{return (el.textContent||'').trim()==='Print Report';}});
+  if(!printBtn || document.getElementById('bam-top-sales-paperwork')) return;
+  var host=printBtn.parentElement;
+  var sales=document.createElement('a'); sales.id='bam-top-sales-paperwork'; sales.href='{url_for('sale_bill_of_sale', vehicle_id=vehicle_id)}'; sales.textContent='Sales Paperwork'; sales.style.cssText='display:inline-block;background:#0f766e;color:white;padding:10px 14px;border-radius:7px;text-decoration:none;font-weight:800;margin:4px';
+  var del=document.createElement('button'); del.id='bam-top-delete-vehicle'; del.type='button'; del.textContent='Delete Vehicle'; del.style.cssText='background:#b91c1c;color:white;border:0;padding:10px 14px;border-radius:7px;font-weight:800;margin:4px;cursor:pointer';
+  del.onclick=function(){{var panel=document.getElementById('bam-delete-vehicle');if(panel){{panel.scrollIntoView({{behavior:'smooth',block:'center'}});setTimeout(function(){{var inp=document.getElementById('bam-delete-confirm');if(inp)inp.focus();}},450);}}}};
+  host.appendChild(sales); host.appendChild(del);
+ }}
+ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',addTopActions);else addTopActions();
+}})();
+</script>"""
+    return vehicle_page.replace("</body>", sale_actions + delete_panel + valuation_button + top_actions_script + "</body>")
 
 @app.route("/vehicles/<int:vehicle_id>/documents", methods=["POST"])
 @login_required
@@ -3230,7 +3244,7 @@ def sale_invoice(vehicle_id):
     return render_template("sale_invoice.html", vehicle=vehicle, sale=sale, sale_ex_gst=sale_ex_gst)
 
 
-@app.route("/vehicles/<int:vehicle_id>/bill-of-sale")
+@app.route("/vehicles/<int:vehicle_id>/bill-of-sale", methods=["GET", "POST"])
 @login_required
 def sale_bill_of_sale(vehicle_id):
     conn = db()
@@ -3251,6 +3265,30 @@ def sale_bill_of_sale(vehicle_id):
     buyer_address = sale["buyer_address"] if sale else ""
     buyer_phone = sale["buyer_phone"] if sale else ""
     invoice_no = sale["invoice_number"] if sale else ""
+    form = {
+        "sale_date": request.form.get("sale_date", sale_date),
+        "buyer_name": request.form.get("buyer_name", buyer or ""),
+        "buyer_address": request.form.get("buyer_address", buyer_address or ""),
+        "buyer_phone": request.form.get("buyer_phone", buyer_phone or ""),
+        "buyer_email": request.form.get("buyer_email", (sale["buyer_email"] if sale else "") or ""),
+        "sale_price": request.form.get("sale_price", str(price) if price else ""),
+        "payment_method": request.form.get("payment_method", (sale["payment_method"] if sale else "") or ""),
+        "notes": request.form.get("notes", (sale["notes"] if sale else "") or ""),
+    }
+    if request.method == "POST":
+        buyer = form["buyer_name"]
+        buyer_address = form["buyer_address"]
+        buyer_phone = form["buyer_phone"]
+        sale_date = form["sale_date"]
+        try:
+            price = float(str(form["sale_price"] or "0").replace("$", "").replace(",", ""))
+        except ValueError:
+            price = 0
+        try:
+            pretty_date = datetime.strptime(sale_date, "%Y-%m-%d").strftime("%d %B %Y")
+        except (ValueError, TypeError):
+            pretty_date = sale_date or ""
+
     bill_html = r'''<!doctype html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>BAM Bill of Sale</title><style>
@@ -3265,6 +3303,9 @@ body{font-family:Arial,sans-serif;background:#eef2f7;margin:0;color:#111827}.pag
 <div><div class="label">Asset Type</div><div class="field">{{ asset_type }}</div></div><div><div class="label">Stock Number</div><div class="field">{{ vehicle.stock_no }}</div></div><div><div class="label">Year / Make / Model</div><div class="field">{{ vehicle.year or '' }} {{ vehicle.make }} {{ vehicle.model }} {{ vehicle.variant or '' }}</div></div><div><div class="label">Registration</div><div class="field">{{ vehicle.registration or 'N/A' }}</div></div>
 <div class="wide"><div class="label">VIN / Chassis / HIN</div><div class="field">{{ vehicle.vin or vehicle.hin or 'N/A' }}</div></div><div><div class="label">Engine Number / Code</div><div class="field">{{ vehicle.engine_code or 'N/A' }}</div></div><div><div class="label">Odometer / Engine Hours</div><div class="field">{% if vehicle.odometer_km %}{{ '{:,}'.format(vehicle.odometer_km) }} km{% elif vehicle.engine_hours %}{{ vehicle.engine_hours }} hours{% else %}N/A{% endif %}</div></div></div>
 <div class="terms"><p>The seller acknowledges receipt of the sale consideration shown above and transfers the described asset to the buyer, subject to the recorded sale terms and any statutory rights that apply.</p><p>The buyer acknowledges the asset details and condition disclosed at the time of sale. Any warranty or additional conditions recorded on the BAM sales invoice or contract form part of the sale documentation.</p></div><div class="signatures"><div class="sig">Seller signature &amp; date</div><div class="sig">Buyer signature &amp; date</div></div></div></body></html>'''
+    if request.method == "GET":
+        editor_html = r'''<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>BAM Sales Paperwork</title><style>body{font-family:Arial,sans-serif;background:#eef2f7;color:#111827;margin:0}.card{max-width:900px;margin:30px auto;background:white;padding:30px;border-radius:14px;box-shadow:0 4px 20px #0002}.grid{display:grid;grid-template-columns:1fr 1fr;gap:16px 20px}.wide{grid-column:1/-1}label{display:block;font-size:12px;font-weight:800;text-transform:uppercase;color:#475569;margin-bottom:5px}input,select,textarea{width:100%;box-sizing:border-box;padding:11px;border:1px solid #cbd5e1;border-radius:8px;font:inherit}textarea{min-height:100px}.actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:20px}.btn{background:#0f766e;color:#fff;border:0;border-radius:8px;padding:12px 17px;font-weight:800;text-decoration:none;cursor:pointer}.secondary{background:#475569}@media(max-width:650px){.card{margin:0;border-radius:0;padding:22px}.grid{grid-template-columns:1fr}.wide{grid-column:auto}}</style></head><body><div class="card"><h1>Sales Paperwork / Bill of Sale</h1><p>Enter the buyer and sale details. This prepares the Bill of Sale without marking the vehicle Sold.</p><form method="post"><div class="grid"><div><label>Buyer Name</label><input name="buyer_name" value="{{form.buyer_name}}" required></div><div><label>Buyer Phone</label><input name="buyer_phone" value="{{form.buyer_phone}}"></div><div class="wide"><label>Buyer Address</label><input name="buyer_address" value="{{form.buyer_address}}"></div><div><label>Buyer Email</label><input type="email" name="buyer_email" value="{{form.buyer_email}}"></div><div><label>Sale Price (AUD)</label><input name="sale_price" inputmode="decimal" value="{{form.sale_price}}" required></div><div><label>Sale Date</label><input type="date" name="sale_date" value="{{form.sale_date}}" required></div><div><label>Payment Method</label><select name="payment_method"><option value="">Select</option>{% for m in ["Cash","Bank Transfer","EFTPOS","Finance","Cheque","Other"] %}<option value="{{m}}" {% if form.payment_method==m %}selected{% endif %}>{{m}}</option>{% endfor %}</select></div><div class="wide"><label>Sale Notes / Conditions</label><textarea name="notes">{{form.notes}}</textarea></div></div><div class="actions"><button class="btn" type="submit">Create Bill of Sale</button><a class="btn secondary" href="{{back_url}}">Back to Vehicle</a></div></form></div></body></html>'''
+        return render_template_string(editor_html, form=form, back_url=url_for("vehicle_detail", vehicle_id=vehicle_id))
     return render_template_string(bill_html, vehicle=vehicle, sale=sale, asset_type=asset_type, title_asset=title_asset, pretty_date=pretty_date, price=price, buyer=buyer, buyer_address=buyer_address, buyer_phone=buyer_phone, invoice_no=invoice_no, back_url=url_for("vehicle_detail", vehicle_id=vehicle_id))
 
 
