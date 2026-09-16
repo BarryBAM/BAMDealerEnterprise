@@ -63,7 +63,7 @@ app.config.update(
     PERMANENT_SESSION_LIFETIME=timedelta(hours=int(os.environ.get("BAM_SESSION_HOURS", "12"))),
 )
 
-APP_VERSION = "25.19.1"
+APP_VERSION = "25.19.2"
 APP_NAME = "BAM Dealer Enterprise Cloud"
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "").strip()
 OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-5.6-luna").strip() or "gpt-5.6-luna"
@@ -846,6 +846,10 @@ def init_db():
     ensure_column(conn, "auction_vehicles", "comparable_price_3", "REAL DEFAULT 0")
     ensure_column(conn, "auction_vehicles", "comparable_price_4", "REAL DEFAULT 0")
     ensure_column(conn, "auction_vehicles", "comparable_price_5", "REAL DEFAULT 0")
+    # Version 25.19.2 - BAM Live Bid Tracker for saved Auction Watch items.
+    ensure_column(conn, "auction_vehicles", "live_bid_checked_at", "TEXT")
+    ensure_column(conn, "auction_vehicles", "live_bid_status", "TEXT")
+    ensure_column(conn, "auction_vehicles", "live_bid_count", "INTEGER")
 
     count = conn.execute(
         "SELECT COUNT(*) AS c FROM users"
@@ -8080,6 +8084,105 @@ def _fetch_pickles_search_card(stock_id, request_headers):
     return ""
 
 
+def _extract_live_auction_bid(page_html, url=""):
+    """Extract a current public auction bid from a fetched listing page.
+
+    v25.19.2 starts with Grays. The parser checks visible labels plus common
+    embedded JSON/state keys because auction sites can render the same amount in
+    different parts of the page. It deliberately does not place bids.
+    """
+    host = (urllib.parse.urlparse(url or "").netloc or "").lower()
+    if "grays.com" not in host:
+        return {"supported": False, "status": "Live tracking currently supports Grays saved listings."}
+
+    raw = html.unescape(page_html or "").replace("\\/", "/")
+    text = _strip_html(raw)
+    sold_patterns = [
+        r"(?:sold\s+for|sold\s+price|final\s+bid\s+price)\s*[:\-]?\s*\$\s*([\d,]+(?:\.\d{1,2})?)",
+    ]
+    sold = _first_match(text, sold_patterns)
+    sold_value = _number(sold)
+
+    patterns = [
+        r"Current\s+Bid(?:\s*\([^)]*\))?\s*[:\-]?\s*\$\s*([\d,]+(?:\.\d{1,2})?)",
+        r"Highest\s+Bid\s*[:\-]?\s*\$\s*([\d,]+(?:\.\d{1,2})?)",
+        r'["\']currentBid["\']\s*:\s*(?:["\']?\$?\s*)?([\d,]+(?:\.\d{1,2})?)',
+        r'["\']current_bid["\']\s*:\s*(?:["\']?\$?\s*)?([\d,]+(?:\.\d{1,2})?)',
+        r'["\']highestBid["\']\s*:\s*(?:["\']?\$?\s*)?([\d,]+(?:\.\d{1,2})?)',
+        r'currentBid(?:Amount|Value)?\\?["\']?\s*[:=]\s*\\?["\']?\$?\s*([\d,]+(?:\.\d{1,2})?)',
+    ]
+    candidates = []
+    for blob in (text, raw):
+        for pattern in patterns:
+            for match in re.finditer(pattern, blob, flags=re.I):
+                value = _number(match.group(1))
+                if value is not None and 0 <= value < 100_000_000:
+                    candidates.append(value)
+    # Prefer the largest repeated/live amount when multiple stale state values
+    # exist in the HTML. This is appropriate for an ascending auction bid.
+    current = max(candidates) if candidates else None
+
+    bid_count = None
+    count_text = _first_match(text, [
+        r"(?:Bid\s+Count|Number\s+of\s+Bids|Bids)\s*[:\-]?\s*(\d{1,6})\b",
+        r"(\d{1,6})\s+Bids?\b",
+    ])
+    if count_text:
+        try: bid_count = int(count_text)
+        except ValueError: pass
+
+    if sold_value is not None and current is None:
+        return {"supported": True, "current_bid": None, "sold_price": sold_value, "bid_count": bid_count, "status": "Auction finished"}
+    if current is None:
+        return {"supported": True, "current_bid": None, "sold_price": sold_value, "bid_count": bid_count, "status": "Current bid not exposed on the public page"}
+    return {"supported": True, "current_bid": round(current, 2), "sold_price": sold_value, "bid_count": bid_count, "status": "LIVE"}
+
+
+def _fetch_live_auction_bid(url):
+    parsed = _validate_public_http_url(url)
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0 Safari/537.36",
+        "Accept-Language": "en-AU,en;q=0.9",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Cache-Control": "no-cache, no-store",
+        "Pragma": "no-cache",
+    }
+    req = urllib.request.Request(url, headers=headers)
+    with urllib.request.urlopen(req, timeout=15) as response:
+        ctype = (response.headers.get("Content-Type") or "").lower()
+        if "html" not in ctype:
+            raise ValueError("Auction listing did not return a normal web page.")
+        charset = response.headers.get_content_charset() or "utf-8"
+        raw = response.read(4_000_000).decode(charset, errors="ignore")
+    return _extract_live_auction_bid(raw, parsed.geturl())
+
+
+def _refresh_saved_live_bid(conn, item):
+    url = (item["listing_url"] or item["auction_url"] or "").strip()
+    checked = datetime.now().isoformat(timespec="seconds")
+    if not url:
+        conn.execute("UPDATE auction_vehicles SET live_bid_checked_at=?,live_bid_status=? WHERE id=?", (checked, "No auction listing URL saved", item["id"]))
+        return {"ok": False, "id": item["id"], "error": "No auction listing URL saved."}
+    try:
+        result = _fetch_live_auction_bid(url)
+        if not result.get("supported"):
+            status = result.get("status") or "Auction site not supported"
+            conn.execute("UPDATE auction_vehicles SET live_bid_checked_at=?,live_bid_status=? WHERE id=?", (checked, status, item["id"]))
+            return {"ok": False, "id": item["id"], "error": status}
+        values = [checked, result.get("status") or "Checked", result.get("bid_count"), item["id"]]
+        if result.get("current_bid") is not None:
+            conn.execute("UPDATE auction_vehicles SET current_bid=?,live_bid_checked_at=?,live_bid_status=?,live_bid_count=?,updated_at=? WHERE id=?", (result["current_bid"], checked, result.get("status") or "LIVE", result.get("bid_count"), checked, item["id"]))
+        elif result.get("sold_price") is not None:
+            conn.execute("UPDATE auction_vehicles SET sold_price=?,status='Sold',live_bid_checked_at=?,live_bid_status=?,live_bid_count=?,updated_at=? WHERE id=?", (result["sold_price"], checked, result.get("status") or "Auction finished", result.get("bid_count"), checked, item["id"]))
+        else:
+            conn.execute("UPDATE auction_vehicles SET live_bid_checked_at=?,live_bid_status=?,live_bid_count=? WHERE id=?", tuple(values))
+        return {"ok": result.get("current_bid") is not None or result.get("sold_price") is not None, "id": item["id"], **result, "checked_at": checked}
+    except Exception as exc:
+        status = f"Live check failed: {str(exc)[:160]}"
+        conn.execute("UPDATE auction_vehicles SET live_bid_checked_at=?,live_bid_status=? WHERE id=?", (checked, status, item["id"]))
+        return {"ok": False, "id": item["id"], "error": status, "checked_at": checked}
+
+
 def _fetch_listing_page(url):
     parsed = _validate_public_http_url(url)
     source = _detect_listing_source(url)
@@ -8492,11 +8595,35 @@ def _auction_market_value(conn, item):
 
 AUCTION_PAGE = r"""
 <!doctype html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>BAM Buying Watch</title>
-<style>body{font-family:Arial;background:#0f172a;color:#e5e7eb;margin:0}.wrap{max-width:1450px;margin:auto;padding:24px}.top{display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap}.brand{font-size:30px;font-weight:800}.sub,.muted{color:#94a3b8}.btn{display:inline-block;padding:10px 14px;border-radius:9px;background:#2563eb;color:white;text-decoration:none;border:0;font-weight:700;cursor:pointer}.secondary{background:#334155}.panel,.card{background:#111827;border:1px solid #334155;border-radius:14px}.panel{padding:16px;margin-top:16px}.filters{display:grid;grid-template-columns:2fr repeat(5,1fr) auto;gap:10px}.filters input,.filters select{padding:10px;border-radius:8px;border:1px solid #475569;background:#0b1220;color:white}.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:14px;margin-top:16px}.card{overflow:hidden}.thumb{height:190px;background:#020617;display:flex;align-items:center;justify-content:center;color:#64748b}.thumb img{width:100%;height:100%;object-fit:cover}.cardbody{padding:14px}.title{font-size:20px;font-weight:800}.pill{display:inline-block;background:#1e293b;border:1px solid #475569;border-radius:999px;padding:4px 8px;margin:3px 2px;font-size:12px}.price{font-size:18px;font-weight:800;margin-top:8px}.actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}.flash{background:#1e3a8a;padding:10px;border-radius:8px;margin:10px 0}@media(max-width:900px){.filters{grid-template-columns:1fr 1fr}}@media(max-width:550px){.filters{grid-template-columns:1fr}}</style>
-</head><body><div class='wrap'><div class='top'><div><div class='brand'>🔎 BAM Buying Watch</div><div class='sub'>Cars • Boats • Caravans • Trailers • Motorcycles • Other</div></div><div><a class='btn secondary' href='{{url_for("dashboard")}}'>← BAM Dashboard</a> <a class='btn' href='{{url_for("auction_add")}}'>+ Add Watch Vehicle</a></div></div>
+<style>body{font-family:Arial;background:#0f172a;color:#e5e7eb;margin:0}.wrap{max-width:1450px;margin:auto;padding:24px}.top{display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap}.brand{font-size:30px;font-weight:800}.sub,.muted{color:#94a3b8}.btn{display:inline-block;padding:10px 14px;border-radius:9px;background:#2563eb;color:white;text-decoration:none;border:0;font-weight:700;cursor:pointer}.secondary{background:#334155}.panel,.card{background:#111827;border:1px solid #334155;border-radius:14px}.panel{padding:16px;margin-top:16px}.filters{display:grid;grid-template-columns:2fr repeat(5,1fr) auto;gap:10px}.filters input,.filters select{padding:10px;border-radius:8px;border:1px solid #475569;background:#0b1220;color:white}.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:14px;margin-top:16px}.card{overflow:hidden}.thumb{height:190px;background:#020617;display:flex;align-items:center;justify-content:center;color:#64748b}.thumb img{width:100%;height:100%;object-fit:cover}.cardbody{padding:14px}.title{font-size:20px;font-weight:800}.pill{display:inline-block;background:#1e293b;border:1px solid #475569;border-radius:999px;padding:4px 8px;margin:3px 2px;font-size:12px}.price{font-size:18px;font-weight:800;margin-top:8px}.livebid{margin-top:8px;padding:9px 10px;border-radius:9px;background:#052e16;border:1px solid #16a34a}.livebid strong{color:#4ade80;font-size:20px}.live-meta{font-size:11px;color:#94a3b8;margin-top:3px}.actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}.flash{background:#1e3a8a;padding:10px;border-radius:8px;margin:10px 0}@media(max-width:900px){.filters{grid-template-columns:1fr 1fr}}@media(max-width:550px){.filters{grid-template-columns:1fr}}</style>
+</head><body><div class='wrap'><div class='top'><div><div class='brand'>🔎 BAM Buying Watch</div><div class='sub'>Cars • Boats • Caravans • Trailers • Motorcycles • Other</div></div><div><a class='btn secondary' href='{{url_for("dashboard")}}'>← BAM Dashboard</a> <button type='button' class='btn secondary' id='refresh_live_bids'>🔴 Refresh Live Bids</button> <a class='btn' href='{{url_for("auction_add")}}'>+ Add Watch Vehicle</a></div></div>
 {% with messages=get_flashed_messages(with_categories=true) %}{% for cat,msg in messages %}<div class='flash'>{{msg}}</div>{% endfor %}{% endwith %}
 <div class='panel'><form class='filters' method='get'><input name='q' value='{{q}}' placeholder='Search make, model, source, seller, auction, location...'><select name='asset_type'><option value=''>All types</option>{% for x in types %}<option {{'selected' if asset_type==x else ''}}>{{x}}</option>{% endfor %}</select><select name='source'><option value=''>All sources</option>{% for x in sources %}<option {{'selected' if source_filter==x else ''}}>{{x}}</option>{% endfor %}</select><select name='status'><option value=''>All status</option>{% for x in statuses %}<option {{'selected' if status==x else ''}}>{{x}}</option>{% endfor %}</select><input name='make' value='{{make}}' placeholder='Make'><input name='model' value='{{model}}' placeholder='Model'><button class='btn'>Search</button></form></div>
-<div class='cards'>{% for v in rows %}<div class='card'><div class='thumb'>{% if v.thumbnail %}<img src='{{url_for("uploaded_file",filename=v.thumbnail)}}'>{% else %}No photo yet{% endif %}</div><div class='cardbody'><div class='title'>{{v.year or ''}} {{v.make}} {{v.model}}</div><div class='muted'>{{v.variant or ''}} • {{v.listing_source or 'Auction'}}{% if (v.listing_source or 'Auction')=='Auction' %} • {{v.auction_name or 'Auction not set'}} • Lot {{v.lot_number or '-'}}{% else %} • {{v.seller_location or 'Location not set'}}{% endif %}</div><div><span class='pill'>{{v.asset_type}}</span><span class='pill'>{{v.status}}</span>{% if v.odometer_km %}<span class='pill'>{{'{:,}'.format(v.odometer_km)}} km</span>{% endif %}{% if v.transmission %}<span class='pill'>{{v.transmission}}</span>{% endif %}{% if v.drive_type %}<span class='pill'>{{v.drive_type}}</span>{% endif %}</div><div class='price'>{% if (v.listing_source or 'Auction')=='Auction' %}Current ${{'{:,.0f}'.format(v.current_bid or 0)}} · Sold ${{'{:,.0f}'.format(v.sold_price or 0)}}{% else %}Asking ${{'{:,.0f}'.format(v.asking_price or 0)}} · Negotiated ${{'{:,.0f}'.format(v.negotiated_price or 0)}}{% endif %}</div><div class='muted'>Finishes: {{v.auction_finish or 'Not set'}} · {{v.colour or 'Colour not set'}} · {{v.condition_grade or 'Unknown'}}</div><div class='actions'><a class='btn' href='{{url_for("auction_detail",auction_id=v.id)}}'>Open</a><a class='btn secondary' href='{{url_for("auction_watch",make=v.make,model=v.model)}}'>Same Model History</a></div></div></div>{% else %}<div class='panel'>No Buying Watch vehicles match these filters yet.</div>{% endfor %}</div></div></body></html>
+<div class='cards'>{% for v in rows %}<div class='card'><div class='thumb'>{% if v.thumbnail %}<img src='{{url_for("uploaded_file",filename=v.thumbnail)}}'>{% else %}No photo yet{% endif %}</div><div class='cardbody'><div class='title'>{{v.year or ''}} {{v.make}} {{v.model}}</div><div class='muted'>{{v.variant or ''}} • {{v.listing_source or 'Auction'}}{% if (v.listing_source or 'Auction')=='Auction' %} • {{v.auction_name or 'Auction not set'}} • Lot {{v.lot_number or '-'}}{% else %} • {{v.seller_location or 'Location not set'}}{% endif %}</div><div><span class='pill'>{{v.asset_type}}</span><span class='pill'>{{v.status}}</span>{% if v.odometer_km %}<span class='pill'>{{'{:,}'.format(v.odometer_km)}} km</span>{% endif %}{% if v.transmission %}<span class='pill'>{{v.transmission}}</span>{% endif %}{% if v.drive_type %}<span class='pill'>{{v.drive_type}}</span>{% endif %}</div><div class='price'>{% if (v.listing_source or 'Auction')=='Auction' %}Current ${{'{:,.0f}'.format(v.current_bid or 0)}} · Sold ${{'{:,.0f}'.format(v.sold_price or 0)}}{% else %}Asking ${{'{:,.0f}'.format(v.asking_price or 0)}} · Negotiated ${{'{:,.0f}'.format(v.negotiated_price or 0)}}{% endif %}</div>{% if (v.listing_source or 'Auction')=='Auction' and (v.status in ['Watching','Bidding']) %}<div class='livebid' data-live-id='{{v.id}}'><strong>🔴 LIVE BID ${{'{:,.0f}'.format(v.current_bid or 0)}}</strong><div class='live-meta'>{{v.live_bid_status or 'Ready to track'}}{% if v.live_bid_count is not none %} · {{v.live_bid_count}} bids{% endif %} · Last checked {{v.live_bid_checked_at or 'not yet'}}</div></div>{% endif %}<div class='muted'>Finishes: {{v.auction_finish or 'Not set'}} · {{v.colour or 'Colour not set'}} · {{v.condition_grade or 'Unknown'}}</div><div class='actions'><a class='btn' href='{{url_for("auction_detail",auction_id=v.id)}}'>Open</a><a class='btn secondary' href='{{url_for("auction_watch",make=v.make,model=v.model)}}'>Same Model History</a></div></div></div>{% else %}<div class='panel'>No Buying Watch vehicles match these filters yet.</div>{% endfor %}</div></div><script>
+(function(){
+  const btn=document.getElementById('refresh_live_bids');
+  async function refreshLive(silent=false){
+    if(!btn) return;
+    const original=btn.textContent; btn.disabled=true; if(!silent) btn.textContent='⏳ Checking Grays...';
+    try{
+      const r=await fetch('{{url_for("auction_live_bids_refresh")}}',{method:'POST',headers:{'X-Requested-With':'fetch'}});
+      const d=await r.json();
+      if(!r.ok) throw new Error(d.error||'Live bid refresh failed');
+      (d.results||[]).forEach(x=>{
+        const box=document.querySelector('[data-live-id="'+x.id+'"]'); if(!box) return;
+        if(x.current_bid!==undefined && x.current_bid!==null){
+          const strong=box.querySelector('strong'); if(strong) strong.textContent='🔴 LIVE BID $'+Number(x.current_bid).toLocaleString('en-AU',{maximumFractionDigits:0});
+        }
+        const meta=box.querySelector('.live-meta'); if(meta){ meta.textContent=(x.status||x.error||'Checked')+(x.bid_count!==undefined&&x.bid_count!==null?' · '+x.bid_count+' bids':'')+' · Last checked '+(x.checked_at||'now'); }
+      });
+      if(!silent && d.checked===0) alert('No saved Grays items in Watching/Bidding status have a listing URL to track.');
+    }catch(e){ if(!silent) alert('BAM Live Bid Tracker: '+e.message); }
+    finally{ btn.disabled=false; btn.textContent=original; }
+  }
+  if(btn) btn.addEventListener('click',()=>refreshLive(false));
+  if(document.querySelector('[data-live-id]')){ setTimeout(()=>refreshLive(true),2500); setInterval(()=>refreshLive(true),30000); }
+})();
+</script></body></html>
 """
 
 AUCTION_FORM = r"""
@@ -8537,7 +8664,7 @@ AUCTION_FORM = r"""
 <div class='asset-field boat' style='padding-top:24px'><label><input type='checkbox' name='trailer_included' style='width:auto' {{'checked' if item and item.trailer_included else ''}}> Trailer included</label></div>
 <div class='asset-field boat full'><label>Boat Features</label><textarea name='boat_features' rows='16' style='min-height:260px' placeholder='Sounder, GPS, canopy, electric anchor, safety gear...'>{{item.boat_features or "" if item else ""}}</textarea></div>
 <div class='asset-field trailer full'><label>Trailer Features</label><textarea name='trailer_features' placeholder='Brakes, dimensions, ramps, winch, cage, tipping...'>{{item.trailer_features or "" if item else ""}}</textarea></div>
-<div class='market-field'><label>Asking Price</label><input type='number' step='.01' id='asking_price' name='asking_price' value='{{item.asking_price or 0 if item else 0}}'></div><div class='market-field'><label>Negotiated Price</label><input type='number' step='.01' name='negotiated_price' value='{{item.negotiated_price or 0 if item else 0}}'></div><div class='auction-field'><label>Reserve Status</label><select id='reserve_status' name='reserve_status'><option {{'selected' if not item or not item.reserve_status or item.reserve_status=='Unknown' else ''}}>Unknown</option><option {{'selected' if item and item.reserve_status=='No Reserve' else ''}}>No Reserve</option><option {{'selected' if item and item.reserve_status=='Reserve' else ''}}>Reserve</option></select></div><div class='auction-field'><label>Current Bid</label><input type='number' step='.01' id='current_bid' name='current_bid' value='{{item.current_bid or 0 if item else 0}}'></div><div class='auction-field'><label>My Maximum Bid</label><input type='number' step='.01' name='max_bid' value='{{item.max_bid or 0 if item else 0}}'></div><div class='auction-field'><label>Sold Price</label><input type='number' step='.01' name='sold_price' value='{{item.sold_price or 0 if item else 0}}'></div><div class='auction-field'><label>Auction Fees</label><input type='number' step='.01' name='auction_fees' value='{{item.auction_fees or 0 if item else 0}}'></div><div><label>Transport Cost</label><input type='number' step='.01' name='transport_cost' value='{{item.transport_cost or 0 if item else 0}}'></div><div><label>Other Costs</label><input type='number' step='.01' name='other_costs' value='{{item.other_costs or 0 if item else 0}}'></div><div><label>Quick-Sale Value</label><input type='number' step='.01' name='quick_sale_value' value='{{item.quick_sale_value or 0 if item else 0}}'></div><div><label>Repairs / Reconditioning</label><input type='number' step='.01' name='repair_allowance' value='{{item.repair_allowance or 0 if item else 0}}'></div><div><label>Registration / PPSR / Transfer</label><input type='number' step='.01' name='rego_ppsr_cost' value='{{item.rego_ppsr_cost or 0 if item else 0}}'></div><div><label>Target Profit</label><input type='number' step='.01' name='target_profit' value='{{item.target_profit or 0 if item else 0}}'></div><div class='asset-field boat'><label>Boat Engine Service / Repairs</label><input type='number' step='.01' name='boat_engine_cost' value='{{item.boat_engine_cost or 0 if item else 0}}'></div><div class='asset-field boat'><label>Hull Repairs</label><input type='number' step='.01' name='boat_hull_cost' value='{{item.boat_hull_cost or 0 if item else 0}}'></div><div class='asset-field boat'><label>Trailer / Trailer Rego</label><input type='number' step='.01' name='boat_trailer_cost' value='{{item.boat_trailer_cost or 0 if item else 0}}'></div>
+<div class='market-field'><label>Asking Price</label><input type='number' step='.01' id='asking_price' name='asking_price' value='{{item.asking_price or 0 if item else 0}}'></div><div class='market-field'><label>Negotiated Price</label><input type='number' step='.01' name='negotiated_price' value='{{item.negotiated_price or 0 if item else 0}}'></div><div class='auction-field'><label>Reserve Status</label><select id='reserve_status' name='reserve_status'><option {{'selected' if not item or not item.reserve_status or item.reserve_status=='Unknown' else ''}}>Unknown</option><option {{'selected' if item and item.reserve_status=='No Reserve' else ''}}>No Reserve</option><option {{'selected' if item and item.reserve_status=='Reserve' else ''}}>Reserve</option></select></div><div class='auction-field'><label>Current Bid {% if item and item.live_bid_status=='LIVE' %}<span style='color:#4ade80'>● LIVE</span>{% endif %}</label><input type='number' step='.01' id='current_bid' name='current_bid' value='{{item.current_bid or 0 if item else 0}}'>{% if item %}<div class='muted' style='margin-top:5px'>{{item.live_bid_status or 'Live tracking not checked yet'}}{% if item.live_bid_count is not none %} · {{item.live_bid_count}} bids{% endif %}<br>Last live check: {{item.live_bid_checked_at or 'Not yet checked'}}</div><button type='button' class='btn secondary' id='detail_live_bid_btn' style='margin-top:7px'>🔴 Refresh Live Bid</button>{% endif %}</div><div class='auction-field'><label>My Maximum Bid</label><input type='number' step='.01' name='max_bid' value='{{item.max_bid or 0 if item else 0}}'></div><div class='auction-field'><label>Sold Price</label><input type='number' step='.01' name='sold_price' value='{{item.sold_price or 0 if item else 0}}'></div><div class='auction-field'><label>Auction Fees</label><input type='number' step='.01' name='auction_fees' value='{{item.auction_fees or 0 if item else 0}}'></div><div><label>Transport Cost</label><input type='number' step='.01' name='transport_cost' value='{{item.transport_cost or 0 if item else 0}}'></div><div><label>Other Costs</label><input type='number' step='.01' name='other_costs' value='{{item.other_costs or 0 if item else 0}}'></div><div><label>Quick-Sale Value</label><input type='number' step='.01' name='quick_sale_value' value='{{item.quick_sale_value or 0 if item else 0}}'></div><div><label>Repairs / Reconditioning</label><input type='number' step='.01' name='repair_allowance' value='{{item.repair_allowance or 0 if item else 0}}'></div><div><label>Registration / PPSR / Transfer</label><input type='number' step='.01' name='rego_ppsr_cost' value='{{item.rego_ppsr_cost or 0 if item else 0}}'></div><div><label>Target Profit</label><input type='number' step='.01' name='target_profit' value='{{item.target_profit or 0 if item else 0}}'></div><div class='asset-field boat'><label>Boat Engine Service / Repairs</label><input type='number' step='.01' name='boat_engine_cost' value='{{item.boat_engine_cost or 0 if item else 0}}'></div><div class='asset-field boat'><label>Hull Repairs</label><input type='number' step='.01' name='boat_hull_cost' value='{{item.boat_hull_cost or 0 if item else 0}}'></div><div class='asset-field boat'><label>Trailer / Trailer Rego</label><input type='number' step='.01' name='boat_trailer_cost' value='{{item.boat_trailer_cost or 0 if item else 0}}'></div>
 <div class='full' id='pre_save_valuation'><div class='panel' style='margin:8px 0 0'><h2>📊 Enter Market Valuation Before Saving</h2><div class='muted'>Use BAM Automatic Market Valuation to research similar Australian Cars, Boats, Caravans or Trailers and fill up to five advertised prices automatically. You can still edit them manually. BAM calculates the market ranges, puts Market Mid into Quick-Sale Value and updates the buying guide before you save.</div><div class='grid' style='margin-top:12px'><div><label>Comparable 1 ($)</label><input class='pre-comp' type='number' step='.01' min='0' name='comparable_price_1' value='{{item.comparable_price_1 or "" if item else ""}}'></div><div><label>Comparable 2 ($)</label><input class='pre-comp' type='number' step='.01' min='0' name='comparable_price_2' value='{{item.comparable_price_2 or "" if item else ""}}'></div><div><label>Comparable 3 ($)</label><input class='pre-comp' type='number' step='.01' min='0' name='comparable_price_3' value='{{item.comparable_price_3 or "" if item else ""}}'></div><div><label>Comparable 4 ($)</label><input class='pre-comp' type='number' step='.01' min='0' name='comparable_price_4' value='{{item.comparable_price_4 or "" if item else ""}}'></div><div><label>Comparable 5 ($)</label><input class='pre-comp' type='number' step='.01' min='0' name='comparable_price_5' value='{{item.comparable_price_5 or "" if item else ""}}'></div></div><div class='valuation-grid' style='margin-top:12px'><div class='valuation-card'><span>Market Low</span><strong id='pre_market_low'>$0</strong></div><div class='valuation-card'><span>Market Mid / Quick-Sale</span><strong id='pre_market_mid'>$0</strong></div><div class='valuation-card'><span>Market High</span><strong id='pre_market_high'>$0</strong></div><div class='valuation-card'><span>Wholesale Range</span><strong id='pre_wholesale'>$0 – $0</strong></div><div class='valuation-card'><span>Trade Range</span><strong id='pre_trade'>$0 – $0</strong></div><div class='valuation-card'><span>Private Range</span><strong id='pre_private'>$0 – $0</strong></div></div><div class='actions'><button type='button' class='btn good' id='pre_calc_valuation_btn'>Calculate Market Valuation & Buying Guide</button></div><div class='valuation-grid' style='margin-top:12px'><div class='valuation-card'><span>Target Buy Price</span><strong id='pre_target_buy'>$0</strong></div><div class='valuation-card'><span>Maximum Recommended Bid</span><strong id='pre_max_bid'>$0</strong></div><div class='valuation-card'><span>Walk-Away Price</span><strong id='pre_walkaway'>$0</strong></div><div class='valuation-card'><span>Expected Profit</span><strong id='pre_expected_profit'>$0</strong></div><div class='valuation-card'><span>Deal Score</span><strong id='pre_deal_score'>-</strong></div></div><div id='pre_deal_message' class='notice' style='margin-top:12px'>Enter comparable prices and BAM will calculate the buying guide.</div></div></div><div class='full'><label>Listing Description <span class='muted'>(Facebook, Gumtree, auction or other listing)</span></label><textarea id='listing_description' placeholder='Paste or add the full listing description here. BAM will copy it into Condition / Inspection Notes below.'></textarea><div class='muted' style='margin-top:6px'>Use this for Cars, Boats, Caravans and Trailers. The description is kept in Condition / Inspection Notes so the original seller or auction information stays with the watch item.</div></div>
 <div class='full'><label>Condition / Inspection Notes <span class='muted'>(click to open full screen)</span></label><textarea id='condition_notes' name='condition_notes' class='bam-fullscreen-trigger' title='Click to open full-screen Condition / Inspection Notes'>{{item.condition_notes or "" if item else ""}}</textarea><div class='muted' style='margin-top:6px'>Click the Condition box or Inspection Notes to open the large full-screen reader/editor.</div></div><div class='full'><label>Add Listing Photos (maximum 10 total)</label><input id='listing_photo_files' type='file' name='photos' accept='image/*' multiple><div class='actions' style='margin-top:8px'><button type='button' class='btn secondary' id='paste_photo_btn'>📋 Paste Copied Photo</button></div><div class='muted' style='margin-top:6px'>Facebook / Gumtree: right-click a listing photo and choose Copy image, then click Paste Copied Photo. Repeat for more photos, or use Choose Files to select several at once.</div><div id='local_photo_preview' class='photos' style='margin-top:10px'></div><div id='imported_photo_preview' class='photos' style='margin-top:10px'></div></div></div><div class='actions'><button class='btn'>Save Watch Vehicle</button>{% if item %}<a class='btn secondary' href='{{url_for("auction_value",auction_id=item.id)}}'>Get Valuation</a>{% endif %}</div></form></div>
 {% if not item %}<div class='panel'><h2>🇦🇺 BAM Market Valuation</h2><div class='muted'>BAM Automatic Market Valuation researches the Australian market and fills the comparable prices and buying guide before you save. Google is kept as a manual cross-check.</div><div class='actions'><button type='button' class='btn good' id='bam_auto_valuation_btn'>✨ BAM Automatic Market Valuation</button><button type='button' class='btn secondary' id='google_market_valuation_btn'>🔎 Open Google Cross-Check ↗</button></div></div>{% endif %}
@@ -8568,6 +8695,19 @@ if(bamAutoValuationBtn){
       alert('BAM found '+(data.prices||[]).length+' current Australian comparable listing(s). The valuation and buying guide have been filled in. Save the watch item to store them.');
     }catch(err){ alert('BAM Automatic Market Valuation: '+err.message); }
     finally{ bamAutoValuationBtn.disabled=false; bamAutoValuationBtn.textContent=original; }
+  });
+}
+const detailLiveBidBtn = document.getElementById('detail_live_bid_btn');
+if(detailLiveBidBtn){
+  detailLiveBidBtn.addEventListener('click',async()=>{
+    const original=detailLiveBidBtn.textContent; detailLiveBidBtn.disabled=true; detailLiveBidBtn.textContent='⏳ Checking live bid...';
+    try{
+      const r=await fetch('{{url_for("auction_live_bid_refresh",auction_id=item.id) if item else "#"}}',{method:'POST',headers:{'X-Requested-With':'fetch'}});
+      const d=await r.json(); if(!r.ok) throw new Error(d.error||'Live bid refresh failed');
+      if(d.current_bid!==undefined && d.current_bid!==null){ const el=document.getElementById('current_bid'); if(el){el.value=d.current_bid; el.dispatchEvent(new Event('input'));} }
+      alert((d.current_bid!==undefined&&d.current_bid!==null?'Live bid updated to $'+Number(d.current_bid).toLocaleString('en-AU'):(d.status||'Checked'))+'\nLast checked: '+(d.checked_at||'now'));
+    }catch(e){ alert('BAM Live Bid Tracker: '+e.message); }
+    finally{ detailLiveBidBtn.disabled=false; detailLiveBidBtn.textContent=original; }
   });
 }
 const openAuctionUrlBtn = document.getElementById('open_auction_url_btn');
@@ -9020,6 +9160,46 @@ def auction_watch():
     rows=conn.execute(sql,params).fetchall(); conn.close()
     return render_template_string(AUCTION_PAGE,rows=rows,q=q,asset_type=asset_type,status=status,source_filter=source,make=make,model=model,types=AUCTION_TYPES,statuses=AUCTION_STATUSES,sources=BUYING_SOURCES)
 
+
+
+@app.post("/auction-watch/live-bids/refresh")
+@login_required
+def auction_live_bids_refresh():
+    conn = db()
+    try:
+        rows = conn.execute("""SELECT * FROM auction_vehicles
+            WHERE status IN ('Watching','Bidding')
+              AND COALESCE(listing_url,auction_url,'')<>''
+            ORDER BY COALESCE(auction_finish,'9999-12-31T23:59'),id DESC LIMIT 20""").fetchall()
+        # v25.19.2 starts with Grays only; leave other saved auction sites untouched.
+        rows = [r for r in rows if "grays.com" in (urllib.parse.urlparse((r["listing_url"] or r["auction_url"] or "")).netloc or "").lower()]
+        results = [_refresh_saved_live_bid(conn, row) for row in rows]
+        conn.commit()
+        return jsonify(ok=True, checked=len(results), results=results)
+    except Exception as exc:
+        conn.rollback()
+        return jsonify(ok=False, error=str(exc)), 500
+    finally:
+        conn.close()
+
+
+@app.post("/auction-watch/<int:auction_id>/live-bid/refresh")
+@login_required
+def auction_live_bid_refresh(auction_id):
+    conn = db()
+    try:
+        item = conn.execute("SELECT * FROM auction_vehicles WHERE id=?", (auction_id,)).fetchone()
+        if not item:
+            return jsonify(ok=False, error="Auction vehicle not found."), 404
+        result = _refresh_saved_live_bid(conn, item)
+        conn.commit()
+        status_code = 200 if result.get("supported", True) else 400
+        return jsonify(result), status_code
+    except Exception as exc:
+        conn.rollback()
+        return jsonify(ok=False, error=str(exc)), 500
+    finally:
+        conn.close()
 
 
 @app.post("/auction-watch/import-listing")
