@@ -66,7 +66,7 @@ app.config.update(
 APP_VERSION = "25.18.7"
 APP_NAME = "BAM Dealer Enterprise Cloud"
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "").strip()
-OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-5").strip() or "gpt-5"
+OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-5.6-luna").strip() or "gpt-5.6-luna"
 VIN_DECODER_URL = os.environ.get("BAM_VIN_DECODER_URL", "https://vpic.nhtsa.dot.gov/api/vehicles/DecodeVinValuesExtended/{vin}?format=json")
 VIN_DATA_PROVIDER_NAME = os.environ.get("BAM_VIN_DATA_PROVIDER_NAME", "NHTSA vPIC").strip() or "NHTSA vPIC"
 WORKSHOP_PROVIDER_NAME = os.environ.get("BAM_WORKSHOP_PROVIDER_NAME", "eManualOnline").strip() or "eManualOnline"
