@@ -63,7 +63,7 @@ app.config.update(
     PERMANENT_SESSION_LIFETIME=timedelta(hours=int(os.environ.get("BAM_SESSION_HOURS", "12"))),
 )
 
-APP_VERSION = "25.18.9"
+APP_VERSION = "25.19.0"
 APP_NAME = "BAM Dealer Enterprise Cloud"
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "").strip()
 OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-5.6-luna").strip() or "gpt-5.6-luna"
@@ -2354,8 +2354,20 @@ def vehicle_detail(vehicle_id):
         remaining_to_break_even=remaining_to_break_even,
         break_even_status=break_even_status,
     )
+    # v25.19.0 - important sale paperwork and protected vehicle actions on the vehicle record.
     valuation_button = f"<a href=\"{url_for('vehicle_valuation', vehicle_id=vehicle_id)}\" style=\"position:fixed;right:22px;bottom:22px;z-index:9998;background:#15803d;color:white;padding:14px 18px;border-radius:12px;text-decoration:none;font-weight:800\">Market Valuation &amp; Deal Score</a>"
-    return vehicle_page.replace("</body>", valuation_button + "</body>")
+    if sale:
+        sale_actions = f"<section id='bam-sale-paperwork' style='margin:18px auto;max-width:1200px;padding:18px;border:1px solid #cbd5e1;border-radius:14px;background:#fff;color:#0f172a'><h2>Sales Paperwork</h2><p>Sale recorded for <b>{html.escape(str(sale['buyer_name'] or 'Buyer'))}</b>. Invoice <b>{html.escape(str(sale['invoice_number'] or ''))}</b>.</p><div style='display:flex;gap:10px;flex-wrap:wrap'><a href='{url_for('sale_invoice', vehicle_id=vehicle_id)}' style='background:#2563eb;color:white;padding:11px 15px;border-radius:9px;text-decoration:none;font-weight:800'>View / Print Sales Receipt &amp; Invoice</a><a href='{url_for('sale_bill_of_sale', vehicle_id=vehicle_id)}' style='background:#0f766e;color:white;padding:11px 15px;border-radius:9px;text-decoration:none;font-weight:800'>View / Print Bill of Sale</a><a href='{url_for('sale_contract', vehicle_id=vehicle_id)}' style='background:#475569;color:white;padding:11px 15px;border-radius:9px;text-decoration:none;font-weight:800'>Sales Contract</a></div></section>"
+    else:
+        sale_actions = f"<section id='bam-sale-paperwork' style='margin:18px auto;max-width:1200px;padding:18px;border:1px solid #cbd5e1;border-radius:14px;background:#fff;color:#0f172a'><h2>Sales Paperwork</h2><p>No sale has been recorded yet. You can still prepare and print a Bill of Sale.</p><div style='display:flex;gap:10px;flex-wrap:wrap'><a href='{url_for('sale_bill_of_sale', vehicle_id=vehicle_id)}' style='background:#0f766e;color:white;padding:11px 15px;border-radius:9px;text-decoration:none;font-weight:800'>Prepare Bill of Sale</a><a href='#sale' style='background:#2563eb;color:white;padding:11px 15px;border-radius:9px;text-decoration:none;font-weight:800'>Record Sale</a></div></section>"
+    delete_panel = f"<section style='margin:18px auto 90px;max-width:1200px;padding:18px;border:1px solid #fecaca;border-radius:14px;background:#fff7f7;color:#7f1d1d'><h2>Vehicle Record Actions</h2><p>Delete is permanent. Type <b>{html.escape(str(vehicle['stock_no']))}</b> below to protect against accidental deletion.</p><form method='post' action='{url_for('vehicle_delete', vehicle_id=vehicle_id)}' onsubmit=\"return confirm('Permanently delete this vehicle and its vehicle records? This cannot be undone.')\" style='display:flex;gap:10px;flex-wrap:wrap;align-items:center'><input name='confirm_stock_no' required placeholder='Type {html.escape(str(vehicle['stock_no']))}' autocomplete='off' style='padding:10px;border:1px solid #fca5a5;border-radius:8px;min-width:220px'><button type='submit' style='background:#b91c1c;color:white;border:0;padding:11px 15px;border-radius:9px;font-weight:800;cursor:pointer'>Delete Vehicle</button></form></section>"
+    # Add a sales-document choice to the existing Document Centre without changing its upload workflow.
+    option_markers = [('<option value="Other">Other</option>', '<option value="Sales Receipt / Invoice">Sales Receipt / Invoice</option>'), ("<option value='Other'>Other</option>", "<option value='Sales Receipt / Invoice'>Sales Receipt / Invoice</option>")]
+    for marker, addition in option_markers:
+        if marker in vehicle_page and 'Sales Receipt / Invoice' not in vehicle_page:
+            vehicle_page = vehicle_page.replace(marker, addition + marker, 1)
+            break
+    return vehicle_page.replace("</body>", sale_actions + delete_panel + valuation_button + "</body>")
 
 @app.route("/vehicles/<int:vehicle_id>/documents", methods=["POST"])
 @login_required
@@ -3216,6 +3228,74 @@ def sale_invoice(vehicle_id):
         return "Sale invoice is not available until a sale is recorded.", 404
     sale_ex_gst = sale["sale_price_inc_gst"] - sale["sale_gst"]
     return render_template("sale_invoice.html", vehicle=vehicle, sale=sale, sale_ex_gst=sale_ex_gst)
+
+
+@app.route("/vehicles/<int:vehicle_id>/bill-of-sale")
+@login_required
+def sale_bill_of_sale(vehicle_id):
+    conn = db()
+    vehicle = conn.execute("SELECT * FROM vehicles WHERE id=?", (vehicle_id,)).fetchone()
+    sale = conn.execute("SELECT * FROM sales WHERE vehicle_id=?", (vehicle_id,)).fetchone()
+    conn.close()
+    if not vehicle:
+        return "Vehicle not found", 404
+    asset_type = str(vehicle["asset_type"] or "Motor Vehicle")
+    title_asset = "Motor Vehicle" if asset_type.lower() == "car" else asset_type
+    sale_date = (sale["sale_date"] if sale else "") or date.today().isoformat()
+    try:
+        pretty_date = datetime.strptime(sale_date, "%Y-%m-%d").strftime("%d %B %Y")
+    except ValueError:
+        pretty_date = sale_date
+    price = float(sale["sale_price_inc_gst"] or 0) if sale else 0
+    buyer = sale["buyer_name"] if sale else ""
+    buyer_address = sale["buyer_address"] if sale else ""
+    buyer_phone = sale["buyer_phone"] if sale else ""
+    invoice_no = sale["invoice_number"] if sale else ""
+    bill_html = r'''<!doctype html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>BAM Bill of Sale</title><style>
+body{font-family:Arial,sans-serif;background:#eef2f7;margin:0;color:#111827}.page{max-width:850px;margin:28px auto;background:white;padding:48px 56px;box-shadow:0 4px 20px #0002}.brand{text-align:center;border-bottom:3px solid #111827;padding-bottom:18px}.brand h1{margin:0;font-size:30px}.brand p{margin:7px 0 0;letter-spacing:3px}.title{text-align:center;font-size:25px;margin:28px 0}.grid{display:grid;grid-template-columns:1fr 1fr;gap:14px 28px}.field{border-bottom:1px solid #9ca3af;padding:8px 0;min-height:22px}.label{font-size:12px;color:#6b7280;font-weight:bold;text-transform:uppercase}.wide{grid-column:1/-1}.terms{margin-top:28px;line-height:1.5}.signatures{display:grid;grid-template-columns:1fr 1fr;gap:50px;margin-top:70px}.sig{border-top:1px solid #111;padding-top:8px}.actions{max-width:850px;margin:18px auto;display:flex;gap:10px}.btn{background:#2563eb;color:white;padding:11px 16px;border:0;border-radius:8px;text-decoration:none;font-weight:bold;cursor:pointer}.secondary{background:#475569}@media(max-width:650px){.page{margin:0;padding:25px 20px}.grid,.signatures{grid-template-columns:1fr}.wide{grid-column:auto}}@media print{body{background:white}.page{box-shadow:none;margin:0;max-width:none}.actions{display:none}}
+</style></head><body>
+<div class="actions"><button class="btn" onclick="window.print()">Print / Save as PDF</button><a class="btn secondary" href="{{ back_url }}">Back to Vehicle</a></div>
+<div class="page"><div class="brand"><h1>BAM MOTOR GROUP</h1><p>BUY • SELL • TRADE</p></div><h2 class="title">BILL OF SALE — {{ title_asset|upper }}</h2>
+<div class="grid">
+<div><div class="label">Seller</div><div class="field">BAM Motor Group</div></div><div><div class="label">Sale Date</div><div class="field">{{ pretty_date }}</div></div>
+<div><div class="label">Buyer</div><div class="field">{{ buyer or '____________________________' }}</div></div><div><div class="label">Sale Price (AUD, inc. GST where applicable)</div><div class="field">{% if price %}${{ '{:,.2f}'.format(price) }}{% else %}________________{% endif %}</div></div>
+<div class="wide"><div class="label">Buyer Address</div><div class="field">{{ buyer_address or '____________________________________________________________' }}</div></div><div><div class="label">Buyer Phone</div><div class="field">{{ buyer_phone or '____________________________' }}</div></div><div><div class="label">Invoice Number</div><div class="field">{{ invoice_no or '____________________________' }}</div></div>
+<div><div class="label">Asset Type</div><div class="field">{{ asset_type }}</div></div><div><div class="label">Stock Number</div><div class="field">{{ vehicle.stock_no }}</div></div><div><div class="label">Year / Make / Model</div><div class="field">{{ vehicle.year or '' }} {{ vehicle.make }} {{ vehicle.model }} {{ vehicle.variant or '' }}</div></div><div><div class="label">Registration</div><div class="field">{{ vehicle.registration or 'N/A' }}</div></div>
+<div class="wide"><div class="label">VIN / Chassis / HIN</div><div class="field">{{ vehicle.vin or vehicle.hin or 'N/A' }}</div></div><div><div class="label">Engine Number / Code</div><div class="field">{{ vehicle.engine_code or 'N/A' }}</div></div><div><div class="label">Odometer / Engine Hours</div><div class="field">{% if vehicle.odometer_km %}{{ '{:,}'.format(vehicle.odometer_km) }} km{% elif vehicle.engine_hours %}{{ vehicle.engine_hours }} hours{% else %}N/A{% endif %}</div></div></div>
+<div class="terms"><p>The seller acknowledges receipt of the sale consideration shown above and transfers the described asset to the buyer, subject to the recorded sale terms and any statutory rights that apply.</p><p>The buyer acknowledges the asset details and condition disclosed at the time of sale. Any warranty or additional conditions recorded on the BAM sales invoice or contract form part of the sale documentation.</p></div><div class="signatures"><div class="sig">Seller signature &amp; date</div><div class="sig">Buyer signature &amp; date</div></div></div></body></html>'''
+    return render_template_string(bill_html, vehicle=vehicle, sale=sale, asset_type=asset_type, title_asset=title_asset, pretty_date=pretty_date, price=price, buyer=buyer, buyer_address=buyer_address, buyer_phone=buyer_phone, invoice_no=invoice_no, back_url=url_for("vehicle_detail", vehicle_id=vehicle_id))
+
+
+@app.post("/vehicles/<int:vehicle_id>/delete")
+@login_required
+def vehicle_delete(vehicle_id):
+    conn = db()
+    vehicle = conn.execute("SELECT * FROM vehicles WHERE id=?", (vehicle_id,)).fetchone()
+    if not vehicle:
+        conn.close(); return "Vehicle not found", 404
+    supplied = (request.form.get("confirm_stock_no") or "").strip().upper()
+    required = str(vehicle["stock_no"] or "").strip().upper()
+    if not required or supplied != required:
+        conn.close(); flash(f"Vehicle not deleted. Type {vehicle['stock_no']} exactly to confirm.", "error")
+        return redirect(url_for("vehicle_detail", vehicle_id=vehicle_id))
+    photos = conn.execute("SELECT filename FROM vehicle_photos WHERE vehicle_id=?", (vehicle_id,)).fetchall()
+    documents = conn.execute("SELECT filename FROM vehicle_documents WHERE vehicle_id=?", (vehicle_id,)).fetchall()
+    try:
+        conn.execute("UPDATE parts SET vehicle_id=NULL, vehicle_stock_no=COALESCE(vehicle_stock_no, ?) WHERE vehicle_id=?", (vehicle["stock_no"], vehicle_id))
+        conn.execute("DELETE FROM vehicles WHERE id=?", (vehicle_id,))
+        conn.commit()
+    except sqlite3.Error as exc:
+        conn.rollback(); conn.close(); flash(f"Vehicle could not be deleted: {exc}", "error")
+        return redirect(url_for("vehicle_detail", vehicle_id=vehicle_id))
+    conn.close()
+    for row in list(photos) + list(documents):
+        try: (UPLOAD_DIR / row["filename"]).unlink(missing_ok=True)
+        except (OSError, TypeError): pass
+    log_action("Vehicle deleted", "vehicle", vehicle_id, f"{vehicle['stock_no']} {vehicle['make']} {vehicle['model']}")
+    flash(f"{vehicle['stock_no']} was permanently deleted from Vehicle Inventory.", "success")
+    return redirect(url_for("vehicles"))
 
 
 @app.route("/export/vehicles.csv")
