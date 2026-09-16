@@ -63,7 +63,7 @@ app.config.update(
     PERMANENT_SESSION_LIFETIME=timedelta(hours=int(os.environ.get("BAM_SESSION_HOURS", "12"))),
 )
 
-APP_VERSION = "25.20.0"
+APP_VERSION = "25.20.1"
 APP_NAME = "BAM Dealer Enterprise Cloud"
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "").strip()
 OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-5.6-luna").strip() or "gpt-5.6-luna"
@@ -2276,11 +2276,19 @@ def vehicle_detail(vehicle_id):
         * float(row["unit_cost_inc_gst"] or 0)
     )
 
+    # Version 25.20.1 - Storage is a true vehicle cost and follows who paid it.
+    # BAM and Shared storage are joint costs, split equally between Barry and Matt.
+    barry_storage, matt_storage = split_partner_costs(
+        storage_records,
+        storage_accrued_amount
+    )
+
     barry_invested += (
         barry_expenses
         + barry_jobs
         + barry_services
         + barry_parts
+        + barry_storage
         + selling_costs / 2
     )
 
@@ -2289,6 +2297,7 @@ def vehicle_detail(vehicle_id):
         + matt_jobs
         + matt_services
         + matt_parts
+        + matt_storage
         + selling_costs / 2
     )
 
@@ -9534,7 +9543,7 @@ def readiness_check():
 # Gunicorn imports this module rather than executing it as __main__.
 init_db()
 
-# Version 25.20.0 - Business Expenses & Vehicle Storage
+# Version 25.20.1 - Business Expenses, Vehicle Storage & Financial Integration
 BUSINESS_EXPENSE_CATEGORIES = ["Vehicle Storage","Yard / Factory Rent","Water","Electricity","Gas","Strata / Body Corporate","Insurance","Business Registration / Licensing","Tax / Accounting","Building / Maintenance","Council Rates","Phone / Internet","Security","Cleaning","Tools / Equipment","Bank Fees","Advertising","Other"]
 EXPENSE_FREQUENCIES = ["One-off","Weekly","Fortnightly","Monthly","Quarterly","Yearly"]
 STORAGE_PERIODS = ["Daily","Weekly","Fortnightly","Monthly"]
@@ -9565,10 +9574,10 @@ def business_expenses():
     conn.close()
     template='''{% extends "base.html" %}{% block content %}
 <style>.bo-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px}.bo-card,.bo-panel{background:#fff;border:1px solid #dbe3ea;border-radius:14px;padding:16px;margin-bottom:16px}.bo-card b{font-size:1.45rem}.bo-form{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px}.bo-form input,.bo-form select,.bo-form textarea{width:100%;box-sizing:border-box;padding:10px;border:1px solid #cbd5e1;border-radius:8px}.bo-table{width:100%;border-collapse:collapse}.bo-table th,.bo-table td{padding:9px;border-bottom:1px solid #e2e8f0;text-align:left}.bo-btn{background:#0f766e;color:white;border:0;border-radius:8px;padding:10px 14px;font-weight:800;cursor:pointer}.muted{color:#64748b;font-size:.9rem}@media(max-width:700px){.bo-panel{overflow:auto}.bo-table{font-size:.82rem}}</style>
-<h1>Business Expenses &amp; Storage</h1><p class="muted">BAM overheads, recurring costs and vehicle storage in one place.</p>
+<h1>Business Expenses &amp; Storage</h1><p class="muted">BAM overheads, recurring costs and vehicle storage in one place. Storage automatically flows into each vehicle’s Total Invested, partner contribution and profit/loss.</p>
 <div class="bo-grid"><div class="bo-card">This Month<br><b>${{ '%.2f'|format(month_total) }}</b></div><div class="bo-card">Financial Year<br><b>${{ '%.2f'|format(fy_total) }}</b></div><div class="bo-card">GST Recorded FY<br><b>${{ '%.2f'|format(gst_total) }}</b></div><div class="bo-card">Active Storage Accrued<br><b>${{ '%.2f'|format(active_storage_total) }}</b></div></div>
 <div class="bo-panel"><h2>Add Business Expense / Overhead</h2><form method="post" action="{{url_for('business_expense_add')}}" class="bo-form"><input type="date" name="expense_date" value="{{today}}" required><select name="category">{% for x in categories %}<option>{{x}}</option>{% endfor %}</select><input name="description" placeholder="Description" required><input name="supplier" placeholder="Supplier / payee"><input type="number" step="0.01" min="0" name="amount_inc_gst" placeholder="Amount inc GST" required><input type="number" step="0.01" min="0" name="gst_amount" placeholder="GST amount"><select name="paid_by"><option>BAM</option><option>Barry</option><option>Matt</option><option>Shared</option></select><select name="frequency">{% for x in frequencies %}<option>{{x}}</option>{% endfor %}</select><input type="date" name="due_date"><input type="date" name="paid_date"><select name="status"><option>Paid</option><option>Due</option><option>Scheduled</option></select><textarea name="notes" placeholder="Notes"></textarea><button class="bo-btn">Save Business Expense</button></form></div>
-<div class="bo-panel"><h2>Vehicle Storage</h2><p class="muted">Choose Daily, Weekly, Fortnightly or Monthly. BAM automatically accrues storage until you stop it.</p><form method="post" action="{{url_for('vehicle_storage_add')}}" class="bo-form"><select name="vehicle_id" required><option value="">Select BAM vehicle</option>{% for v in vehicles %}<option value="{{v.id}}">{{v.stock_no}} — {{v.year or ''}} {{v.make}} {{v.model}}</option>{% endfor %}</select><input name="provider" placeholder="Storage provider"><input name="location" placeholder="Storage location"><input type="date" name="start_date" value="{{today}}" required><input type="number" step="0.01" min="0" name="rate" placeholder="Storage rate $" required><select name="rate_period">{% for x in storage_periods %}<option>{{x}}</option>{% endfor %}</select><select name="paid_by"><option>BAM</option><option>Barry</option><option>Matt</option><option>Shared</option></select><select name="gst_included"><option value="1">GST included</option><option value="0">No GST</option></select><textarea name="notes" placeholder="Storage notes"></textarea><button class="bo-btn">Start Storage</button></form></div>
+<div class="bo-panel"><h2>Vehicle Storage</h2><p class="muted">Choose Daily, Weekly, Fortnightly or Monthly. BAM automatically accrues storage until you stop it. Barry or Matt payments are assigned to that partner; BAM or Shared costs are split 50/50.</p><form method="post" action="{{url_for('vehicle_storage_add')}}" class="bo-form"><select name="vehicle_id" required><option value="">Select BAM vehicle</option>{% for v in vehicles %}<option value="{{v.id}}">{{v.stock_no}} — {{v.year or ''}} {{v.make}} {{v.model}}</option>{% endfor %}</select><input name="provider" placeholder="Storage provider"><input name="location" placeholder="Storage location"><input type="date" name="start_date" value="{{today}}" required><input type="number" step="0.01" min="0" name="rate" placeholder="Storage rate $" required><select name="rate_period">{% for x in storage_periods %}<option>{{x}}</option>{% endfor %}</select><select name="paid_by"><option>BAM</option><option>Barry</option><option>Matt</option><option>Shared</option></select><select name="gst_included"><option value="1">GST included</option><option value="0">No GST</option></select><textarea name="notes" placeholder="Storage notes"></textarea><button class="bo-btn">Start Storage</button></form></div>
 <div class="bo-panel"><h2>Current &amp; Previous Storage</h2><table class="bo-table"><tr><th>Vehicle</th><th>Provider / Location</th><th>Dates</th><th>Rate</th><th>Accrued</th><th></th></tr>{% for r in storage %}<tr><td><a href="{{url_for('vehicle_detail',vehicle_id=r.vehicle_id)}}">{{r.stock_no}}</a><br>{{r.year or ''}} {{r.make}} {{r.model}}</td><td>{{r.provider or '—'}}<br>{{r.location or ''}}</td><td>{{r.start_date}} → {{r.end_date or 'ACTIVE'}}</td><td>${{ '%.2f'|format(r.rate or 0) }} / {{r.rate_period}}</td><td><b>${{ '%.2f'|format(r.accrued) }}</b></td><td>{% if not r.end_date %}<form method="post" action="{{url_for('vehicle_storage_stop',storage_id=r.id)}}"><button class="bo-btn">Stop Today</button></form>{% endif %}</td></tr>{% else %}<tr><td colspan="6">No storage recorded yet.</td></tr>{% endfor %}</table></div>
 <div class="bo-panel"><h2>Business Expense History</h2><table class="bo-table"><tr><th>Date</th><th>Category</th><th>Description</th><th>Supplier</th><th>Frequency</th><th>Paid By</th><th>Amount</th><th>GST</th><th>Status</th></tr>{% for r in expenses %}<tr><td>{{r.expense_date}}</td><td>{{r.category}}</td><td>{{r.description}}</td><td>{{r.supplier or '—'}}</td><td>{{r.frequency}}</td><td>{{r.paid_by}}</td><td>${{ '%.2f'|format(r.amount_inc_gst or 0) }}</td><td>${{ '%.2f'|format(r.gst_amount or 0) }}</td><td>{{r.status}}</td></tr>{% else %}<tr><td colspan="9">No business expenses recorded yet.</td></tr>{% endfor %}</table></div>
 {% endblock %}'''
