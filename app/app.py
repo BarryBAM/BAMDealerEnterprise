@@ -63,7 +63,7 @@ app.config.update(
     PERMANENT_SESSION_LIFETIME=timedelta(hours=int(os.environ.get("BAM_SESSION_HOURS", "12"))),
 )
 
-APP_VERSION = "25.19.5"
+APP_VERSION = "25.20.0"
 APP_NAME = "BAM Dealer Enterprise Cloud"
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "").strip()
 OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-5.6-luna").strip() or "gpt-5.6-luna"
@@ -850,6 +850,14 @@ def init_db():
     ensure_column(conn, "auction_vehicles", "live_bid_checked_at", "TEXT")
     ensure_column(conn, "auction_vehicles", "live_bid_status", "TEXT")
     ensure_column(conn, "auction_vehicles", "live_bid_count", "INTEGER")
+
+    # Version 25.20.0 - BAM Business Expenses & Vehicle Storage.
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS business_expenses (id INTEGER PRIMARY KEY AUTOINCREMENT,expense_date TEXT NOT NULL,category TEXT NOT NULL,description TEXT NOT NULL,supplier TEXT,amount_inc_gst REAL NOT NULL DEFAULT 0,gst_amount REAL NOT NULL DEFAULT 0,paid_by TEXT NOT NULL DEFAULT 'BAM',frequency TEXT NOT NULL DEFAULT 'One-off',due_date TEXT,paid_date TEXT,status TEXT NOT NULL DEFAULT 'Paid',notes TEXT,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+        CREATE TABLE IF NOT EXISTS vehicle_storage (id INTEGER PRIMARY KEY AUTOINCREMENT,vehicle_id INTEGER NOT NULL,provider TEXT,location TEXT,start_date TEXT NOT NULL,end_date TEXT,rate REAL NOT NULL DEFAULT 0,rate_period TEXT NOT NULL DEFAULT 'Weekly',gst_included INTEGER NOT NULL DEFAULT 1,paid_by TEXT NOT NULL DEFAULT 'BAM',notes TEXT,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,FOREIGN KEY(vehicle_id) REFERENCES vehicles(id) ON DELETE CASCADE);
+        CREATE INDEX IF NOT EXISTS idx_business_expense_date ON business_expenses(expense_date);
+        CREATE INDEX IF NOT EXISTS idx_vehicle_storage_vehicle ON vehicle_storage(vehicle_id);
+    """)
 
     count = conn.execute(
         "SELECT COUNT(*) AS c FROM users"
@@ -2201,9 +2209,11 @@ def vehicle_detail(vehicle_id):
     )
     service_total = sum(float(row["cost_inc_gst"] or 0) for row in services)
     parts_total = sum(float(row["quantity_used"] or 0) * float(row["unit_cost_inc_gst"] or 0) for row in parts_used)
+    storage_records = conn.execute("SELECT * FROM vehicle_storage WHERE vehicle_id=? ORDER BY start_date DESC,id DESC", (vehicle_id,)).fetchall()
+    storage_total = sum(storage_accrued_amount(row) for row in storage_records)
     sale_price = float(sale["sale_price_inc_gst"] or 0) if sale else 0
     selling_costs = float((sale["advertising_cost"] or 0) + (sale["transfer_cost"] or 0)) if sale else 0
-    total_invested = float(vehicle["purchase_price_inc_gst"] or 0) + expense_total + job_total + service_total + parts_total + selling_costs
+    total_invested = float(vehicle["purchase_price_inc_gst"] or 0) + expense_total + job_total + service_total + parts_total + storage_total + selling_costs
 
     def split_partner_costs(rows, amount_func):
         barry = 0.0
@@ -2340,6 +2350,8 @@ def vehicle_detail(vehicle_id):
         job_total=job_total,
         service_total=service_total,
         parts_total=parts_total,
+        storage_total=storage_total,
+        storage_records=storage_records,
         total_invested=total_invested,
         profit=profit,
         barry_invested=barry_invested,
@@ -9521,6 +9533,82 @@ def readiness_check():
 
 # Gunicorn imports this module rather than executing it as __main__.
 init_db()
+
+# Version 25.20.0 - Business Expenses & Vehicle Storage
+BUSINESS_EXPENSE_CATEGORIES = ["Vehicle Storage","Yard / Factory Rent","Water","Electricity","Gas","Strata / Body Corporate","Insurance","Business Registration / Licensing","Tax / Accounting","Building / Maintenance","Council Rates","Phone / Internet","Security","Cleaning","Tools / Equipment","Bank Fees","Advertising","Other"]
+EXPENSE_FREQUENCIES = ["One-off","Weekly","Fortnightly","Monthly","Quarterly","Yearly"]
+STORAGE_PERIODS = ["Daily","Weekly","Fortnightly","Monthly"]
+
+def storage_accrued_amount(row, as_of=None):
+    try: start=datetime.strptime(str(row["start_date"]),"%Y-%m-%d").date()
+    except (TypeError,ValueError): return 0.0
+    try: end=datetime.strptime(str(row["end_date"]),"%Y-%m-%d").date() if row["end_date"] else (as_of or date.today())
+    except ValueError: end=as_of or date.today()
+    if end < start: return 0.0
+    days=(end-start).days+1
+    divisor={"Daily":1,"Weekly":7,"Fortnightly":14,"Monthly":30.4375}.get(str(row["rate_period"] or "Weekly"),7)
+    import math
+    return round(float(row["rate"] or 0)*max(1,math.ceil(days/divisor)),2)
+
+@app.route("/business-expenses")
+@login_required
+def business_expenses():
+    conn=db(); expenses=conn.execute("SELECT * FROM business_expenses ORDER BY expense_date DESC,id DESC").fetchall()
+    raw_storage=conn.execute("SELECT vs.*,v.stock_no,v.year,v.make,v.model FROM vehicle_storage vs JOIN vehicles v ON v.id=vs.vehicle_id ORDER BY CASE WHEN COALESCE(vs.end_date,'')='' THEN 0 ELSE 1 END,vs.start_date DESC,vs.id DESC").fetchall()
+    vehicles=conn.execute("SELECT id,stock_no,year,make,model FROM vehicles ORDER BY stock_no DESC").fetchall()
+    today=date.today(); month=today.strftime('%Y-%m'); fy_start=date(today.year if today.month>=7 else today.year-1,7,1).isoformat()
+    month_total=sum(float(r['amount_inc_gst'] or 0) for r in expenses if str(r['expense_date'] or '').startswith(month)); fy_total=sum(float(r['amount_inc_gst'] or 0) for r in expenses if str(r['expense_date'] or '')>=fy_start); gst_total=sum(float(r['gst_amount'] or 0) for r in expenses if str(r['expense_date'] or '')>=fy_start)
+    storage=[]; active_storage_total=0.0
+    for r in raw_storage:
+        d=dict(r); d['accrued']=storage_accrued_amount(r); storage.append(d)
+        if not r['end_date']: active_storage_total+=d['accrued']
+    conn.close()
+    template='''{% extends "base.html" %}{% block content %}
+<style>.bo-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px}.bo-card,.bo-panel{background:#fff;border:1px solid #dbe3ea;border-radius:14px;padding:16px;margin-bottom:16px}.bo-card b{font-size:1.45rem}.bo-form{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px}.bo-form input,.bo-form select,.bo-form textarea{width:100%;box-sizing:border-box;padding:10px;border:1px solid #cbd5e1;border-radius:8px}.bo-table{width:100%;border-collapse:collapse}.bo-table th,.bo-table td{padding:9px;border-bottom:1px solid #e2e8f0;text-align:left}.bo-btn{background:#0f766e;color:white;border:0;border-radius:8px;padding:10px 14px;font-weight:800;cursor:pointer}.muted{color:#64748b;font-size:.9rem}@media(max-width:700px){.bo-panel{overflow:auto}.bo-table{font-size:.82rem}}</style>
+<h1>Business Expenses &amp; Storage</h1><p class="muted">BAM overheads, recurring costs and vehicle storage in one place.</p>
+<div class="bo-grid"><div class="bo-card">This Month<br><b>${{ '%.2f'|format(month_total) }}</b></div><div class="bo-card">Financial Year<br><b>${{ '%.2f'|format(fy_total) }}</b></div><div class="bo-card">GST Recorded FY<br><b>${{ '%.2f'|format(gst_total) }}</b></div><div class="bo-card">Active Storage Accrued<br><b>${{ '%.2f'|format(active_storage_total) }}</b></div></div>
+<div class="bo-panel"><h2>Add Business Expense / Overhead</h2><form method="post" action="{{url_for('business_expense_add')}}" class="bo-form"><input type="date" name="expense_date" value="{{today}}" required><select name="category">{% for x in categories %}<option>{{x}}</option>{% endfor %}</select><input name="description" placeholder="Description" required><input name="supplier" placeholder="Supplier / payee"><input type="number" step="0.01" min="0" name="amount_inc_gst" placeholder="Amount inc GST" required><input type="number" step="0.01" min="0" name="gst_amount" placeholder="GST amount"><select name="paid_by"><option>BAM</option><option>Barry</option><option>Matt</option><option>Shared</option></select><select name="frequency">{% for x in frequencies %}<option>{{x}}</option>{% endfor %}</select><input type="date" name="due_date"><input type="date" name="paid_date"><select name="status"><option>Paid</option><option>Due</option><option>Scheduled</option></select><textarea name="notes" placeholder="Notes"></textarea><button class="bo-btn">Save Business Expense</button></form></div>
+<div class="bo-panel"><h2>Vehicle Storage</h2><p class="muted">Choose Daily, Weekly, Fortnightly or Monthly. BAM automatically accrues storage until you stop it.</p><form method="post" action="{{url_for('vehicle_storage_add')}}" class="bo-form"><select name="vehicle_id" required><option value="">Select BAM vehicle</option>{% for v in vehicles %}<option value="{{v.id}}">{{v.stock_no}} — {{v.year or ''}} {{v.make}} {{v.model}}</option>{% endfor %}</select><input name="provider" placeholder="Storage provider"><input name="location" placeholder="Storage location"><input type="date" name="start_date" value="{{today}}" required><input type="number" step="0.01" min="0" name="rate" placeholder="Storage rate $" required><select name="rate_period">{% for x in storage_periods %}<option>{{x}}</option>{% endfor %}</select><select name="paid_by"><option>BAM</option><option>Barry</option><option>Matt</option><option>Shared</option></select><select name="gst_included"><option value="1">GST included</option><option value="0">No GST</option></select><textarea name="notes" placeholder="Storage notes"></textarea><button class="bo-btn">Start Storage</button></form></div>
+<div class="bo-panel"><h2>Current &amp; Previous Storage</h2><table class="bo-table"><tr><th>Vehicle</th><th>Provider / Location</th><th>Dates</th><th>Rate</th><th>Accrued</th><th></th></tr>{% for r in storage %}<tr><td><a href="{{url_for('vehicle_detail',vehicle_id=r.vehicle_id)}}">{{r.stock_no}}</a><br>{{r.year or ''}} {{r.make}} {{r.model}}</td><td>{{r.provider or '—'}}<br>{{r.location or ''}}</td><td>{{r.start_date}} → {{r.end_date or 'ACTIVE'}}</td><td>${{ '%.2f'|format(r.rate or 0) }} / {{r.rate_period}}</td><td><b>${{ '%.2f'|format(r.accrued) }}</b></td><td>{% if not r.end_date %}<form method="post" action="{{url_for('vehicle_storage_stop',storage_id=r.id)}}"><button class="bo-btn">Stop Today</button></form>{% endif %}</td></tr>{% else %}<tr><td colspan="6">No storage recorded yet.</td></tr>{% endfor %}</table></div>
+<div class="bo-panel"><h2>Business Expense History</h2><table class="bo-table"><tr><th>Date</th><th>Category</th><th>Description</th><th>Supplier</th><th>Frequency</th><th>Paid By</th><th>Amount</th><th>GST</th><th>Status</th></tr>{% for r in expenses %}<tr><td>{{r.expense_date}}</td><td>{{r.category}}</td><td>{{r.description}}</td><td>{{r.supplier or '—'}}</td><td>{{r.frequency}}</td><td>{{r.paid_by}}</td><td>${{ '%.2f'|format(r.amount_inc_gst or 0) }}</td><td>${{ '%.2f'|format(r.gst_amount or 0) }}</td><td>{{r.status}}</td></tr>{% else %}<tr><td colspan="9">No business expenses recorded yet.</td></tr>{% endfor %}</table></div>
+{% endblock %}'''
+    return render_template_string(template,expenses=expenses,storage=storage,vehicles=vehicles,categories=BUSINESS_EXPENSE_CATEGORIES,frequencies=EXPENSE_FREQUENCIES,storage_periods=STORAGE_PERIODS,today=today.isoformat(),month_total=month_total,fy_total=fy_total,gst_total=gst_total,active_storage_total=active_storage_total)
+
+@app.route("/business-expenses/add",methods=["POST"])
+@login_required
+def business_expense_add():
+    conn=db()
+    try:
+        conn.execute("INSERT INTO business_expenses(expense_date,category,description,supplier,amount_inc_gst,gst_amount,paid_by,frequency,due_date,paid_date,status,notes) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",(request.form.get('expense_date'),request.form.get('category'),request.form.get('description','').strip(),request.form.get('supplier','').strip() or None,float(request.form.get('amount_inc_gst') or 0),float(request.form.get('gst_amount') or 0),request.form.get('paid_by') or 'BAM',request.form.get('frequency') or 'One-off',request.form.get('due_date') or None,request.form.get('paid_date') or None,request.form.get('status') or 'Paid',request.form.get('notes','').strip() or None)); conn.commit(); flash('Business expense saved.','success')
+    except (ValueError,sqlite3.Error) as exc: conn.rollback(); flash(str(exc),'error')
+    finally: conn.close()
+    return redirect(url_for('business_expenses'))
+
+@app.route("/business-expenses/storage/add",methods=["POST"])
+@login_required
+def vehicle_storage_add():
+    conn=db()
+    try:
+        conn.execute("INSERT INTO vehicle_storage(vehicle_id,provider,location,start_date,rate,rate_period,gst_included,paid_by,notes) VALUES(?,?,?,?,?,?,?,?,?)",(int(request.form.get('vehicle_id')),request.form.get('provider','').strip() or None,request.form.get('location','').strip() or None,request.form.get('start_date'),float(request.form.get('rate') or 0),request.form.get('rate_period') or 'Weekly',1 if request.form.get('gst_included')=='1' else 0,request.form.get('paid_by') or 'BAM',request.form.get('notes','').strip() or None)); conn.commit(); flash('Vehicle storage started.','success')
+    except (ValueError,sqlite3.Error) as exc: conn.rollback(); flash(str(exc),'error')
+    finally: conn.close()
+    return redirect(url_for('business_expenses'))
+
+@app.route("/business-expenses/storage/<int:storage_id>/stop",methods=["POST"])
+@login_required
+def vehicle_storage_stop(storage_id):
+    conn=db(); conn.execute("UPDATE vehicle_storage SET end_date=? WHERE id=? AND COALESCE(end_date,'')=''",(date.today().isoformat(),storage_id)); conn.commit(); conn.close(); flash('Storage stopped and total frozen.','success'); return redirect(url_for('business_expenses'))
+
+@app.after_request
+def bam_business_expenses_nav(response):
+    if response.status_code==200 and 'text/html' in response.headers.get('Content-Type','') and not response.direct_passthrough:
+        try:
+            text=response.get_data(as_text=True)
+            if 'bam-business-expenses-nav' not in text and '</body>' in text.lower():
+                script='''<script id="bam-business-expenses-nav">(function(){function add(){if(document.getElementById('bam-business-expenses-link'))return;var links=Array.from(document.querySelectorAll('a'));var anchor=links.find(function(a){return (a.textContent||'').indexOf('Executive Dashboard')>=0;})||links.find(function(a){return (a.textContent||'').indexOf('Vehicle Inventory')>=0;});if(!anchor)return;var a=document.createElement('a');a.id='bam-business-expenses-link';a.href='/business-expenses';a.textContent='Business Expenses & Storage';a.className=anchor.className;a.style.cssText=anchor.style.cssText;a.style.display='block';anchor.insertAdjacentElement('afterend',a);}if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',add);else add();})();</script>'''
+                pos=text.lower().rfind('</body>'); text=text[:pos]+script+text[pos:]; response.set_data(text); response.headers['Content-Length']=str(len(response.get_data()))
+        except Exception: pass
+    return response
 
 if __name__ == "__main__":
     app.run(
