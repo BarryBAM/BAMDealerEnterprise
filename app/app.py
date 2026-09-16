@@ -63,7 +63,7 @@ app.config.update(
     PERMANENT_SESSION_LIFETIME=timedelta(hours=int(os.environ.get("BAM_SESSION_HOURS", "12"))),
 )
 
-APP_VERSION = "25.19.2"
+APP_VERSION = "25.19.3"
 APP_NAME = "BAM Dealer Enterprise Cloud"
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "").strip()
 OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-5.6-luna").strip() or "gpt-5.6-luna"
@@ -6834,6 +6834,61 @@ def _extract_listing_details(raw_text, url="", title="", description=""):
 
     # Extra Grays labels that are reliable on vehicle lot pages.
     if "grays.com" in (urllib.parse.urlparse(url or "").netloc or "").lower():
+        # v25.19.3 - Grays vehicle identity repair.  Some Grays car pages expose
+        # Year/VIN/rego/specifications correctly but their Make/Model/Variant are
+        # outside BAM's catalogue.  Read Grays' own labelled fields first, then
+        # fall back to the lot title so saved watch vehicles keep their identity.
+        grays_make = _first_match(source_text, [
+            r"(?:^|\s)Make\s*[:\-]?\s*([A-Za-z][A-Za-z0-9 .&'/-]{1,40}?)(?=\s+(?:Model|Variant|Series|Body\s+Type|Year)\b)",
+        ], flags=re.I | re.S)
+        grays_model = _first_match(source_text, [
+            r"(?:^|\s)Model\s*[:\-]?\s*([A-Za-z0-9][A-Za-z0-9 .&'/-]{0,60}?)(?=\s+(?:Variant|Series|Body\s+Type|Year|VIN|Registration)\b)",
+        ], flags=re.I | re.S)
+        grays_variant = _first_match(source_text, [
+            r"(?:^|\s)(?:Variant|Series)\s*[:\-]?\s*([A-Za-z0-9][A-Za-z0-9 .&'()+/-]{0,70}?)(?=\s+(?:Body\s+Type|Year|VIN|Registration|Engine|Transmission|Fuel|Drive)\b)",
+        ], flags=re.I | re.S)
+
+        def _clean_grays_identity(value, limit):
+            value = re.sub(r"\s+", " ", str(value or "")).strip(" ,.-")
+            if not value or len(value) > limit:
+                return ""
+            bad = {"make", "model", "variant", "series", "body type", "year", "vehicle"}
+            return "" if value.lower() in bad else value
+
+        grays_make = _clean_grays_identity(grays_make, 40)
+        grays_model = _clean_grays_identity(grays_model, 60)
+        grays_variant = _clean_grays_identity(grays_variant, 70)
+        if grays_make: details["make"] = grays_make.upper() if grays_make.lower() == "mini" else grays_make.title()
+        if grays_model: details["model"] = grays_model
+        if grays_variant: details["variant"] = grays_variant
+
+        # Title fallback, e.g. "2010 MINI Cooper ... Auction (...) | Grays".
+        if not details.get("make") or not details.get("model"):
+            gt = re.sub(r"\s+", " ", _strip_html(title or "")).strip()
+            gt = re.split(r"\s+(?:Auction\b|\|\s*Grays\b|Grays Australia\b)", gt, maxsplit=1, flags=re.I)[0].strip(" -|,")
+            tm = re.match(r"^(?:(?:19|20)\d{2})\s+(.+)$", gt, flags=re.I)
+            rest = tm.group(1).strip() if tm else ""
+            if rest:
+                known_makes = sorted(set(VEHICLE_MODEL_CATALOG.keys()) | {"MINI", "Jeep", "Porsche", "Fiat", "Citroen", "Peugeot", "Alfa Romeo", "Chrysler"}, key=len, reverse=True)
+                title_make = next((m for m in known_makes if re.match(rf"^{re.escape(m)}(?:\s|$)", rest, flags=re.I)), "")
+                if title_make:
+                    remainder = re.sub(rf"^{re.escape(title_make)}\s*", "", rest, count=1, flags=re.I).strip()
+                    models = list(VEHICLE_MODEL_CATALOG.get(title_make, []))
+                    if title_make == "MINI": models = ["Cooper S", "Cooper", "Clubman", "Countryman", "Paceman", "One"]
+                    title_model = next((m for m in sorted(models, key=len, reverse=True) if re.match(rf"^{re.escape(m)}(?:\s|$)", remainder, flags=re.I)), "")
+                    if not title_model:
+                        mm = re.match(r"^([A-Za-z0-9][A-Za-z0-9-]{0,30})(?:\s+|$)(.*)$", remainder)
+                        title_model = mm.group(1) if mm else remainder
+                    if title_make and not details.get("make"):
+                        details["make"] = "MINI" if title_make.upper() == "MINI" else title_make
+                    if title_model and not details.get("model"):
+                        details["model"] = title_model
+                    if title_model and not details.get("variant"):
+                        tail = re.sub(rf"^{re.escape(title_model)}\s*", "", remainder, count=1, flags=re.I).strip(" ,.-")
+                        tail = re.split(r"\s+(?:Automatic|Manual|CVT|DCT|AWD|4WD|FWD|RWD|Petrol|Diesel)\b", tail, maxsplit=1, flags=re.I)[0].strip(" ,.-")
+                        if 1 <= len(tail) <= 70:
+                            details["variant"] = tail
+
         sale_name = _first_match(source_text, [r"Part\s+of\s+Sale\s*[:\-]?\s*(.+?)(?=Warranty|Description|GST|Location|Lot\s+ID|$)"])
         if sale_name:
             details["auction_name"] = sale_name.strip(" -")[:120]
