@@ -63,7 +63,7 @@ app.config.update(
     PERMANENT_SESSION_LIFETIME=timedelta(hours=int(os.environ.get("BAM_SESSION_HOURS", "12"))),
 )
 
-APP_VERSION = "25.21.5"
+APP_VERSION = "25.19.5"
 APP_NAME = "BAM Dealer Enterprise Cloud"
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "").strip()
 OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-5.6-luna").strip() or "gpt-5.6-luna"
@@ -325,9 +325,6 @@ def init_db():
     ensure_column(conn, "users", "last_login", "TEXT")
 
     ensure_column(conn, "vehicles", "ppsr_number", "TEXT")
-    # Version 25.21.5 - unified PPSR / Vehicle History.
-    ensure_column(conn, "vehicles", "ppsr_search_date", "TEXT")
-    ensure_column(conn, "vehicles", "ppsr_result", "TEXT DEFAULT 'Not Checked'")
     ensure_column(conn, "vehicles", "roadworthy_status", "TEXT DEFAULT 'Not Checked'")
     ensure_column(conn, "vehicles", "service_due_date", "TEXT")
     ensure_column(conn, "vehicles", "service_history", "TEXT")
@@ -853,55 +850,6 @@ def init_db():
     ensure_column(conn, "auction_vehicles", "live_bid_checked_at", "TEXT")
     ensure_column(conn, "auction_vehicles", "live_bid_status", "TEXT")
     ensure_column(conn, "auction_vehicles", "live_bid_count", "INTEGER")
-
-    # Version 25.20.0 - BAM Business Expenses & Vehicle Storage.
-    conn.executescript("""
-        CREATE TABLE IF NOT EXISTS business_expenses (id INTEGER PRIMARY KEY AUTOINCREMENT,expense_date TEXT NOT NULL,category TEXT NOT NULL,description TEXT NOT NULL,supplier TEXT,amount_inc_gst REAL NOT NULL DEFAULT 0,gst_amount REAL NOT NULL DEFAULT 0,paid_by TEXT NOT NULL DEFAULT 'BAM',frequency TEXT NOT NULL DEFAULT 'One-off',due_date TEXT,paid_date TEXT,status TEXT NOT NULL DEFAULT 'Paid',notes TEXT,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
-        CREATE TABLE IF NOT EXISTS vehicle_storage (id INTEGER PRIMARY KEY AUTOINCREMENT,vehicle_id INTEGER NOT NULL,provider TEXT,location TEXT,start_date TEXT NOT NULL,end_date TEXT,rate REAL NOT NULL DEFAULT 0,rate_period TEXT NOT NULL DEFAULT 'Weekly',gst_included INTEGER NOT NULL DEFAULT 1,paid_by TEXT NOT NULL DEFAULT 'BAM',notes TEXT,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,FOREIGN KEY(vehicle_id) REFERENCES vehicles(id) ON DELETE CASCADE);
-        CREATE INDEX IF NOT EXISTS idx_business_expense_date ON business_expenses(expense_date);
-        CREATE INDEX IF NOT EXISTS idx_vehicle_storage_vehicle ON vehicle_storage(vehicle_id);
-    """)
-
-    # Version 25.21.0 - BAM Consignment Management.
-    conn.executescript("""
-        CREATE TABLE IF NOT EXISTS consignments (id INTEGER PRIMARY KEY AUTOINCREMENT,consignment_no TEXT UNIQUE NOT NULL,status TEXT NOT NULL DEFAULT 'Draft',asset_type TEXT NOT NULL DEFAULT 'Car',owner_name TEXT NOT NULL,owner_phone TEXT,owner_email TEXT,owner_address TEXT,start_date TEXT,expiry_date TEXT,agreement_signed INTEGER NOT NULL DEFAULT 0,commission_rate REAL NOT NULL DEFAULT 0,owner_required_return REAL NOT NULL DEFAULT 0,asking_price REAL NOT NULL DEFAULT 0,minimum_sale_price REAL NOT NULL DEFAULT 0,year INTEGER,make TEXT NOT NULL,model TEXT NOT NULL,variant TEXT,vin TEXT,registration TEXT,rego_expiry TEXT,odometer_km INTEGER,colour TEXT,roadworthy_status TEXT DEFAULT 'Not Checked',market_low REAL DEFAULT 0,market_mid REAL DEFAULT 0,market_high REAL DEFAULT 0,sale_date TEXT,sale_price REAL DEFAULT 0,buyer_name TEXT,notes TEXT,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
-        CREATE TABLE IF NOT EXISTS consignment_expenses (id INTEGER PRIMARY KEY AUTOINCREMENT,consignment_id INTEGER NOT NULL,expense_date TEXT,category TEXT NOT NULL,description TEXT NOT NULL,amount_inc_gst REAL DEFAULT 0,paid_by TEXT DEFAULT 'BAM',recover_from_owner INTEGER DEFAULT 0,FOREIGN KEY(consignment_id) REFERENCES consignments(id) ON DELETE CASCADE);
-        CREATE TABLE IF NOT EXISTS consignment_job_cards (id INTEGER PRIMARY KEY AUTOINCREMENT,consignment_id INTEGER NOT NULL,job_date TEXT,description TEXT NOT NULL,labour_cost REAL DEFAULT 0,parts_cost REAL DEFAULT 0,status TEXT DEFAULT 'Open',FOREIGN KEY(consignment_id) REFERENCES consignments(id) ON DELETE CASCADE);
-        CREATE TABLE IF NOT EXISTS consignment_documents (id INTEGER PRIMARY KEY AUTOINCREMENT,consignment_id INTEGER NOT NULL,document_type TEXT NOT NULL,filename TEXT NOT NULL,description TEXT,uploaded_at TEXT DEFAULT CURRENT_TIMESTAMP,FOREIGN KEY(consignment_id) REFERENCES consignments(id) ON DELETE CASCADE);
-        CREATE TABLE IF NOT EXISTS consignment_photos (id INTEGER PRIMARY KEY AUTOINCREMENT,consignment_id INTEGER NOT NULL,filename TEXT NOT NULL,caption TEXT,uploaded_at TEXT DEFAULT CURRENT_TIMESTAMP,FOREIGN KEY(consignment_id) REFERENCES consignments(id) ON DELETE CASCADE);
-        CREATE INDEX IF NOT EXISTS idx_consignments_status ON consignments(status);
-    """)
-    # Version 25.21.2 - categorised consignment condition photos.
-    ensure_column(conn, "consignment_photos", "photo_category", "TEXT DEFAULT 'Other'")
-
-    # Version 25.21.3 - electronic consignment intake declarations and handover.
-    ensure_column(conn, "consignments", "owner_authority_confirmed", "INTEGER DEFAULT 0")
-    ensure_column(conn, "consignments", "finance_status", "TEXT DEFAULT 'Not declared'")
-    ensure_column(conn, "consignments", "finance_details", "TEXT")
-    ensure_column(conn, "consignments", "ppsr_reference", "TEXT")
-    ensure_column(conn, "consignments", "damage_status", "TEXT DEFAULT 'Not declared'")
-    ensure_column(conn, "consignments", "damage_details", "TEXT")
-    ensure_column(conn, "consignments", "faults_disclosed", "INTEGER DEFAULT 0")
-    ensure_column(conn, "consignments", "fault_details", "TEXT")
-    ensure_column(conn, "consignments", "odometer_confirmed", "INTEGER DEFAULT 0")
-    ensure_column(conn, "consignments", "keys_supplied", "INTEGER DEFAULT 0")
-    ensure_column(conn, "consignments", "registration_papers_supplied", "INTEGER DEFAULT 0")
-    ensure_column(conn, "consignments", "service_records_supplied", "INTEGER DEFAULT 0")
-    ensure_column(conn, "consignments", "other_documents_supplied", "TEXT")
-    ensure_column(conn, "consignments", "advertising_authority", "INTEGER DEFAULT 0")
-    ensure_column(conn, "consignments", "photo_retention_authority", "INTEGER DEFAULT 0")
-    ensure_column(conn, "consignments", "declaration_name", "TEXT")
-    ensure_column(conn, "consignments", "declaration_date", "TEXT")
-
-    # Version 25.21.4 - Consignment PPSR + pre-existing damage acceptance.
-    ensure_column(conn, "consignments", "ppsr_search_date", "TEXT")
-    ensure_column(conn, "consignments", "ppsr_result", "TEXT DEFAULT 'Not Checked'")
-    ensure_column(conn, "consignments", "condition_inspection_date", "TEXT")
-    ensure_column(conn, "consignments", "preexisting_damage_notes", "TEXT")
-    ensure_column(conn, "consignments", "damage_photos_reviewed", "INTEGER DEFAULT 0")
-    ensure_column(conn, "consignments", "owner_damage_accepted", "INTEGER DEFAULT 0")
-    ensure_column(conn, "consignments", "damage_acceptance_name", "TEXT")
-    ensure_column(conn, "consignments", "damage_acceptance_date", "TEXT")
 
     count = conn.execute(
         "SELECT COUNT(*) AS c FROM users"
@@ -2197,32 +2145,6 @@ def vehicle_generate_ai_ad(vehicle_id):
     return redirect(url_for("advertisement_pro", vehicle_id=vehicle_id))
 
 
-
-@app.route("/vehicles/<int:vehicle_id>/ppsr-history", methods=["POST"])
-@login_required
-def vehicle_ppsr_history_save(vehicle_id):
-    conn = db()
-    try:
-        if not conn.execute("SELECT id FROM vehicles WHERE id=?", (vehicle_id,)).fetchone():
-            return "Vehicle not found", 404
-        conn.execute(
-            """UPDATE vehicles
-               SET ppsr_number=?, ppsr_search_date=?, ppsr_result=?
-               WHERE id=?""",
-            (
-                (request.form.get("ppsr_number") or "").strip() or None,
-                request.form.get("ppsr_search_date") or None,
-                request.form.get("ppsr_result") or "Not Checked",
-                vehicle_id,
-            ),
-        )
-        conn.commit()
-        flash("PPSR / Vehicle History saved.", "success")
-    finally:
-        conn.close()
-    return redirect(url_for("vehicle_detail", vehicle_id=vehicle_id) + "#ppsr-history")
-
-
 @app.route("/vehicles/<int:vehicle_id>")
 @login_required
 def vehicle_detail(vehicle_id):
@@ -2279,11 +2201,9 @@ def vehicle_detail(vehicle_id):
     )
     service_total = sum(float(row["cost_inc_gst"] or 0) for row in services)
     parts_total = sum(float(row["quantity_used"] or 0) * float(row["unit_cost_inc_gst"] or 0) for row in parts_used)
-    storage_records = conn.execute("SELECT * FROM vehicle_storage WHERE vehicle_id=? ORDER BY start_date DESC,id DESC", (vehicle_id,)).fetchall()
-    storage_total = sum(storage_accrued_amount(row) for row in storage_records)
     sale_price = float(sale["sale_price_inc_gst"] or 0) if sale else 0
     selling_costs = float((sale["advertising_cost"] or 0) + (sale["transfer_cost"] or 0)) if sale else 0
-    total_invested = float(vehicle["purchase_price_inc_gst"] or 0) + expense_total + job_total + service_total + parts_total + storage_total + selling_costs
+    total_invested = float(vehicle["purchase_price_inc_gst"] or 0) + expense_total + job_total + service_total + parts_total + selling_costs
 
     def split_partner_costs(rows, amount_func):
         barry = 0.0
@@ -2346,19 +2266,11 @@ def vehicle_detail(vehicle_id):
         * float(row["unit_cost_inc_gst"] or 0)
     )
 
-    # Version 25.20.1 - Storage is a true vehicle cost and follows who paid it.
-    # BAM and Shared storage are joint costs, split equally between Barry and Matt.
-    barry_storage, matt_storage = split_partner_costs(
-        storage_records,
-        storage_accrued_amount
-    )
-
     barry_invested += (
         barry_expenses
         + barry_jobs
         + barry_services
         + barry_parts
-        + barry_storage
         + selling_costs / 2
     )
 
@@ -2367,7 +2279,6 @@ def vehicle_detail(vehicle_id):
         + matt_jobs
         + matt_services
         + matt_parts
-        + matt_storage
         + selling_costs / 2
     )
 
@@ -2429,8 +2340,6 @@ def vehicle_detail(vehicle_id):
         job_total=job_total,
         service_total=service_total,
         parts_total=parts_total,
-        storage_total=storage_total,
-        storage_records=storage_records,
         total_invested=total_invested,
         profit=profit,
         barry_invested=barry_invested,
@@ -9612,207 +9521,6 @@ def readiness_check():
 
 # Gunicorn imports this module rather than executing it as __main__.
 init_db()
-
-# Version 25.20.1 - Business Expenses, Vehicle Storage & Financial Integration
-BUSINESS_EXPENSE_CATEGORIES = ["Vehicle Storage","Yard / Factory Rent","Water","Electricity","Gas","Strata / Body Corporate","Insurance","Business Registration / Licensing","Tax / Accounting","Building / Maintenance","Council Rates","Phone / Internet","Security","Cleaning","Tools / Equipment","Bank Fees","Advertising","Other"]
-EXPENSE_FREQUENCIES = ["One-off","Weekly","Fortnightly","Monthly","Quarterly","Yearly"]
-STORAGE_PERIODS = ["Daily","Weekly","Fortnightly","Monthly"]
-
-def storage_accrued_amount(row, as_of=None):
-    try: start=datetime.strptime(str(row["start_date"]),"%Y-%m-%d").date()
-    except (TypeError,ValueError): return 0.0
-    try: end=datetime.strptime(str(row["end_date"]),"%Y-%m-%d").date() if row["end_date"] else (as_of or date.today())
-    except ValueError: end=as_of or date.today()
-    if end < start: return 0.0
-    days=(end-start).days+1
-    divisor={"Daily":1,"Weekly":7,"Fortnightly":14,"Monthly":30.4375}.get(str(row["rate_period"] or "Weekly"),7)
-    import math
-    return round(float(row["rate"] or 0)*max(1,math.ceil(days/divisor)),2)
-
-@app.route("/business-expenses")
-@login_required
-def business_expenses():
-    conn=db(); expenses=conn.execute("SELECT * FROM business_expenses ORDER BY expense_date DESC,id DESC").fetchall()
-    raw_storage=conn.execute("SELECT vs.*,v.stock_no,v.year,v.make,v.model FROM vehicle_storage vs JOIN vehicles v ON v.id=vs.vehicle_id ORDER BY CASE WHEN COALESCE(vs.end_date,'')='' THEN 0 ELSE 1 END,vs.start_date DESC,vs.id DESC").fetchall()
-    vehicles=conn.execute("SELECT id,stock_no,year,make,model FROM vehicles ORDER BY stock_no DESC").fetchall()
-    today=date.today(); month=today.strftime('%Y-%m'); fy_start=date(today.year if today.month>=7 else today.year-1,7,1).isoformat()
-    month_total=sum(float(r['amount_inc_gst'] or 0) for r in expenses if str(r['expense_date'] or '').startswith(month)); fy_total=sum(float(r['amount_inc_gst'] or 0) for r in expenses if str(r['expense_date'] or '')>=fy_start); gst_total=sum(float(r['gst_amount'] or 0) for r in expenses if str(r['expense_date'] or '')>=fy_start)
-    storage=[]; active_storage_total=0.0
-    for r in raw_storage:
-        d=dict(r); d['accrued']=storage_accrued_amount(r); storage.append(d)
-        if not r['end_date']: active_storage_total+=d['accrued']
-    conn.close()
-    template='''{% extends "base.html" %}{% block content %}
-<style>.bo-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px}.bo-card,.bo-panel{background:#fff;border:1px solid #dbe3ea;border-radius:14px;padding:16px;margin-bottom:16px}.bo-card b{font-size:1.45rem}.bo-form{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px}.bo-form input,.bo-form select,.bo-form textarea{width:100%;box-sizing:border-box;padding:10px;border:1px solid #cbd5e1;border-radius:8px}.bo-table{width:100%;border-collapse:collapse}.bo-table th,.bo-table td{padding:9px;border-bottom:1px solid #e2e8f0;text-align:left}.bo-btn{background:#0f766e;color:white;border:0;border-radius:8px;padding:10px 14px;font-weight:800;cursor:pointer}.muted{color:#64748b;font-size:.9rem}@media(max-width:700px){.bo-panel{overflow:auto}.bo-table{font-size:.82rem}}</style>
-<h1>Business Expenses &amp; Storage</h1><p class="muted">BAM overheads, recurring costs and vehicle storage in one place. Storage automatically flows into each vehicle’s Total Invested, partner contribution and profit/loss.</p>
-<div class="bo-grid"><div class="bo-card">This Month<br><b>${{ '%.2f'|format(month_total) }}</b></div><div class="bo-card">Financial Year<br><b>${{ '%.2f'|format(fy_total) }}</b></div><div class="bo-card">GST Recorded FY<br><b>${{ '%.2f'|format(gst_total) }}</b></div><div class="bo-card">Active Storage Accrued<br><b>${{ '%.2f'|format(active_storage_total) }}</b></div></div>
-<div class="bo-panel"><h2>Add Business Expense / Overhead</h2><form method="post" action="{{url_for('business_expense_add')}}" class="bo-form"><input type="date" name="expense_date" value="{{today}}" required><select name="category">{% for x in categories %}<option>{{x}}</option>{% endfor %}</select><input name="description" placeholder="Description" required><input name="supplier" placeholder="Supplier / payee"><input type="number" step="0.01" min="0" name="amount_inc_gst" placeholder="Amount inc GST" required><input type="number" step="0.01" min="0" name="gst_amount" placeholder="GST amount"><select name="paid_by"><option>BAM</option><option>Barry</option><option>Matt</option><option>Shared</option></select><select name="frequency">{% for x in frequencies %}<option>{{x}}</option>{% endfor %}</select><input type="date" name="due_date"><input type="date" name="paid_date"><select name="status"><option>Paid</option><option>Due</option><option>Scheduled</option></select><textarea name="notes" placeholder="Notes"></textarea><button class="bo-btn">Save Business Expense</button></form></div>
-<div class="bo-panel"><h2>Vehicle Storage</h2><p class="muted">Choose Daily, Weekly, Fortnightly or Monthly. BAM automatically accrues storage until you stop it. Barry or Matt payments are assigned to that partner; BAM or Shared costs are split 50/50.</p><form method="post" action="{{url_for('vehicle_storage_add')}}" class="bo-form"><select name="vehicle_id" required><option value="">Select BAM vehicle</option>{% for v in vehicles %}<option value="{{v.id}}">{{v.stock_no}} — {{v.year or ''}} {{v.make}} {{v.model}}</option>{% endfor %}</select><input name="provider" placeholder="Storage provider"><input name="location" placeholder="Storage location"><input type="date" name="start_date" value="{{today}}" required><input type="number" step="0.01" min="0" name="rate" placeholder="Storage rate $" required><select name="rate_period">{% for x in storage_periods %}<option>{{x}}</option>{% endfor %}</select><select name="paid_by"><option>BAM</option><option>Barry</option><option>Matt</option><option>Shared</option></select><select name="gst_included"><option value="1">GST included</option><option value="0">No GST</option></select><textarea name="notes" placeholder="Storage notes"></textarea><button class="bo-btn">Start Storage</button></form></div>
-<div class="bo-panel"><h2>Current &amp; Previous Storage</h2><table class="bo-table"><tr><th>Vehicle</th><th>Provider / Location</th><th>Dates</th><th>Rate</th><th>Accrued</th><th></th></tr>{% for r in storage %}<tr><td><a href="{{url_for('vehicle_detail',vehicle_id=r.vehicle_id)}}">{{r.stock_no}}</a><br>{{r.year or ''}} {{r.make}} {{r.model}}</td><td>{{r.provider or '—'}}<br>{{r.location or ''}}</td><td>{{r.start_date}} → {{r.end_date or 'ACTIVE'}}</td><td>${{ '%.2f'|format(r.rate or 0) }} / {{r.rate_period}}</td><td><b>${{ '%.2f'|format(r.accrued) }}</b></td><td>{% if not r.end_date %}<form method="post" action="{{url_for('vehicle_storage_stop',storage_id=r.id)}}"><button class="bo-btn">Stop Today</button></form>{% endif %}</td></tr>{% else %}<tr><td colspan="6">No storage recorded yet.</td></tr>{% endfor %}</table></div>
-<div class="bo-panel"><h2>Business Expense History</h2><table class="bo-table"><tr><th>Date</th><th>Category</th><th>Description</th><th>Supplier</th><th>Frequency</th><th>Paid By</th><th>Amount</th><th>GST</th><th>Status</th></tr>{% for r in expenses %}<tr><td>{{r.expense_date}}</td><td>{{r.category}}</td><td>{{r.description}}</td><td>{{r.supplier or '—'}}</td><td>{{r.frequency}}</td><td>{{r.paid_by}}</td><td>${{ '%.2f'|format(r.amount_inc_gst or 0) }}</td><td>${{ '%.2f'|format(r.gst_amount or 0) }}</td><td>{{r.status}}</td></tr>{% else %}<tr><td colspan="9">No business expenses recorded yet.</td></tr>{% endfor %}</table></div>
-{% endblock %}'''
-    return render_template_string(template,expenses=expenses,storage=storage,vehicles=vehicles,categories=BUSINESS_EXPENSE_CATEGORIES,frequencies=EXPENSE_FREQUENCIES,storage_periods=STORAGE_PERIODS,today=today.isoformat(),month_total=month_total,fy_total=fy_total,gst_total=gst_total,active_storage_total=active_storage_total)
-
-@app.route("/business-expenses/add",methods=["POST"])
-@login_required
-def business_expense_add():
-    conn=db()
-    try:
-        conn.execute("INSERT INTO business_expenses(expense_date,category,description,supplier,amount_inc_gst,gst_amount,paid_by,frequency,due_date,paid_date,status,notes) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",(request.form.get('expense_date'),request.form.get('category'),request.form.get('description','').strip(),request.form.get('supplier','').strip() or None,float(request.form.get('amount_inc_gst') or 0),float(request.form.get('gst_amount') or 0),request.form.get('paid_by') or 'BAM',request.form.get('frequency') or 'One-off',request.form.get('due_date') or None,request.form.get('paid_date') or None,request.form.get('status') or 'Paid',request.form.get('notes','').strip() or None)); conn.commit(); flash('Business expense saved.','success')
-    except (ValueError,sqlite3.Error) as exc: conn.rollback(); flash(str(exc),'error')
-    finally: conn.close()
-    return redirect(url_for('business_expenses'))
-
-@app.route("/business-expenses/storage/add",methods=["POST"])
-@login_required
-def vehicle_storage_add():
-    conn=db()
-    try:
-        conn.execute("INSERT INTO vehicle_storage(vehicle_id,provider,location,start_date,rate,rate_period,gst_included,paid_by,notes) VALUES(?,?,?,?,?,?,?,?,?)",(int(request.form.get('vehicle_id')),request.form.get('provider','').strip() or None,request.form.get('location','').strip() or None,request.form.get('start_date'),float(request.form.get('rate') or 0),request.form.get('rate_period') or 'Weekly',1 if request.form.get('gst_included')=='1' else 0,request.form.get('paid_by') or 'BAM',request.form.get('notes','').strip() or None)); conn.commit(); flash('Vehicle storage started.','success')
-    except (ValueError,sqlite3.Error) as exc: conn.rollback(); flash(str(exc),'error')
-    finally: conn.close()
-    return redirect(url_for('business_expenses'))
-
-@app.route("/business-expenses/storage/<int:storage_id>/stop",methods=["POST"])
-@login_required
-def vehicle_storage_stop(storage_id):
-    conn=db(); conn.execute("UPDATE vehicle_storage SET end_date=? WHERE id=? AND COALESCE(end_date,'')=''",(date.today().isoformat(),storage_id)); conn.commit(); conn.close(); flash('Storage stopped and total frozen.','success'); return redirect(url_for('business_expenses'))
-
-
-def next_consignment_number(conn=None):
-    own = conn is None; conn = conn or db(); highest = 0
-    for row in conn.execute("SELECT consignment_no FROM consignments").fetchall():
-        m = re.search(r"(\d+)$", row["consignment_no"] or "")
-        if m: highest=max(highest,int(m.group(1)))
-    if own: conn.close()
-    return f"CONSIGN-{highest+1:05d}"
-
-@app.route('/consignments')
-@login_required
-def consignments():
-    conn=db(); rows=conn.execute('SELECT * FROM consignments ORDER BY id DESC').fetchall(); conn.close()
-    return render_template_string('''{% extends "base.html" %}{% block content %}<style>.cg{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px}.p{background:#fff;border:1px solid #dbe3ea;border-radius:14px;padding:16px;margin-bottom:16px}.t{width:100%;border-collapse:collapse}.t th,.t td{padding:10px;border-bottom:1px solid #e2e8f0;text-align:left}.b{background:#0f766e;color:#fff;padding:10px 14px;border-radius:8px;text-decoration:none;font-weight:800}.muted{color:#64748b}</style><div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap"><div><h1>BAM Consignment Management</h1><p class="muted">Customer-owned Cars • Caravans • Trailers • Boats • Motorbikes • Other</p></div><a class="b" href="{{url_for('consignment_new')}}">+ New Consignment</a></div><div class="p"><table class="t"><tr><th>No.</th><th>Vehicle / Asset</th><th>Owner</th><th>Status</th><th>Asking</th><th>Agreement</th><th></th></tr>{% for c in rows %}<tr><td><b>{{c.consignment_no}}</b></td><td>{{c.year or ''}} {{c.make}} {{c.model}} {{c.variant or ''}}<br><span class="muted">{{c.asset_type}} • {{c.registration or 'No rego'}}</span></td><td>{{c.owner_name}}</td><td>{{c.status}}</td><td>${{'%.2f'|format(c.asking_price or 0)}}</td><td>{{'✓ Signed' if c.agreement_signed else 'Pending'}}</td><td><a class="b" href="{{url_for('consignment_detail',consignment_id=c.id)}}">Open</a></td></tr>{% else %}<tr><td colspan="7">No consignment vehicles yet.</td></tr>{% endfor %}</table></div>{% endblock %}''',rows=rows)
-
-@app.route('/consignments/new',methods=['GET','POST'])
-@login_required
-def consignment_new():
-    if request.method=='POST':
-        conn=db()
-        try:
-            no=next_consignment_number(conn)
-            cur=conn.execute('''INSERT INTO consignments(consignment_no,status,asset_type,owner_name,owner_phone,owner_email,owner_address,start_date,expiry_date,agreement_signed,commission_rate,owner_required_return,asking_price,minimum_sale_price,year,make,model,variant,vin,registration,rego_expiry,odometer_km,colour,roadworthy_status,market_low,market_mid,market_high,notes) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',(no,request.form.get('status') or 'Draft',request.form.get('asset_type') or 'Car',request.form.get('owner_name'),request.form.get('owner_phone'),request.form.get('owner_email'),request.form.get('owner_address'),request.form.get('start_date'),request.form.get('expiry_date'),1 if request.form.get('agreement_signed') else 0,float(request.form.get('commission_rate') or 0),float(request.form.get('owner_required_return') or 0),float(request.form.get('asking_price') or 0),float(request.form.get('minimum_sale_price') or 0),int(request.form.get('year')) if request.form.get('year') else None,request.form.get('make'),request.form.get('model'),request.form.get('variant'),request.form.get('vin'),request.form.get('registration'),request.form.get('rego_expiry'),int(request.form.get('odometer_km')) if request.form.get('odometer_km') else None,request.form.get('colour'),request.form.get('roadworthy_status') or 'Not Checked',float(request.form.get('market_low') or 0),float(request.form.get('market_mid') or 0),float(request.form.get('market_high') or 0),request.form.get('notes'))); conn.commit(); return redirect(url_for('consignment_detail',consignment_id=cur.lastrowid))
-        except Exception as exc: conn.rollback(); flash(str(exc),'error')
-        finally: conn.close()
-    return render_template_string('''{% extends "base.html" %}{% block content %}<style>.p{background:#fff;border:1px solid #dbe3ea;border-radius:14px;padding:18px;margin-bottom:16px}.f{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:10px}.f input,.f select,.f textarea{width:100%;box-sizing:border-box;padding:10px;border:1px solid #cbd5e1;border-radius:8px}.f label{font-weight:700}.b{background:#0f766e;color:#fff;border:0;border-radius:8px;padding:11px 16px;font-weight:800}</style><h1>New Consignment</h1><form method="post"><div class="p"><h2>Owner & Agreement</h2><div class="f"><label>Owner Name<input name="owner_name" required></label><label>Phone<input name="owner_phone"></label><label>Email<input name="owner_email"></label><label>Address<input name="owner_address"></label><label>Start<input type="date" name="start_date"></label><label>Expiry<input type="date" name="expiry_date"></label><label>Status<select name="status"><option>Draft</option><option>Active</option></select></label><label>Agreement Signed<select name="agreement_signed"><option value="">No</option><option value="1">Yes</option></select></label></div></div><div class="p"><h2>Vehicle / Asset</h2><div class="f"><label>Type<select name="asset_type"><option>Car</option><option>Caravan</option><option>Trailer</option><option>Boat</option><option>Motorbike</option><option>Other</option></select></label><label>Year<input type="number" name="year"></label><label>Make<input name="make" required></label><label>Model<input name="model" required></label><label>Variant<input name="variant"></label><label>VIN / HIN<input name="vin"></label><label>Registration<input name="registration"></label><label>Rego Expiry<input type="date" name="rego_expiry"></label><label>Kilometres / Hours<input type="number" name="odometer_km"></label><label>Colour<input name="colour"></label><label>Roadworthy<input name="roadworthy_status" value="Not Checked"></label></div></div><div class="p"><h2>Financial Snapshot</h2><div class="f"><label>Owner Required $<input type="number" step=".01" name="owner_required_return"></label><label>Asking Price $<input type="number" step=".01" name="asking_price"></label><label>Minimum Sale $<input type="number" step=".01" name="minimum_sale_price"></label><label>BAM Commission %<input type="number" step=".01" name="commission_rate"></label><label>Market Low $<input type="number" step=".01" name="market_low"></label><label>Market Mid $<input type="number" step=".01" name="market_mid"></label><label>Market High $<input type="number" step=".01" name="market_high"></label><label>Notes<textarea name="notes"></textarea></label></div></div><button class="b">Create Consignment</button></form>{% endblock %}''')
-
-@app.route('/consignments/<int:consignment_id>')
-@login_required
-def consignment_detail(consignment_id):
-    conn=db(); c=conn.execute('SELECT * FROM consignments WHERE id=?',(consignment_id,)).fetchone()
-    if not c: conn.close(); return 'Consignment not found',404
-    ex=conn.execute('SELECT * FROM consignment_expenses WHERE consignment_id=? ORDER BY id DESC',(consignment_id,)).fetchall(); jobs=conn.execute('SELECT * FROM consignment_job_cards WHERE consignment_id=? ORDER BY id DESC',(consignment_id,)).fetchall(); docs=conn.execute('SELECT * FROM consignment_documents WHERE consignment_id=? ORDER BY id DESC',(consignment_id,)).fetchall(); photos=conn.execute('SELECT * FROM consignment_photos WHERE consignment_id=? ORDER BY id DESC',(consignment_id,)).fetchall(); conn.close()
-    expense=sum(float(x['amount_inc_gst'] or 0) for x in ex); recovery=sum(float(x['amount_inc_gst'] or 0) for x in ex if x['recover_from_owner']); workshop=sum(float(x['labour_cost'] or 0)+float(x['parts_cost'] or 0) for x in jobs); basis=float(c['sale_price'] or 0) or float(c['asking_price'] or 0); commission=basis*float(c['commission_rate'] or 0)/100; owner_net=max(0,basis-commission-recovery); bam_net=commission-max(0,expense-recovery)
-    return render_template_string('''{% extends "base.html" %}{% block content %}<style>.g{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px}.p,.k{background:#fff;border:1px solid #dbe3ea;border-radius:14px;padding:16px;margin-bottom:16px}.k b{font-size:1.35rem}.f{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px}.f input,.f select{padding:9px;border:1px solid #cbd5e1;border-radius:8px}.t{width:100%;border-collapse:collapse}.t td,.t th{padding:8px;border-bottom:1px solid #e2e8f0;text-align:left}.b{background:#0f766e;color:#fff;border:0;border-radius:8px;padding:10px 14px;font-weight:800}.danger{background:#b91c1c}.muted{color:#64748b}</style><h1>{{c.consignment_no}} — {{c.year or ''}} {{c.make}} {{c.model}}</h1><p class="muted">Owner: {{c.owner_name}} • {{c.status}} • {{'Agreement signed' if c.agreement_signed else 'Agreement pending'}}</p><div class="g"><div class="k">Asking<br><b>${{'%.2f'|format(c.asking_price or 0)}}</b></div><div class="k">BAM Commission<br><b>${{'%.2f'|format(commission)}}</b></div><div class="k">Owner Net<br><b>${{'%.2f'|format(owner_net)}}</b></div><div class="k">Expenses<br><b>${{'%.2f'|format(expense)}}</b></div><div class="k">Workshop<br><b>${{'%.2f'|format(workshop)}}</b></div><div class="k">BAM Net<br><b>${{'%.2f'|format(bam_net)}}</b></div></div><div class="p"><h2>Vehicle Record</h2><p><b>{{c.asset_type}}</b> • VIN/HIN {{c.vin or '—'}} • Rego {{c.registration or '—'}} • Expiry {{c.rego_expiry or '—'}} • {{c.odometer_km or 0}} km/hours • {{c.colour or '—'}} • Roadworthy: {{c.roadworthy_status}}</p><p>Owner required: ${{'%.2f'|format(c.owner_required_return or 0)}} • Minimum: ${{'%.2f'|format(c.minimum_sale_price or 0)}} • Market: ${{'%.0f'|format(c.market_low or 0)}} / ${{'%.0f'|format(c.market_mid or 0)}} / ${{'%.0f'|format(c.market_high or 0)}}</p></div><div class="p"><h2>Workshop / Job Cards</h2><form class="f" method="post" action="{{url_for('consignment_job_add',consignment_id=c.id)}}"><input type="date" name="job_date"><input name="description" placeholder="Work description" required><input type="number" step=".01" name="labour_cost" placeholder="Labour $"><input type="number" step=".01" name="parts_cost" placeholder="Parts $"><select name="status"><option>Open</option><option>In Progress</option><option>Completed</option></select><button class="b">Add Job</button></form><table class="t"><tr><th>Date</th><th>Work</th><th>Labour</th><th>Parts</th><th>Status</th></tr>{% for j in jobs %}<tr><td>{{j.job_date or ''}}</td><td>{{j.description}}</td><td>${{'%.2f'|format(j.labour_cost or 0)}}</td><td>${{'%.2f'|format(j.parts_cost or 0)}}</td><td>{{j.status}}</td></tr>{% endfor %}</table></div><div class="p"><h2>Expenses</h2><form class="f" method="post" action="{{url_for('consignment_expense_add',consignment_id=c.id)}}"><input type="date" name="expense_date"><select name="category"><option>Workshop</option><option>Parts</option><option>Service</option><option>Roadworthy</option><option>Registration</option><option>Advertising</option><option>Other</option></select><input name="description" placeholder="Description" required><input type="number" step=".01" name="amount_inc_gst" placeholder="Amount $"><select name="paid_by"><option>BAM</option><option>Owner</option><option>Barry</option><option>Matt</option></select><label><input type="checkbox" name="recover_from_owner"> Recover from owner</label><button class="b">Add Expense</button></form><table class="t"><tr><th>Date</th><th>Category</th><th>Description</th><th>Paid By</th><th>Amount</th></tr>{% for e in ex %}<tr><td>{{e.expense_date or ''}}</td><td>{{e.category}}</td><td>{{e.description}}</td><td>{{e.paid_by}}</td><td>${{'%.2f'|format(e.amount_inc_gst or 0)}}</td></tr>{% endfor %}</table></div><div class="p"><h2>Vehicle Photo Manager</h2><p class="muted">Keep all consignment photos with this vehicle. Add exterior, interior, odometer, VIN/chassis, damage and sale-listing photos.</p><form method="post" enctype="multipart/form-data" action="{{url_for('consignment_photo_add',consignment_id=c.id)}}"><select name="photo_category"><option>Front</option><option>Rear</option><option>Left Side</option><option>Right Side</option><option>Interior</option><option>Odometer</option><option>VIN / Chassis</option><option>Damage</option><option>Pre-existing Damage</option><option>Documents</option><option>Advertising</option><option selected>Other</option></select> <input type="file" name="photos" accept="image/png,image/jpeg,image/webp" multiple required> <input name="caption" placeholder="Caption / condition note (optional)"> <button class="b">Upload Photos</button></form><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px;margin-top:14px">{% for p in photos %}<div style="border:1px solid #dbe3ea;border-radius:12px;padding:8px;background:#f8fafc"><a href="{{url_for('uploaded_file',filename=p.filename)}}" target="_blank"><img src="{{url_for('uploaded_file',filename=p.filename)}}" style="width:100%;height:140px;object-fit:cover;border-radius:8px"></a><div style="padding:6px 2px"><span style="display:inline-block;background:#e2e8f0;border-radius:999px;padding:3px 8px;font-size:.78rem;font-weight:800">{{p.photo_category or 'Other'}}</span><br><b>{{p.caption or 'Vehicle photo'}}</b></div><form method="post" action="{{url_for('consignment_photo_delete',consignment_id=c.id,photo_id=p.id)}}" onsubmit="return confirm('Delete this photo?')"><button class="b danger" style="padding:7px 10px">Delete</button></form></div>{% else %}<div class="muted">No vehicle photos yet.</div>{% endfor %}</div></div><div class="p"><h2>PPSR / Vehicle History</h2><p class="muted">Run the official Australian PPSR vehicle search, then record the certificate/reference and result against this consignment.</p><div class="f"><a class="b" href="https://www.ppsr.gov.au/searching/do-used-car-or-vehicle-search" target="_blank" rel="noopener">Run PPSR Check ↗</a><div><b>VIN / HIN:</b><br>{{c.vin or 'Enter VIN/HIN in the vehicle record first'}}</div><div><b>Current PPSR reference:</b><br>{{c.ppsr_reference or 'Not recorded'}}</div><div><b>Search date:</b><br>{{c.ppsr_search_date or 'Not recorded'}}</div><div><b>Result:</b><br>{{c.ppsr_result or 'Not Checked'}}</div></div><p class="muted" style="margin-top:10px">After completing the search, save the PPSR details below and upload the certificate in Consignment Agreement & Documents.</p></div><div class="p"><h2>Owner Intake, Declarations & Handover</h2><p class="muted">Record the owner declarations here first. These answers automatically flow into the printable consignment agreement.</p><form method="post" action="{{url_for('consignment_declarations_save',consignment_id=c.id)}}"><div class="f"><label><input type="checkbox" name="owner_authority_confirmed" value="1" {% if c.owner_authority_confirmed %}checked{% endif %}> Owner confirms authority to consign and sell</label><label>Finance / security interest<select name="finance_status"><option {% if c.finance_status=='Not declared' %}selected{% endif %}>Not declared</option><option {% if c.finance_status=='No' %}selected{% endif %}>No</option><option {% if c.finance_status=='Yes' %}selected{% endif %}>Yes</option></select></label><input name="finance_details" value="{{c.finance_details or ''}}" placeholder="Finance/security details"><input name="ppsr_reference" value="{{c.ppsr_reference or ''}}" placeholder="PPSR reference / certificate"><label>PPSR search date<input type="date" name="ppsr_search_date" value="{{c.ppsr_search_date or ''}}"></label><label>PPSR result<select name="ppsr_result"><option {% if (c.ppsr_result or 'Not Checked')=='Not Checked' %}selected{% endif %}>Not Checked</option><option {% if c.ppsr_result=='Clear / No security interest recorded' %}selected{% endif %}>Clear / No security interest recorded</option><option {% if c.ppsr_result=='Security interest recorded' %}selected{% endif %}>Security interest recorded</option><option {% if c.ppsr_result=='Written-off record' %}selected{% endif %}>Written-off record</option><option {% if c.ppsr_result=='Stolen record' %}selected{% endif %}>Stolen record</option><option {% if c.ppsr_result=='Review Required' %}selected{% endif %}>Review Required</option></select></label><label>Damage / written-off history<select name="damage_status"><option {% if c.damage_status=='Not declared' %}selected{% endif %}>Not declared</option><option {% if c.damage_status=='No' %}selected{% endif %}>No</option><option {% if c.damage_status=='Yes' %}selected{% endif %}>Yes</option></select></label><input name="damage_details" value="{{c.damage_details or ''}}" placeholder="Accident, flood, structural or damage details"><label><input type="checkbox" name="faults_disclosed" value="1" {% if c.faults_disclosed %}checked{% endif %}> Mechanical/electrical faults reviewed</label><input name="fault_details" value="{{c.fault_details or ''}}" placeholder="Known faults / material defects"><label><input type="checkbox" name="odometer_confirmed" value="1" {% if c.odometer_confirmed %}checked{% endif %}> Odometer / hours confirmed by owner</label><label>Keys / remotes supplied<input type="number" min="0" name="keys_supplied" value="{{c.keys_supplied or 0}}"></label><label><input type="checkbox" name="registration_papers_supplied" value="1" {% if c.registration_papers_supplied %}checked{% endif %}> Registration papers supplied</label><label><input type="checkbox" name="service_records_supplied" value="1" {% if c.service_records_supplied %}checked{% endif %}> Service records supplied</label><input name="other_documents_supplied" value="{{c.other_documents_supplied or ''}}" placeholder="Other documents / items handed over"><label><input type="checkbox" name="advertising_authority" value="1" {% if c.advertising_authority %}checked{% endif %}> Owner authorises BAM to photograph and advertise</label><label><input type="checkbox" name="photo_retention_authority" value="1" {% if c.photo_retention_authority %}checked{% endif %}> Owner authorises condition photos to be retained</label><label>Condition inspection date<input type="date" name="condition_inspection_date" value="{{c.condition_inspection_date or ''}}"></label><input name="preexisting_damage_notes" value="{{c.preexisting_damage_notes or ''}}" placeholder="Pre-existing damage / condition notes"><label><input type="checkbox" name="damage_photos_reviewed" value="1" {% if c.damage_photos_reviewed %}checked{% endif %}> Owner has reviewed BAM condition / damage photos</label><label><input type="checkbox" name="owner_damage_accepted" value="1" {% if c.owner_damage_accepted %}checked{% endif %}> Owner accepts the recorded pre-existing damage and condition</label><input name="damage_acceptance_name" value="{{c.damage_acceptance_name or c.owner_name or ''}}" placeholder="Owner name for damage acceptance"><label>Damage acceptance date<input type="date" name="damage_acceptance_date" value="{{c.damage_acceptance_date or ''}}"></label><input name="declaration_name" value="{{c.declaration_name or c.owner_name or ''}}" placeholder="Owner declaration name"><input type="date" name="declaration_date" value="{{c.declaration_date or ''}}"></div><p><button class="b">Save Declarations & Handover</button></p></form></div><div class="p"><h2>Consignment Agreement & Documents</h2><p><a class="b" href="{{url_for('consignment_agreement',consignment_id=c.id)}}" target="_blank">Generate / Print Consignment Agreement</a></p><p class="muted">Review and print/sign the agreement. After signing, scan or photograph it and upload the signed copy below.</p><form method="post" enctype="multipart/form-data" action="{{url_for('consignment_document_add',consignment_id=c.id)}}"><select name="document_type"><option>Signed Consignment Agreement</option><option>PPSR Certificate</option><option>Pre-existing Damage Acceptance</option><option>Owner ID</option><option>Registration</option><option>Roadworthy</option><option>Service Record</option><option>Sales Paperwork</option><option>Other</option></select> <input type="file" name="document" required> <button class="b">Upload Document</button></form><p>{% for d in docs %}<a href="{{url_for('uploaded_file',filename=d.filename)}}" target="_blank">{{d.document_type}}</a>{% if not loop.last %} • {% endif %}{% else %}<span class="muted">No documents uploaded yet.</span>{% endfor %}</p></div><div class="p"><h2>Complete Sale</h2><form class="f" method="post" action="{{url_for('consignment_sale',consignment_id=c.id)}}"><input type="date" name="sale_date"><input type="number" step=".01" name="sale_price" placeholder="Sale price"><input name="buyer_name" placeholder="Buyer name"><button class="b">Mark Sold</button></form></div><div class="p"><form method="post" action="{{url_for('consignment_delete',consignment_id=c.id)}}" onsubmit="return confirm('Delete this consignment permanently?')"><button class="b danger">Delete Consignment</button></form></div>{% endblock %}''',c=c,ex=ex,jobs=jobs,docs=docs,photos=photos,expense=expense,workshop=workshop,commission=commission,owner_net=owner_net,bam_net=bam_net)
-
-@app.route('/consignments/<int:consignment_id>/expense',methods=['POST'])
-@login_required
-def consignment_expense_add(consignment_id):
-    conn=db(); conn.execute('INSERT INTO consignment_expenses(consignment_id,expense_date,category,description,amount_inc_gst,paid_by,recover_from_owner) VALUES(?,?,?,?,?,?,?)',(consignment_id,request.form.get('expense_date'),request.form.get('category'),request.form.get('description'),float(request.form.get('amount_inc_gst') or 0),request.form.get('paid_by') or 'BAM',1 if request.form.get('recover_from_owner') else 0)); conn.commit(); conn.close(); return redirect(url_for('consignment_detail',consignment_id=consignment_id))
-
-@app.route('/consignments/<int:consignment_id>/job',methods=['POST'])
-@login_required
-def consignment_job_add(consignment_id):
-    conn=db(); conn.execute('INSERT INTO consignment_job_cards(consignment_id,job_date,description,labour_cost,parts_cost,status) VALUES(?,?,?,?,?,?)',(consignment_id,request.form.get('job_date'),request.form.get('description'),float(request.form.get('labour_cost') or 0),float(request.form.get('parts_cost') or 0),request.form.get('status') or 'Open')); conn.commit(); conn.close(); return redirect(url_for('consignment_detail',consignment_id=consignment_id))
-
-@app.route('/consignments/<int:consignment_id>/declarations',methods=['POST'])
-@login_required
-def consignment_declarations_save(consignment_id):
-    conn=db()
-    try:
-        conn.execute("""UPDATE consignments SET owner_authority_confirmed=?,finance_status=?,finance_details=?,ppsr_reference=?,ppsr_search_date=?,ppsr_result=?,damage_status=?,damage_details=?,faults_disclosed=?,fault_details=?,odometer_confirmed=?,keys_supplied=?,registration_papers_supplied=?,service_records_supplied=?,other_documents_supplied=?,advertising_authority=?,photo_retention_authority=?,condition_inspection_date=?,preexisting_damage_notes=?,damage_photos_reviewed=?,owner_damage_accepted=?,damage_acceptance_name=?,damage_acceptance_date=?,declaration_name=?,declaration_date=? WHERE id=?""",(1 if request.form.get('owner_authority_confirmed') else 0,request.form.get('finance_status') or 'Not declared',(request.form.get('finance_details') or '').strip(),(request.form.get('ppsr_reference') or '').strip(),request.form.get('ppsr_search_date') or None,request.form.get('ppsr_result') or 'Not Checked',request.form.get('damage_status') or 'Not declared',(request.form.get('damage_details') or '').strip(),1 if request.form.get('faults_disclosed') else 0,(request.form.get('fault_details') or '').strip(),1 if request.form.get('odometer_confirmed') else 0,int(request.form.get('keys_supplied') or 0),1 if request.form.get('registration_papers_supplied') else 0,1 if request.form.get('service_records_supplied') else 0,(request.form.get('other_documents_supplied') or '').strip(),1 if request.form.get('advertising_authority') else 0,1 if request.form.get('photo_retention_authority') else 0,request.form.get('condition_inspection_date') or None,(request.form.get('preexisting_damage_notes') or '').strip(),1 if request.form.get('damage_photos_reviewed') else 0,1 if request.form.get('owner_damage_accepted') else 0,(request.form.get('damage_acceptance_name') or '').strip(),request.form.get('damage_acceptance_date') or None,(request.form.get('declaration_name') or '').strip(),request.form.get('declaration_date') or None,consignment_id))
-        conn.commit(); flash('Consignment declarations and handover saved.','success')
-    finally: conn.close()
-    return redirect(url_for('consignment_detail',consignment_id=consignment_id))
-
-@app.route('/consignments/<int:consignment_id>/photos',methods=['POST'])
-@login_required
-def consignment_photo_add(consignment_id):
-    conn=db()
-    try:
-        if not conn.execute('SELECT id FROM consignments WHERE id=?',(consignment_id,)).fetchone(): return 'Consignment not found',404
-        caption=(request.form.get('caption') or '').strip(); category=(request.form.get('photo_category') or 'Other').strip(); added=0
-        for upload in request.files.getlist('photos')[:20]:
-            fn=save_upload(upload)
-            if fn:
-                conn.execute('INSERT INTO consignment_photos(consignment_id,filename,caption,photo_category) VALUES(?,?,?,?)',(consignment_id,fn,caption,category)); added+=1
-        conn.commit()
-        if added: flash(f'{added} consignment photo(s) uploaded.','success')
-    finally: conn.close()
-    return redirect(url_for('consignment_detail',consignment_id=consignment_id))
-
-@app.route('/consignments/<int:consignment_id>/photos/<int:photo_id>/delete',methods=['POST'])
-@login_required
-def consignment_photo_delete(consignment_id,photo_id):
-    conn=db()
-    try:
-        conn.execute('DELETE FROM consignment_photos WHERE id=? AND consignment_id=?',(photo_id,consignment_id)); conn.commit()
-    finally: conn.close()
-    return redirect(url_for('consignment_detail',consignment_id=consignment_id))
-
-@app.route('/consignments/<int:consignment_id>/agreement')
-@login_required
-def consignment_agreement(consignment_id):
-    conn=db(); c=conn.execute('SELECT * FROM consignments WHERE id=?',(consignment_id,)).fetchone(); conn.close()
-    if not c: return 'Consignment not found',404
-    commission_amount=float(c['asking_price'] or 0)*float(c['commission_rate'] or 0)/100
-    missing=[]
-    checks=[('Owner phone',c['owner_phone']),('Owner address',c['owner_address']),('Agreement start date',c['start_date']),('Agreement expiry date',c['expiry_date']),('VIN / HIN',c['vin']),('Registration',c['registration']),('Odometer / hours',c['odometer_km']),('Asking price',float(c['asking_price'] or 0)>0),('Minimum sale price',float(c['minimum_sale_price'] or 0)>0),('BAM commission',float(c['commission_rate'] or 0)>0)]
-    for label,value in checks:
-        if not value: missing.append(label)
-    template="""<!doctype html><html><head><meta charset='utf-8'><title>{{c.consignment_no}} Consignment Agreement</title><style>body{font-family:Arial,sans-serif;color:#172033;max-width:900px;margin:30px auto;padding:0 24px;line-height:1.42}h1{margin-bottom:4px}.muted{color:#64748b}.warn{background:#fff7ed;border:2px solid #f59e0b;border-radius:10px;padding:12px;margin:14px 0}.box{border:1px solid #cbd5e1;border-radius:10px;padding:14px;margin:14px 0}.grid{display:grid;grid-template-columns:1fr 1fr;gap:8px 24px}.sig{margin-top:55px;display:grid;grid-template-columns:1fr 1fr;gap:40px}.line{border-top:1px solid #111;padding-top:6px}.print{background:#0f766e;color:#fff;border:0;border-radius:8px;padding:10px 16px;font-weight:700}.check{margin:6px 0}.small{font-size:.9rem}@media print{.print{display:none}body{margin:0;max-width:none}.warn{break-inside:avoid}.box{break-inside:avoid}}</style></head><body><button class='print' onclick='window.print()'>Print / Save as PDF</button><h1>BAM Motor Group — Consignment Agreement</h1><div class='muted'>Agreement {{c.consignment_no}} • Generated {{today}}</div>{% if missing %}<div class='warn'><b>Complete before signing:</b> {{missing|join(', ')}}. Return to the consignment record and enter these details before using this as the signed agreement.</div>{% endif %}<div class='box'><h2>Owner / Consignor</h2><div class='grid'><div><b>Name:</b> {{c.owner_name}}</div><div><b>Phone:</b> {{c.owner_phone or '—'}}</div><div><b>Email:</b> {{c.owner_email or '—'}}</div><div><b>Address:</b> {{c.owner_address or '—'}}</div></div></div><div class='box'><h2>Vehicle / Asset</h2><div class='grid'><div><b>Type:</b> {{c.asset_type}}</div><div><b>Vehicle:</b> {{c.year or ''}} {{c.make}} {{c.model}} {{c.variant or ''}}</div><div><b>VIN / HIN:</b> {{c.vin or '—'}}</div><div><b>Registration:</b> {{c.registration or '—'}}</div><div><b>Rego expiry:</b> {{c.rego_expiry or '—'}}</div><div><b>Kilometres / Hours:</b> {{c.odometer_km or '—'}}</div><div><b>Colour:</b> {{c.colour or '—'}}</div><div><b>Roadworthy:</b> {{c.roadworthy_status or '—'}}</div></div></div><div class='box'><h2>Sale Authority & Financial Terms</h2><div class='grid'><div><b>Agreement start:</b> {{c.start_date or '—'}}</div><div><b>Agreement expiry:</b> {{c.expiry_date or '—'}}</div><div><b>Asking price:</b> ${{'%.2f'|format(c.asking_price or 0)}}</div><div><b>Minimum sale price:</b> ${{'%.2f'|format(c.minimum_sale_price or 0)}}</div><div><b>Owner required return:</b> ${{'%.2f'|format(c.owner_required_return or 0)}}</div><div><b>BAM commission:</b> {{'%.2f'|format(c.commission_rate or 0)}}% (about ${{'%.2f'|format(commission_amount)}} at asking price)</div></div></div><div class='box'><h2>Owner Declarations & Handover Checklist</h2><div class='check'>{{'☑' if c.owner_authority_confirmed else '☐'}} I am entitled to consign and authorise the sale of this vehicle/asset.</div><div class='check'><b>Finance/security interest:</b> {{c.finance_status or 'Not declared'}}{% if c.finance_details %} — {{c.finance_details}}{% endif %}</div><div class='check'><b>PPSR:</b> {{c.ppsr_result or 'Not Checked'}}{% if c.ppsr_reference %} &nbsp; <b>Reference:</b> {{c.ppsr_reference}}{% endif %}{% if c.ppsr_search_date %} &nbsp; <b>Search date:</b> {{c.ppsr_search_date}}{% endif %}</div><div class='check'><b>Written-off/accident/flood/structural/material damage:</b> {{c.damage_status or 'Not declared'}}{% if c.damage_details %} — {{c.damage_details}}{% endif %}</div><div class='check'>{{'☑' if c.faults_disclosed else '☐'}} Known mechanical/electrical faults and material defects reviewed.{% if c.fault_details %} <b>Details:</b> {{c.fault_details}}{% endif %}</div><div class='check'>{{'☑' if c.odometer_confirmed else '☐'}} Odometer/hour reading shown above is accurate to the best of my knowledge.</div><div class='check'><b>Keys/remotes supplied:</b> {{c.keys_supplied or 0}} &nbsp;&nbsp; {{'☑' if c.registration_papers_supplied else '☐'}} Registration papers &nbsp; {{'☑' if c.service_records_supplied else '☐'}} Service records{% if c.other_documents_supplied %} &nbsp; <b>Other:</b> {{c.other_documents_supplied}}{% endif %}</div><div class='check'>{{'☑' if c.advertising_authority else '☐'}} BAM may photograph and advertise the vehicle/asset and communicate with prospective purchasers.</div><div class='check'>{{'☑' if c.photo_retention_authority else '☐'}} Condition photographs may be retained with the consignment record.</div><div class='check'><b>Pre-existing damage / condition acceptance:</b> {{'ACCEPTED' if c.owner_damage_accepted else 'NOT YET ACCEPTED'}}{% if c.condition_inspection_date %} — Inspection {{c.condition_inspection_date}}{% endif %}</div><div class='check'>{{'☑' if c.damage_photos_reviewed else '☐'}} Owner reviewed the BAM condition/damage photographs.{% if c.preexisting_damage_notes %} <b>Recorded condition:</b> {{c.preexisting_damage_notes}}{% endif %}</div>{% if c.damage_acceptance_name or c.damage_acceptance_date %}<div class='check'><b>Damage acceptance recorded by:</b> {{c.damage_acceptance_name or c.owner_name}}{% if c.damage_acceptance_date %} on {{c.damage_acceptance_date}}{% endif %}</div>{% endif %}{% if c.declaration_name or c.declaration_date %}<div class='check'><b>Declaration recorded by owner:</b> {{c.declaration_name or c.owner_name}}{% if c.declaration_date %} on {{c.declaration_date}}{% endif %}</div>{% endif %}</div><div class='box'><h2>Pre-Existing Damage & Condition Acknowledgement</h2><p>I have reviewed the vehicle/asset condition and the photographs recorded by BAM Motor Group at handover. I acknowledge that the damage, defects and condition recorded above were present when the vehicle/asset was delivered for consignment.</p><div class='sig' style='margin-top:45px'><div class='line'>Owner / Consignor signature & date</div><div class='line'>BAM Motor Group representative & date</div></div></div><div class='box'><h2>Agreement</h2><p>The owner appoints BAM Motor Group to advertise and facilitate the sale of the vehicle/asset described above during the agreement period, subject to the recorded minimum sale price and agreed commission.</p><p>The owner declares that they are entitled to consign the vehicle/asset and will disclose any finance, security interest, ownership dispute, material defect, written-off history or other matter that may affect lawful sale or accurate advertising.</p><p>BAM may photograph and advertise the vehicle/asset and communicate with prospective purchasers. Workshop, parts, registration, roadworthy, transport, advertising or other costs deducted from owner proceeds must be recorded in the consignment file and agreed with the owner.</p><p>Sale proceeds are to be reconciled after cleared buyer funds are received, with agreed commission and authorised recoverable costs deducted before the owner balance is paid. Any variation to the minimum sale price, commission, expenses or authority should be recorded in writing.</p><p>Either party should record any termination or withdrawal of the consignment in writing. Any agreed costs already incurred remain subject to the recorded expense arrangements.</p><p class='small'><b>Important:</b> This BAM-generated form is an operational record. It should be reviewed against the legal and dealer requirements that apply to the business, location and transaction before being adopted as BAM's final legal form.</p></div><div class='sig'><div class='line'>Owner / Consignor signature & date</div><div class='line'>BAM Motor Group representative & date</div></div><div class='sig'><div class='line'>Owner printed name</div><div class='line'>BAM representative printed name</div></div><div class='box small'><b>Copy supplied:</b> ☐ Owner received a copy of this signed agreement &nbsp;&nbsp; Date: ____________ &nbsp;&nbsp; Method: ☐ Printed ☐ Email ☐ Other</div></body></html>"""
-    return render_template_string(template,c=c,commission_amount=commission_amount,today=date.today().isoformat(),missing=missing)
-
-@app.route('/consignments/<int:consignment_id>/documents',methods=['POST'])
-@login_required
-def consignment_document_add(consignment_id):
-    conn=db()
-    try:
-        fn=save_upload(request.files.get('document'))
-        if fn: conn.execute('INSERT INTO consignment_documents(consignment_id,document_type,filename,description) VALUES(?,?,?,?)',(consignment_id,request.form.get('document_type') or 'Other',fn,request.form.get('description'))); conn.commit()
-    finally: conn.close()
-    return redirect(url_for('consignment_detail',consignment_id=consignment_id))
-
-@app.route('/consignments/<int:consignment_id>/sale',methods=['POST'])
-@login_required
-def consignment_sale(consignment_id):
-    conn=db(); conn.execute("UPDATE consignments SET sale_date=?,sale_price=?,buyer_name=?,status='Sold' WHERE id=?",(request.form.get('sale_date'),float(request.form.get('sale_price') or 0),request.form.get('buyer_name'),consignment_id)); conn.commit(); conn.close(); return redirect(url_for('consignment_detail',consignment_id=consignment_id))
-
-@app.route('/consignments/<int:consignment_id>/delete',methods=['POST'])
-@login_required
-def consignment_delete(consignment_id):
-    conn=db(); conn.execute('DELETE FROM consignments WHERE id=?',(consignment_id,)); conn.commit(); conn.close(); return redirect(url_for('consignments'))
-
-@app.after_request
-def bam_consignment_nav(response):
-    if response.status_code==200 and 'text/html' in response.headers.get('Content-Type','') and not response.direct_passthrough:
-        try:
-            text=response.get_data(as_text=True)
-            if 'bam-consignment-nav' not in text and '</body>' in text.lower():
-                script='''<script id="bam-consignment-nav">(function(){function a(){if(document.getElementById('bam-consignment-link'))return;var x=Array.from(document.querySelectorAll('a')).find(function(e){return (e.textContent||'').indexOf('Vehicle Inventory')>=0;});if(!x)return;var n=document.createElement('a');n.id='bam-consignment-link';n.href='/consignments';n.textContent='Consignment Management';n.className=x.className;n.style.cssText=x.style.cssText;n.style.display='block';x.insertAdjacentElement('afterend',n)}if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',a);else a()})();</script>'''
-                pos=text.lower().rfind('</body>'); response.set_data(text[:pos]+script+text[pos:]); response.headers['Content-Length']=str(len(response.get_data()))
-        except Exception: pass
-    return response
-
-@app.after_request
-def bam_business_expenses_nav(response):
-    if response.status_code==200 and 'text/html' in response.headers.get('Content-Type','') and not response.direct_passthrough:
-        try:
-            text=response.get_data(as_text=True)
-            if 'bam-business-expenses-nav' not in text and '</body>' in text.lower():
-                script='''<script id="bam-business-expenses-nav">(function(){function add(){if(document.getElementById('bam-business-expenses-link'))return;var links=Array.from(document.querySelectorAll('a'));var anchor=links.find(function(a){return (a.textContent||'').indexOf('Executive Dashboard')>=0;})||links.find(function(a){return (a.textContent||'').indexOf('Vehicle Inventory')>=0;});if(!anchor)return;var a=document.createElement('a');a.id='bam-business-expenses-link';a.href='/business-expenses';a.textContent='Business Expenses & Storage';a.className=anchor.className;a.style.cssText=anchor.style.cssText;a.style.display='block';anchor.insertAdjacentElement('afterend',a);}if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',add);else add();})();</script>'''
-                pos=text.lower().rfind('</body>'); text=text[:pos]+script+text[pos:]; response.set_data(text); response.headers['Content-Length']=str(len(response.get_data()))
-        except Exception: pass
-    return response
 
 if __name__ == "__main__":
     app.run(

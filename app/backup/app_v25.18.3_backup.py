@@ -63,10 +63,10 @@ app.config.update(
     PERMANENT_SESSION_LIFETIME=timedelta(hours=int(os.environ.get("BAM_SESSION_HOURS", "12"))),
 )
 
-APP_VERSION = "25.21.5"
+APP_VERSION = "25.18.3"
 APP_NAME = "BAM Dealer Enterprise Cloud"
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "").strip()
-OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-5.6-luna").strip() or "gpt-5.6-luna"
+OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-5").strip() or "gpt-5"
 VIN_DECODER_URL = os.environ.get("BAM_VIN_DECODER_URL", "https://vpic.nhtsa.dot.gov/api/vehicles/DecodeVinValuesExtended/{vin}?format=json")
 VIN_DATA_PROVIDER_NAME = os.environ.get("BAM_VIN_DATA_PROVIDER_NAME", "NHTSA vPIC").strip() or "NHTSA vPIC"
 WORKSHOP_PROVIDER_NAME = os.environ.get("BAM_WORKSHOP_PROVIDER_NAME", "eManualOnline").strip() or "eManualOnline"
@@ -325,9 +325,6 @@ def init_db():
     ensure_column(conn, "users", "last_login", "TEXT")
 
     ensure_column(conn, "vehicles", "ppsr_number", "TEXT")
-    # Version 25.21.5 - unified PPSR / Vehicle History.
-    ensure_column(conn, "vehicles", "ppsr_search_date", "TEXT")
-    ensure_column(conn, "vehicles", "ppsr_result", "TEXT DEFAULT 'Not Checked'")
     ensure_column(conn, "vehicles", "roadworthy_status", "TEXT DEFAULT 'Not Checked'")
     ensure_column(conn, "vehicles", "service_due_date", "TEXT")
     ensure_column(conn, "vehicles", "service_history", "TEXT")
@@ -402,22 +399,6 @@ def init_db():
     ensure_column(conn, "vehicles", "market_price_mid", "REAL DEFAULT 0")
     ensure_column(conn, "vehicles", "market_price_high", "REAL DEFAULT 0")
     ensure_column(conn, "vehicles", "market_price_checked_at", "TEXT")
-    ensure_column(conn, "vehicles", "comparable_price_1", "REAL DEFAULT 0")
-    ensure_column(conn, "vehicles", "comparable_price_2", "REAL DEFAULT 0")
-    ensure_column(conn, "vehicles", "comparable_price_3", "REAL DEFAULT 0")
-    ensure_column(conn, "vehicles", "comparable_price_4", "REAL DEFAULT 0")
-    ensure_column(conn, "vehicles", "comparable_price_5", "REAL DEFAULT 0")
-    ensure_column(conn, "vehicles", "private_value_low", "REAL DEFAULT 0")
-    ensure_column(conn, "vehicles", "private_value_high", "REAL DEFAULT 0")
-    ensure_column(conn, "vehicles", "wholesale_value_low", "REAL DEFAULT 0")
-    ensure_column(conn, "vehicles", "wholesale_value_high", "REAL DEFAULT 0")
-    ensure_column(conn, "vehicles", "trade_value_low", "REAL DEFAULT 0")
-    ensure_column(conn, "vehicles", "trade_value_high", "REAL DEFAULT 0")
-    ensure_column(conn, "vehicles", "dealer_value_low", "REAL DEFAULT 0")
-    ensure_column(conn, "vehicles", "dealer_value_high", "REAL DEFAULT 0")
-    ensure_column(conn, "vehicles", "valuation_provider", "TEXT")
-    ensure_column(conn, "vehicles", "valuation_confidence", "TEXT")
-    ensure_column(conn, "vehicles", "valuation_source", "TEXT")
 
     # Version 18 - Parts Vehicle / Dismantling
     ensure_column(conn, "vehicles", "vehicle_purpose", "TEXT DEFAULT 'Retail Sale'")
@@ -849,59 +830,6 @@ def init_db():
     ensure_column(conn, "auction_vehicles", "comparable_price_3", "REAL DEFAULT 0")
     ensure_column(conn, "auction_vehicles", "comparable_price_4", "REAL DEFAULT 0")
     ensure_column(conn, "auction_vehicles", "comparable_price_5", "REAL DEFAULT 0")
-    # Version 25.19.2 - BAM Live Bid Tracker for saved Auction Watch items.
-    ensure_column(conn, "auction_vehicles", "live_bid_checked_at", "TEXT")
-    ensure_column(conn, "auction_vehicles", "live_bid_status", "TEXT")
-    ensure_column(conn, "auction_vehicles", "live_bid_count", "INTEGER")
-
-    # Version 25.20.0 - BAM Business Expenses & Vehicle Storage.
-    conn.executescript("""
-        CREATE TABLE IF NOT EXISTS business_expenses (id INTEGER PRIMARY KEY AUTOINCREMENT,expense_date TEXT NOT NULL,category TEXT NOT NULL,description TEXT NOT NULL,supplier TEXT,amount_inc_gst REAL NOT NULL DEFAULT 0,gst_amount REAL NOT NULL DEFAULT 0,paid_by TEXT NOT NULL DEFAULT 'BAM',frequency TEXT NOT NULL DEFAULT 'One-off',due_date TEXT,paid_date TEXT,status TEXT NOT NULL DEFAULT 'Paid',notes TEXT,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
-        CREATE TABLE IF NOT EXISTS vehicle_storage (id INTEGER PRIMARY KEY AUTOINCREMENT,vehicle_id INTEGER NOT NULL,provider TEXT,location TEXT,start_date TEXT NOT NULL,end_date TEXT,rate REAL NOT NULL DEFAULT 0,rate_period TEXT NOT NULL DEFAULT 'Weekly',gst_included INTEGER NOT NULL DEFAULT 1,paid_by TEXT NOT NULL DEFAULT 'BAM',notes TEXT,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,FOREIGN KEY(vehicle_id) REFERENCES vehicles(id) ON DELETE CASCADE);
-        CREATE INDEX IF NOT EXISTS idx_business_expense_date ON business_expenses(expense_date);
-        CREATE INDEX IF NOT EXISTS idx_vehicle_storage_vehicle ON vehicle_storage(vehicle_id);
-    """)
-
-    # Version 25.21.0 - BAM Consignment Management.
-    conn.executescript("""
-        CREATE TABLE IF NOT EXISTS consignments (id INTEGER PRIMARY KEY AUTOINCREMENT,consignment_no TEXT UNIQUE NOT NULL,status TEXT NOT NULL DEFAULT 'Draft',asset_type TEXT NOT NULL DEFAULT 'Car',owner_name TEXT NOT NULL,owner_phone TEXT,owner_email TEXT,owner_address TEXT,start_date TEXT,expiry_date TEXT,agreement_signed INTEGER NOT NULL DEFAULT 0,commission_rate REAL NOT NULL DEFAULT 0,owner_required_return REAL NOT NULL DEFAULT 0,asking_price REAL NOT NULL DEFAULT 0,minimum_sale_price REAL NOT NULL DEFAULT 0,year INTEGER,make TEXT NOT NULL,model TEXT NOT NULL,variant TEXT,vin TEXT,registration TEXT,rego_expiry TEXT,odometer_km INTEGER,colour TEXT,roadworthy_status TEXT DEFAULT 'Not Checked',market_low REAL DEFAULT 0,market_mid REAL DEFAULT 0,market_high REAL DEFAULT 0,sale_date TEXT,sale_price REAL DEFAULT 0,buyer_name TEXT,notes TEXT,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
-        CREATE TABLE IF NOT EXISTS consignment_expenses (id INTEGER PRIMARY KEY AUTOINCREMENT,consignment_id INTEGER NOT NULL,expense_date TEXT,category TEXT NOT NULL,description TEXT NOT NULL,amount_inc_gst REAL DEFAULT 0,paid_by TEXT DEFAULT 'BAM',recover_from_owner INTEGER DEFAULT 0,FOREIGN KEY(consignment_id) REFERENCES consignments(id) ON DELETE CASCADE);
-        CREATE TABLE IF NOT EXISTS consignment_job_cards (id INTEGER PRIMARY KEY AUTOINCREMENT,consignment_id INTEGER NOT NULL,job_date TEXT,description TEXT NOT NULL,labour_cost REAL DEFAULT 0,parts_cost REAL DEFAULT 0,status TEXT DEFAULT 'Open',FOREIGN KEY(consignment_id) REFERENCES consignments(id) ON DELETE CASCADE);
-        CREATE TABLE IF NOT EXISTS consignment_documents (id INTEGER PRIMARY KEY AUTOINCREMENT,consignment_id INTEGER NOT NULL,document_type TEXT NOT NULL,filename TEXT NOT NULL,description TEXT,uploaded_at TEXT DEFAULT CURRENT_TIMESTAMP,FOREIGN KEY(consignment_id) REFERENCES consignments(id) ON DELETE CASCADE);
-        CREATE TABLE IF NOT EXISTS consignment_photos (id INTEGER PRIMARY KEY AUTOINCREMENT,consignment_id INTEGER NOT NULL,filename TEXT NOT NULL,caption TEXT,uploaded_at TEXT DEFAULT CURRENT_TIMESTAMP,FOREIGN KEY(consignment_id) REFERENCES consignments(id) ON DELETE CASCADE);
-        CREATE INDEX IF NOT EXISTS idx_consignments_status ON consignments(status);
-    """)
-    # Version 25.21.2 - categorised consignment condition photos.
-    ensure_column(conn, "consignment_photos", "photo_category", "TEXT DEFAULT 'Other'")
-
-    # Version 25.21.3 - electronic consignment intake declarations and handover.
-    ensure_column(conn, "consignments", "owner_authority_confirmed", "INTEGER DEFAULT 0")
-    ensure_column(conn, "consignments", "finance_status", "TEXT DEFAULT 'Not declared'")
-    ensure_column(conn, "consignments", "finance_details", "TEXT")
-    ensure_column(conn, "consignments", "ppsr_reference", "TEXT")
-    ensure_column(conn, "consignments", "damage_status", "TEXT DEFAULT 'Not declared'")
-    ensure_column(conn, "consignments", "damage_details", "TEXT")
-    ensure_column(conn, "consignments", "faults_disclosed", "INTEGER DEFAULT 0")
-    ensure_column(conn, "consignments", "fault_details", "TEXT")
-    ensure_column(conn, "consignments", "odometer_confirmed", "INTEGER DEFAULT 0")
-    ensure_column(conn, "consignments", "keys_supplied", "INTEGER DEFAULT 0")
-    ensure_column(conn, "consignments", "registration_papers_supplied", "INTEGER DEFAULT 0")
-    ensure_column(conn, "consignments", "service_records_supplied", "INTEGER DEFAULT 0")
-    ensure_column(conn, "consignments", "other_documents_supplied", "TEXT")
-    ensure_column(conn, "consignments", "advertising_authority", "INTEGER DEFAULT 0")
-    ensure_column(conn, "consignments", "photo_retention_authority", "INTEGER DEFAULT 0")
-    ensure_column(conn, "consignments", "declaration_name", "TEXT")
-    ensure_column(conn, "consignments", "declaration_date", "TEXT")
-
-    # Version 25.21.4 - Consignment PPSR + pre-existing damage acceptance.
-    ensure_column(conn, "consignments", "ppsr_search_date", "TEXT")
-    ensure_column(conn, "consignments", "ppsr_result", "TEXT DEFAULT 'Not Checked'")
-    ensure_column(conn, "consignments", "condition_inspection_date", "TEXT")
-    ensure_column(conn, "consignments", "preexisting_damage_notes", "TEXT")
-    ensure_column(conn, "consignments", "damage_photos_reviewed", "INTEGER DEFAULT 0")
-    ensure_column(conn, "consignments", "owner_damage_accepted", "INTEGER DEFAULT 0")
-    ensure_column(conn, "consignments", "damage_acceptance_name", "TEXT")
-    ensure_column(conn, "consignments", "damage_acceptance_date", "TEXT")
 
     count = conn.execute(
         "SELECT COUNT(*) AS c FROM users"
@@ -1209,83 +1137,6 @@ def generate_vehicle_ad_text(vehicle):
     except Exception as exc:
         return fallback, f"AI service unavailable; local draft used ({exc})."
 
-
-
-def _extract_response_text(data):
-    text = data.get("output_text") or ""
-    if text:
-        return text.strip()
-    parts = []
-    for item in data.get("output", []):
-        if item.get("type") == "message":
-            for content in item.get("content", []):
-                if content.get("type") == "output_text" and content.get("text"):
-                    parts.append(content["text"])
-    return "\n".join(parts).strip()
-
-
-def bam_live_market_valuation(details):
-    """Research current Australian advertised comparables with OpenAI web search."""
-    if not OPENAI_API_KEY:
-        raise RuntimeError("OPENAI_API_KEY is not configured in Azure.")
-    clean = {k: v for k, v in dict(details).items() if v not in (None, "", 0, 0.0, "0")}
-    asset = str(clean.get("asset_type") or "Car")
-    identity = " ".join(str(clean.get(k) or "") for k in ("year", "make", "model", "variant", "auction_name", "stock_no")).strip()
-    if not identity:
-        raise ValueError("Enter or import identifying details before running BAM Automatic Market Valuation.")
-    prompt = f"""You are the market-research engine inside BAM Motor Group, Australia.
-Research CURRENT Australian advertised listings for the supplied {asset}. Use web search. Prefer close matches in year, make, model, variant/specification, kilometres/hours, size and equipment. Do not invent listings or prices. Ignore obviously unrelated items and auction guide prices when better retail/private comparables exist.
-
-Vehicle/asset details:\n{json.dumps(clean, ensure_ascii=False)}
-
-Return ONLY valid JSON with this exact shape:
-{{"comparables":[{{"price":18500,"title":"short listing title","source":"site/domain","url":"https://..."}}],"confidence":"Good|Limited|Low","summary":"short factual explanation"}}
-Use AUD asking prices as numbers only. Return up to 5 genuine useful comparables. If fewer than 2 credible priced listings are found, return whatever genuine comparables exist and set confidence Low. Never manufacture missing prices."""
-    payload = json.dumps({
-        "model": OPENAI_MODEL,
-        "input": prompt,
-        "tools": [{"type": "web_search_preview", "search_context_size": "medium"}],
-        "tool_choice": "auto",
-        "store": False,
-    }).encode("utf-8")
-    req = urllib.request.Request("https://api.openai.com/v1/responses", data=payload, headers={"Authorization": f"Bearer {OPENAI_API_KEY}", "Content-Type": "application/json"}, method="POST")
-    try:
-        with urllib.request.urlopen(req, timeout=75) as response:
-            data = json.loads(response.read().decode("utf-8"))
-    except urllib.error.HTTPError as exc:
-        body = exc.read().decode("utf-8", errors="replace")[:800]
-        raise RuntimeError(f"OpenAI valuation request failed ({exc.code}): {body}") from exc
-    text = _extract_response_text(data)
-    match = re.search(r"\{.*\}", text, re.S)
-    if not match:
-        raise RuntimeError("The live valuation service did not return usable market data.")
-    try:
-        result = json.loads(match.group(0))
-    except json.JSONDecodeError as exc:
-        raise RuntimeError("The live valuation service returned invalid market data.") from exc
-    comps = []
-    for c in result.get("comparables", [])[:5]:
-        try:
-            price = float(str(c.get("price", 0)).replace("$", "").replace(",", ""))
-        except (TypeError, ValueError):
-            price = 0
-        if price > 0:
-            comps.append({"price": round(price, 2), "title": str(c.get("title") or "")[:180], "source": str(c.get("source") or "")[:120], "url": str(c.get("url") or "")[:500]})
-    if not comps:
-        raise RuntimeError("No credible priced Australian comparables were found. Try adding more identifying details.")
-    prices = sorted(c["price"] for c in comps)
-    low, high, mid = prices[0], prices[-1], statistics.median(prices)
-    return {
-        "comparables": comps,
-        "prices": [c["price"] for c in comps],
-        "market_low": round(low,2), "market_mid": round(mid,2), "market_high": round(high,2),
-        "private_low": round(low*.92,2), "private_high": round(high*.97,2),
-        "wholesale_low": round(low*.62,2), "wholesale_high": round(mid*.72,2),
-        "trade_low": round(low*.68,2), "trade_high": round(mid*.78,2),
-        "dealer_low": round(low,2), "dealer_high": round(high,2),
-        "confidence": str(result.get("confidence") or ("Good" if len(prices)>=4 else "Limited" if len(prices)>=2 else "Low"))[:40],
-        "summary": str(result.get("summary") or "Current Australian advertised comparable listings researched by BAM AI web search.")[:1000],
-    }
 
 def ensure_smart_reminders(conn):
     today = date.today()
@@ -2197,32 +2048,6 @@ def vehicle_generate_ai_ad(vehicle_id):
     return redirect(url_for("advertisement_pro", vehicle_id=vehicle_id))
 
 
-
-@app.route("/vehicles/<int:vehicle_id>/ppsr-history", methods=["POST"])
-@login_required
-def vehicle_ppsr_history_save(vehicle_id):
-    conn = db()
-    try:
-        if not conn.execute("SELECT id FROM vehicles WHERE id=?", (vehicle_id,)).fetchone():
-            return "Vehicle not found", 404
-        conn.execute(
-            """UPDATE vehicles
-               SET ppsr_number=?, ppsr_search_date=?, ppsr_result=?
-               WHERE id=?""",
-            (
-                (request.form.get("ppsr_number") or "").strip() or None,
-                request.form.get("ppsr_search_date") or None,
-                request.form.get("ppsr_result") or "Not Checked",
-                vehicle_id,
-            ),
-        )
-        conn.commit()
-        flash("PPSR / Vehicle History saved.", "success")
-    finally:
-        conn.close()
-    return redirect(url_for("vehicle_detail", vehicle_id=vehicle_id) + "#ppsr-history")
-
-
 @app.route("/vehicles/<int:vehicle_id>")
 @login_required
 def vehicle_detail(vehicle_id):
@@ -2279,11 +2104,9 @@ def vehicle_detail(vehicle_id):
     )
     service_total = sum(float(row["cost_inc_gst"] or 0) for row in services)
     parts_total = sum(float(row["quantity_used"] or 0) * float(row["unit_cost_inc_gst"] or 0) for row in parts_used)
-    storage_records = conn.execute("SELECT * FROM vehicle_storage WHERE vehicle_id=? ORDER BY start_date DESC,id DESC", (vehicle_id,)).fetchall()
-    storage_total = sum(storage_accrued_amount(row) for row in storage_records)
     sale_price = float(sale["sale_price_inc_gst"] or 0) if sale else 0
     selling_costs = float((sale["advertising_cost"] or 0) + (sale["transfer_cost"] or 0)) if sale else 0
-    total_invested = float(vehicle["purchase_price_inc_gst"] or 0) + expense_total + job_total + service_total + parts_total + storage_total + selling_costs
+    total_invested = float(vehicle["purchase_price_inc_gst"] or 0) + expense_total + job_total + service_total + parts_total + selling_costs
 
     def split_partner_costs(rows, amount_func):
         barry = 0.0
@@ -2346,19 +2169,11 @@ def vehicle_detail(vehicle_id):
         * float(row["unit_cost_inc_gst"] or 0)
     )
 
-    # Version 25.20.1 - Storage is a true vehicle cost and follows who paid it.
-    # BAM and Shared storage are joint costs, split equally between Barry and Matt.
-    barry_storage, matt_storage = split_partner_costs(
-        storage_records,
-        storage_accrued_amount
-    )
-
     barry_invested += (
         barry_expenses
         + barry_jobs
         + barry_services
         + barry_parts
-        + barry_storage
         + selling_costs / 2
     )
 
@@ -2367,7 +2182,6 @@ def vehicle_detail(vehicle_id):
         + matt_jobs
         + matt_services
         + matt_parts
-        + matt_storage
         + selling_costs / 2
     )
 
@@ -2413,7 +2227,7 @@ def vehicle_detail(vehicle_id):
     break_even_status = "Recovered / Profitable" if total_revenue >= total_invested and total_invested > 0 else "Recovering Investment"
     conn.close()
 
-    vehicle_page = render_template(
+    return render_template(
         "vehicle_detail.html",
         vehicle=vehicle,
         expenses=expenses,
@@ -2429,8 +2243,6 @@ def vehicle_detail(vehicle_id):
         job_total=job_total,
         service_total=service_total,
         parts_total=parts_total,
-        storage_total=storage_total,
-        storage_records=storage_records,
         total_invested=total_invested,
         profit=profit,
         barry_invested=barry_invested,
@@ -2449,58 +2261,6 @@ def vehicle_detail(vehicle_id):
         remaining_to_break_even=remaining_to_break_even,
         break_even_status=break_even_status,
     )
-    # v25.19.1 - sales paperwork and protected delete controls are also available in the top action row.
-    valuation_button = f"<a href=\"{url_for('vehicle_valuation', vehicle_id=vehicle_id)}\" style=\"position:fixed;right:22px;bottom:22px;z-index:9998;background:#15803d;color:white;padding:14px 18px;border-radius:12px;text-decoration:none;font-weight:800\">Market Valuation &amp; Deal Score</a>"
-    if sale:
-        sale_actions = f"<section id='bam-sale-paperwork' style='margin:18px auto;max-width:1200px;padding:18px;border:1px solid #cbd5e1;border-radius:14px;background:#fff;color:#0f172a'><h2>Sales Paperwork</h2><p>Sale recorded for <b>{html.escape(str(sale['buyer_name'] or 'Buyer'))}</b>. Invoice <b>{html.escape(str(sale['invoice_number'] or ''))}</b>.</p><div style='display:flex;gap:10px;flex-wrap:wrap'><a href='{url_for('sale_bill_of_sale', vehicle_id=vehicle_id)}' style='background:#0f766e;color:white;padding:11px 15px;border-radius:9px;text-decoration:none;font-weight:800'>Sales Paperwork / Bill of Sale</a><a href='{url_for('sale_invoice', vehicle_id=vehicle_id)}' style='background:#2563eb;color:white;padding:11px 15px;border-radius:9px;text-decoration:none;font-weight:800'>View / Print Sales Receipt &amp; Invoice</a><a href='{url_for('sale_contract', vehicle_id=vehicle_id)}' style='background:#475569;color:white;padding:11px 15px;border-radius:9px;text-decoration:none;font-weight:800'>Sales Contract</a></div></section>"
-    else:
-        sale_actions = f"<section id='bam-sale-paperwork' style='margin:18px auto;max-width:1200px;padding:18px;border:1px solid #cbd5e1;border-radius:14px;background:#fff;color:#0f172a'><h2>Sales Paperwork</h2><p>No sale has been recorded yet. You can prepare an editable Bill of Sale now, or record the sale when it is final.</p><div style='display:flex;gap:10px;flex-wrap:wrap'><a href='{url_for('sale_bill_of_sale', vehicle_id=vehicle_id)}' style='background:#0f766e;color:white;padding:11px 15px;border-radius:9px;text-decoration:none;font-weight:800'>Prepare Editable Bill of Sale</a><a href='#sale' style='background:#2563eb;color:white;padding:11px 15px;border-radius:9px;text-decoration:none;font-weight:800'>Record Sale</a></div></section>"
-    delete_panel = f"<section id='bam-delete-vehicle' style='margin:18px auto 90px;max-width:1200px;padding:18px;border:1px solid #fecaca;border-radius:14px;background:#fff7f7;color:#7f1d1d'><h2>Vehicle Record Actions</h2><p>Delete is permanent. Type <b>{html.escape(str(vehicle['stock_no']))}</b> below to protect against accidental deletion.</p><form method='post' action='{url_for('vehicle_delete', vehicle_id=vehicle_id)}' onsubmit=\"return confirm('Permanently delete this vehicle and its vehicle records? This cannot be undone.')\" style='display:flex;gap:10px;flex-wrap:wrap;align-items:center'><input id='bam-delete-confirm' name='confirm_stock_no' required placeholder='Type {html.escape(str(vehicle['stock_no']))}' autocomplete='off' style='padding:10px;border:1px solid #fca5a5;border-radius:8px;min-width:220px'><button type='submit' style='background:#b91c1c;color:white;border:0;padding:11px 15px;border-radius:9px;font-weight:800;cursor:pointer'>Delete Vehicle</button></form></section>"
-    option_markers = [('<option value="Other">Other</option>', '<option value="Sales Receipt / Invoice">Sales Receipt / Invoice</option>'), ("<option value='Other'>Other</option>", "<option value='Sales Receipt / Invoice'>Sales Receipt / Invoice</option>")]
-    for marker, addition in option_markers:
-        if marker in vehicle_page and 'Sales Receipt / Invoice' not in vehicle_page:
-            vehicle_page = vehicle_page.replace(marker, addition + marker, 1)
-            break
-    top_actions_script = f"""<script>
-(function(){{
- function addTopActions(){{
-  var nodes=Array.from(document.querySelectorAll('a,button'));
-  var printBtn=nodes.find(function(el){{return (el.textContent||'').trim()==='Print Report';}});
-  if(!printBtn || document.getElementById('bam-top-sales-paperwork')) return;
-  var host=printBtn.parentElement;
-  var sales=document.createElement('a'); sales.id='bam-top-sales-paperwork'; sales.href='{url_for('sale_bill_of_sale', vehicle_id=vehicle_id)}'; sales.textContent='Sales Paperwork'; sales.style.cssText='display:inline-block;background:#0f766e;color:white;padding:10px 14px;border-radius:7px;text-decoration:none;font-weight:800;margin:4px';
-  var del=document.createElement('button'); del.id='bam-top-delete-vehicle'; del.type='button'; del.textContent='Delete Vehicle'; del.style.cssText='background:#b91c1c;color:white;border:0;padding:10px 14px;border-radius:7px;font-weight:800;margin:4px;cursor:pointer';
-  del.onclick=function(){{var panel=document.getElementById('bam-delete-vehicle');if(panel){{panel.scrollIntoView({{behavior:'smooth',block:'center'}});setTimeout(function(){{var inp=document.getElementById('bam-delete-confirm');if(inp)inp.focus();}},450);}}}};
-  host.appendChild(sales); host.appendChild(del);
- }}
- if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',addTopActions);else addTopActions();
-}})();
-</script>"""
-    # v25.19.5 - place the lower action panels inside the existing vehicle workspace,
-    # directly after Partner Contribution & Profit. A <template> is inert, so it
-    # cannot become another item in the base page grid while the DOM is loading.
-    bottom_panels_script = f"""<template id="bam-bottom-panels-template">{sale_actions}{delete_panel}</template>
-<script>
-(function(){{
- function placeBottomPanels(){{
-  if(document.getElementById('bam-bottom-panels')) return;
-  var headings=Array.from(document.querySelectorAll('h1,h2,h3,h4'));
-  var partnerHeading=headings.find(function(el){{return (el.textContent||'').indexOf('Partner Contribution')!==-1;}});
-  var tpl=document.getElementById('bam-bottom-panels-template');
-  if(!partnerHeading || !tpl) return;
-  var partnerCard=partnerHeading.closest('.card,.panel,.section') || partnerHeading.parentElement;
-  if(!partnerCard || !partnerCard.parentElement) return;
-  var wrap=document.createElement('div');
-  wrap.id='bam-bottom-panels';
-  wrap.style.cssText='display:block;width:100%;max-width:100%;box-sizing:border-box;grid-column:1/-1;';
-  wrap.appendChild(tpl.content.cloneNode(true));
-  partnerCard.insertAdjacentElement('afterend',wrap);
-  tpl.remove();
- }}
- if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',placeBottomPanels);else placeBottomPanels();
-}})();
-</script>"""
-    return vehicle_page.replace("</body>", bottom_panels_script + valuation_button + top_actions_script + "</body>")
 
 @app.route("/vehicles/<int:vehicle_id>/documents", methods=["POST"])
 @login_required
@@ -3361,101 +3121,6 @@ def sale_invoice(vehicle_id):
         return "Sale invoice is not available until a sale is recorded.", 404
     sale_ex_gst = sale["sale_price_inc_gst"] - sale["sale_gst"]
     return render_template("sale_invoice.html", vehicle=vehicle, sale=sale, sale_ex_gst=sale_ex_gst)
-
-
-@app.route("/vehicles/<int:vehicle_id>/bill-of-sale", methods=["GET", "POST"])
-@login_required
-def sale_bill_of_sale(vehicle_id):
-    conn = db()
-    vehicle = conn.execute("SELECT * FROM vehicles WHERE id=?", (vehicle_id,)).fetchone()
-    sale = conn.execute("SELECT * FROM sales WHERE vehicle_id=?", (vehicle_id,)).fetchone()
-    conn.close()
-    if not vehicle:
-        return "Vehicle not found", 404
-    asset_type = str(vehicle["asset_type"] or "Motor Vehicle")
-    title_asset = "Motor Vehicle" if asset_type.lower() == "car" else asset_type
-    sale_date = (sale["sale_date"] if sale else "") or date.today().isoformat()
-    try:
-        pretty_date = datetime.strptime(sale_date, "%Y-%m-%d").strftime("%d %B %Y")
-    except ValueError:
-        pretty_date = sale_date
-    price = float(sale["sale_price_inc_gst"] or 0) if sale else 0
-    buyer = sale["buyer_name"] if sale else ""
-    buyer_address = sale["buyer_address"] if sale else ""
-    buyer_phone = sale["buyer_phone"] if sale else ""
-    invoice_no = sale["invoice_number"] if sale else ""
-    form = {
-        "sale_date": request.form.get("sale_date", sale_date),
-        "buyer_name": request.form.get("buyer_name", buyer or ""),
-        "buyer_address": request.form.get("buyer_address", buyer_address or ""),
-        "buyer_phone": request.form.get("buyer_phone", buyer_phone or ""),
-        "buyer_email": request.form.get("buyer_email", (sale["buyer_email"] if sale else "") or ""),
-        "sale_price": request.form.get("sale_price", str(price) if price else ""),
-        "payment_method": request.form.get("payment_method", (sale["payment_method"] if sale else "") or ""),
-        "notes": request.form.get("notes", (sale["notes"] if sale else "") or ""),
-    }
-    if request.method == "POST":
-        buyer = form["buyer_name"]
-        buyer_address = form["buyer_address"]
-        buyer_phone = form["buyer_phone"]
-        sale_date = form["sale_date"]
-        try:
-            price = float(str(form["sale_price"] or "0").replace("$", "").replace(",", ""))
-        except ValueError:
-            price = 0
-        try:
-            pretty_date = datetime.strptime(sale_date, "%Y-%m-%d").strftime("%d %B %Y")
-        except (ValueError, TypeError):
-            pretty_date = sale_date or ""
-
-    bill_html = r'''<!doctype html>
-<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>BAM Bill of Sale</title><style>
-body{font-family:Arial,sans-serif;background:#eef2f7;margin:0;color:#111827}.page{max-width:850px;margin:28px auto;background:white;padding:48px 56px;box-shadow:0 4px 20px #0002}.brand{text-align:center;border-bottom:3px solid #111827;padding-bottom:18px}.brand h1{margin:0;font-size:30px}.brand p{margin:7px 0 0;letter-spacing:3px}.title{text-align:center;font-size:25px;margin:28px 0}.grid{display:grid;grid-template-columns:1fr 1fr;gap:14px 28px}.field{border-bottom:1px solid #9ca3af;padding:8px 0;min-height:22px}.label{font-size:12px;color:#6b7280;font-weight:bold;text-transform:uppercase}.wide{grid-column:1/-1}.terms{margin-top:28px;line-height:1.5}.signatures{display:grid;grid-template-columns:1fr 1fr;gap:50px;margin-top:70px}.sig{border-top:1px solid #111;padding-top:8px}.actions{max-width:850px;margin:18px auto;display:flex;gap:10px}.btn{background:#2563eb;color:white;padding:11px 16px;border:0;border-radius:8px;text-decoration:none;font-weight:bold;cursor:pointer}.secondary{background:#475569}@media(max-width:650px){.page{margin:0;padding:25px 20px}.grid,.signatures{grid-template-columns:1fr}.wide{grid-column:auto}}@media print{body{background:white}.page{box-shadow:none;margin:0;max-width:none}.actions{display:none}}
-</style></head><body>
-<div class="actions"><button class="btn" onclick="window.print()">Print / Save as PDF</button><a class="btn secondary" href="{{ back_url }}">Back to Vehicle</a></div>
-<div class="page"><div class="brand"><h1>BAM MOTOR GROUP</h1><p>BUY • SELL • TRADE</p></div><h2 class="title">BILL OF SALE — {{ title_asset|upper }}</h2>
-<div class="grid">
-<div><div class="label">Seller</div><div class="field">BAM Motor Group</div></div><div><div class="label">Sale Date</div><div class="field">{{ pretty_date }}</div></div>
-<div><div class="label">Buyer</div><div class="field">{{ buyer or '____________________________' }}</div></div><div><div class="label">Sale Price (AUD, inc. GST where applicable)</div><div class="field">{% if price %}${{ '{:,.2f}'.format(price) }}{% else %}________________{% endif %}</div></div>
-<div class="wide"><div class="label">Buyer Address</div><div class="field">{{ buyer_address or '____________________________________________________________' }}</div></div><div><div class="label">Buyer Phone</div><div class="field">{{ buyer_phone or '____________________________' }}</div></div><div><div class="label">Invoice Number</div><div class="field">{{ invoice_no or '____________________________' }}</div></div>
-<div><div class="label">Asset Type</div><div class="field">{{ asset_type }}</div></div><div><div class="label">Stock Number</div><div class="field">{{ vehicle.stock_no }}</div></div><div><div class="label">Year / Make / Model</div><div class="field">{{ vehicle.year or '' }} {{ vehicle.make }} {{ vehicle.model }} {{ vehicle.variant or '' }}</div></div><div><div class="label">Registration</div><div class="field">{{ vehicle.registration or 'N/A' }}</div></div>
-<div class="wide"><div class="label">VIN / Chassis / HIN</div><div class="field">{{ vehicle.vin or vehicle.hin or 'N/A' }}</div></div><div><div class="label">Engine Number / Code</div><div class="field">{{ vehicle.engine_code or 'N/A' }}</div></div><div><div class="label">Odometer / Engine Hours</div><div class="field">{% if vehicle.odometer_km %}{{ '{:,}'.format(vehicle.odometer_km) }} km{% elif vehicle.engine_hours %}{{ vehicle.engine_hours }} hours{% else %}N/A{% endif %}</div></div></div>
-<div class="terms"><p>The seller acknowledges receipt of the sale consideration shown above and transfers the described asset to the buyer, subject to the recorded sale terms and any statutory rights that apply.</p><p>The buyer acknowledges the asset details and condition disclosed at the time of sale. Any warranty or additional conditions recorded on the BAM sales invoice or contract form part of the sale documentation.</p></div><div class="signatures"><div class="sig">Seller signature &amp; date</div><div class="sig">Buyer signature &amp; date</div></div></div></body></html>'''
-    if request.method == "GET":
-        editor_html = r'''<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>BAM Sales Paperwork</title><style>body{font-family:Arial,sans-serif;background:#eef2f7;color:#111827;margin:0}.card{max-width:900px;margin:30px auto;background:white;padding:30px;border-radius:14px;box-shadow:0 4px 20px #0002}.grid{display:grid;grid-template-columns:1fr 1fr;gap:16px 20px}.wide{grid-column:1/-1}label{display:block;font-size:12px;font-weight:800;text-transform:uppercase;color:#475569;margin-bottom:5px}input,select,textarea{width:100%;box-sizing:border-box;padding:11px;border:1px solid #cbd5e1;border-radius:8px;font:inherit}textarea{min-height:100px}.actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:20px}.btn{background:#0f766e;color:#fff;border:0;border-radius:8px;padding:12px 17px;font-weight:800;text-decoration:none;cursor:pointer}.secondary{background:#475569}@media(max-width:650px){.card{margin:0;border-radius:0;padding:22px}.grid{grid-template-columns:1fr}.wide{grid-column:auto}}</style></head><body><div class="card"><h1>Sales Paperwork / Bill of Sale</h1><p>Enter the buyer and sale details. This prepares the Bill of Sale without marking the vehicle Sold.</p><form method="post"><div class="grid"><div><label>Buyer Name</label><input name="buyer_name" value="{{form.buyer_name}}" required></div><div><label>Buyer Phone</label><input name="buyer_phone" value="{{form.buyer_phone}}"></div><div class="wide"><label>Buyer Address</label><input name="buyer_address" value="{{form.buyer_address}}"></div><div><label>Buyer Email</label><input type="email" name="buyer_email" value="{{form.buyer_email}}"></div><div><label>Sale Price (AUD)</label><input name="sale_price" inputmode="decimal" value="{{form.sale_price}}" required></div><div><label>Sale Date</label><input type="date" name="sale_date" value="{{form.sale_date}}" required></div><div><label>Payment Method</label><select name="payment_method"><option value="">Select</option>{% for m in ["Cash","Bank Transfer","EFTPOS","Finance","Cheque","Other"] %}<option value="{{m}}" {% if form.payment_method==m %}selected{% endif %}>{{m}}</option>{% endfor %}</select></div><div class="wide"><label>Sale Notes / Conditions</label><textarea name="notes">{{form.notes}}</textarea></div></div><div class="actions"><button class="btn" type="submit">Create Bill of Sale</button><a class="btn secondary" href="{{back_url}}">Back to Vehicle</a></div></form></div></body></html>'''
-        return render_template_string(editor_html, form=form, back_url=url_for("vehicle_detail", vehicle_id=vehicle_id))
-    return render_template_string(bill_html, vehicle=vehicle, sale=sale, asset_type=asset_type, title_asset=title_asset, pretty_date=pretty_date, price=price, buyer=buyer, buyer_address=buyer_address, buyer_phone=buyer_phone, invoice_no=invoice_no, back_url=url_for("vehicle_detail", vehicle_id=vehicle_id))
-
-
-@app.post("/vehicles/<int:vehicle_id>/delete")
-@login_required
-def vehicle_delete(vehicle_id):
-    conn = db()
-    vehicle = conn.execute("SELECT * FROM vehicles WHERE id=?", (vehicle_id,)).fetchone()
-    if not vehicle:
-        conn.close(); return "Vehicle not found", 404
-    supplied = (request.form.get("confirm_stock_no") or "").strip().upper()
-    required = str(vehicle["stock_no"] or "").strip().upper()
-    if not required or supplied != required:
-        conn.close(); flash(f"Vehicle not deleted. Type {vehicle['stock_no']} exactly to confirm.", "error")
-        return redirect(url_for("vehicle_detail", vehicle_id=vehicle_id))
-    photos = conn.execute("SELECT filename FROM vehicle_photos WHERE vehicle_id=?", (vehicle_id,)).fetchall()
-    documents = conn.execute("SELECT filename FROM vehicle_documents WHERE vehicle_id=?", (vehicle_id,)).fetchall()
-    try:
-        conn.execute("UPDATE parts SET vehicle_id=NULL, vehicle_stock_no=COALESCE(vehicle_stock_no, ?) WHERE vehicle_id=?", (vehicle["stock_no"], vehicle_id))
-        conn.execute("DELETE FROM vehicles WHERE id=?", (vehicle_id,))
-        conn.commit()
-    except sqlite3.Error as exc:
-        conn.rollback(); conn.close(); flash(f"Vehicle could not be deleted: {exc}", "error")
-        return redirect(url_for("vehicle_detail", vehicle_id=vehicle_id))
-    conn.close()
-    for row in list(photos) + list(documents):
-        try: (UPLOAD_DIR / row["filename"]).unlink(missing_ok=True)
-        except (OSError, TypeError): pass
-    log_action("Vehicle deleted", "vehicle", vehicle_id, f"{vehicle['stock_no']} {vehicle['make']} {vehicle['model']}")
-    flash(f"{vehicle['stock_no']} was permanently deleted from Vehicle Inventory.", "success")
-    return redirect(url_for("vehicles"))
 
 
 @app.route("/export/vehicles.csv")
@@ -4452,70 +4117,51 @@ def delete_vehicle_photo(vehicle_id, photo_id):
     return redirect(url_for("vehicle_detail", vehicle_id=vehicle_id))
 
 
-@app.post("/vehicles/<int:vehicle_id>/automatic-valuation")
-@login_required
-def vehicle_automatic_valuation(vehicle_id):
-    conn=db(); vehicle=conn.execute("SELECT * FROM vehicles WHERE id=?",(vehicle_id,)).fetchone()
-    if not vehicle: conn.close(); return "Vehicle not found",404
-    try:
-        result=bam_live_market_valuation(dict(vehicle)); prices=(result["prices"]+[0,0,0,0,0])[:5]
-        source=result["summary"] + " Asking prices are market evidence, not confirmed sale prices."
-        conn.execute("""UPDATE vehicles SET comparable_price_1=?,comparable_price_2=?,comparable_price_3=?,comparable_price_4=?,comparable_price_5=?,market_price_low=?,market_price_mid=?,market_price_high=?,private_value_low=?,private_value_high=?,wholesale_value_low=?,wholesale_value_high=?,trade_value_low=?,trade_value_high=?,dealer_value_low=?,dealer_value_high=?,estimated_sale_price=?,minimum_sale_price=?,valuation_provider=?,valuation_confidence=?,valuation_source=?,market_price_checked_at=CURRENT_TIMESTAMP WHERE id=?""",(*prices,result["market_low"],result["market_mid"],result["market_high"],result["private_low"],result["private_high"],result["wholesale_low"],result["wholesale_high"],result["trade_low"],result["trade_high"],result["dealer_low"],result["dealer_high"],result["market_mid"],result["wholesale_high"],"BAM AI live Australian market search",result["confidence"],source,vehicle_id))
-        conn.commit(); flash(f"BAM Automatic Market Valuation researched, calculated and saved {len(result['prices'])} current Australian comparable listing(s). Quick-Sale Value and Buying Guide are updated.","success")
-    except Exception as exc:
-        flash(f"Automatic market valuation could not complete: {exc}","error")
-    finally: conn.close()
-    return redirect(url_for("vehicle_valuation",vehicle_id=vehicle_id))
-
 @app.route("/vehicles/<int:vehicle_id>/valuation", methods=["GET", "POST"])
 @login_required
 def vehicle_valuation(vehicle_id):
     conn = db()
     vehicle = conn.execute("SELECT * FROM vehicles WHERE id=?", (vehicle_id,)).fetchone()
-    if not vehicle:
-        conn.close(); return "Vehicle not found", 404
     expenses = conn.execute("SELECT COALESCE(SUM(cost_inc_gst),0) AS v FROM expenses WHERE vehicle_id=?", (vehicle_id,)).fetchone()["v"]
     jobs = conn.execute("SELECT COALESCE(SUM(CASE WHEN actual_cost_inc_gst>0 THEN actual_cost_inc_gst ELSE estimated_cost END),0) AS v FROM job_cards WHERE vehicle_id=?", (vehicle_id,)).fetchone()["v"]
     services = conn.execute("SELECT COALESCE(SUM(cost_inc_gst),0) AS v FROM service_entries WHERE vehicle_id=?", (vehicle_id,)).fetchone()["v"]
     parts = conn.execute("SELECT COALESCE(SUM(quantity_used*unit_cost_inc_gst),0) AS v FROM part_usage WHERE vehicle_id=?", (vehicle_id,)).fetchone()["v"]
+
+    if not vehicle:
+        conn.close()
+        return "Vehicle not found", 404
+
     if request.method == "POST":
-        prices=[]; raw_prices=[]
-        for i in range(1,6):
-            try: value=float((request.form.get(f"comparable_price_{i}") or "0").strip())
-            except ValueError: value=0
-            raw_prices.append(value)
-            if value>0: prices.append(value)
-        if prices:
-            ordered=sorted(prices); n=len(ordered); low=ordered[0]; high=ordered[-1]
-            mid=ordered[n//2] if n%2 else (ordered[n//2-1]+ordered[n//2])/2
-            confidence="Good" if n>=4 else ("Limited" if n>=2 else "Single comparable")
-            conn.execute("""UPDATE vehicles SET comparable_price_1=?,comparable_price_2=?,comparable_price_3=?,comparable_price_4=?,comparable_price_5=?,market_price_low=?,market_price_mid=?,market_price_high=?,private_value_low=?,private_value_high=?,wholesale_value_low=?,wholesale_value_high=?,trade_value_low=?,trade_value_high=?,dealer_value_low=?,dealer_value_high=?,estimated_sale_price=?,minimum_sale_price=?,valuation_provider=?,valuation_confidence=?,valuation_source=?,market_price_checked_at=CURRENT_TIMESTAMP WHERE id=?""", (*raw_prices,low,mid,high,low*.92,high*.97,low*.62,mid*.72,low*.68,mid*.78,low,high,mid,mid*.72,"BAM comparable market analysis",confidence,f"{n} advertised Australian comparable price(s); asking prices are not confirmed sales.",vehicle_id))
-            conn.commit(); flash("Market valuation calculated. Market Mid has been put into Quick-Sale / Estimated Sale Value.","success")
-        else: flash("Enter at least one comparable market price first.","error")
-        vehicle=conn.execute("SELECT * FROM vehicles WHERE id=?",(vehicle_id,)).fetchone()
+        conn.execute("""
+            UPDATE vehicles
+            SET estimated_sale_price=?,minimum_sale_price=?,valuation_notes=?
+            WHERE id=?
+        """, (
+            float(request.form.get("estimated_sale_price") or 0),
+            float(request.form.get("minimum_sale_price") or 0),
+            request.form.get("valuation_notes"),
+            vehicle_id,
+        ))
+        conn.commit()
+        vehicle = conn.execute("SELECT * FROM vehicles WHERE id=?", (vehicle_id,)).fetchone()
+        log_action("Vehicle valuation updated", "vehicle", vehicle_id, request.form.get("valuation_notes"))
+        flash("Valuation saved.", "success")
+
     conn.close()
-    total_cost=float(vehicle["purchase_price_inc_gst"] or 0)+float(expenses or 0)+float(jobs or 0)+float(services or 0)+float(parts or 0)
-    asset=(vehicle["asset_type"] or "Car").strip(); terms=[vehicle["year"],vehicle["make"],vehicle["model"],vehicle["variant"]]
-    if asset.lower()=="boat": terms += [f'{vehicle["length_m"]}m' if vehicle["length_m"] else None,vehicle["engine_make"],f'{vehicle["horsepower"]}hp' if vehicle["horsepower"] else None,f'{vehicle["engine_hours"]} hours' if vehicle["engine_hours"] else None,"Boatsonline Gumtree Facebook Marketplace"]
-    elif asset.lower()=="caravan": terms += [f'{vehicle["length_m"]}m' if vehicle["length_m"] else None,f'{vehicle["berths"]} berth' if vehicle["berths"] else None,f'{vehicle["tare_weight_kg"]}kg tare' if vehicle["tare_weight_kg"] else None,"Caravancampingsales Gumtree Facebook Marketplace"]
-    elif asset.lower()=="trailer": terms += [f'{vehicle["length_m"]}m' if vehicle["length_m"] else None,f'{vehicle["tare_weight_kg"]}kg tare' if vehicle["tare_weight_kg"] else None,f'{vehicle["atm_kg"]}kg ATM' if vehicle["atm_kg"] else None,"Gumtree Facebook Marketplace"]
-    else: terms += [f'{vehicle["odometer_km"]} km' if vehicle["odometer_km"] else None,"Carsales Gumtree Facebook Marketplace"]
-    google_url="https://www.google.com/search?q="+urllib.parse.quote_plus(" ".join(str(x) for x in terms if x)+f" {asset} for sale Australia price")
-    purchase=float(vehicle["purchase_price_inc_gst"] or 0); running_costs=max(0,total_cost-purchase); quick=float(vehicle["estimated_sale_price"] or vehicle["market_price_mid"] or 0); target_profit=float(vehicle["target_profit"] or 0)
-    target_buy=max(0,float(vehicle["wholesale_value_low"] or quick*.62)-running_costs-target_profit); max_buy=max(0,float(vehicle["wholesale_value_high"] or quick*.72)-running_costs-target_profit); walk_away=max(0,quick-running_costs-target_profit); expected_profit=quick-total_cost if quick else 0
-    if not quick: deal_score="-"; deal_message="Enter comparable prices to calculate the BAM buying guide."
-    elif purchase<=0: deal_score="READY"; deal_message="Valuation ready. Purchase price has not been recorded yet."
-    elif purchase<=target_buy: deal_score="STRONG BUY"; deal_message="Purchase price was at or below BAM Target Buy."
-    elif purchase<=max_buy: deal_score="GOOD BUY"; deal_message="Purchase price was within BAM recommended buying range."
-    elif purchase<=walk_away: deal_score="CAUTION"; deal_message="Purchase price was above BAM recommended buy range but below Walk-Away."
-    else: deal_score="ABOVE WALK-AWAY"; deal_message="Recorded purchase price is above the calculated Walk-Away Price."
-    template='''{% extends "base.html" %}{% block content %}
-<div class="panel"><h1>🇦🇺 BAM Inventory Market Valuation</h1><p><b>{{vehicle.stock_no}}</b> — {{vehicle.year or ''}} {{vehicle.make}} {{vehicle.model}} · {{vehicle.asset_type or 'Car'}}</p><div class="actions"><form method="post" action="{{url_for('vehicle_automatic_valuation',vehicle_id=vehicle.id)}}" style="display:inline"><button class="btn good">✨ BAM Automatic Valuation — Research, Calculate & Save</button></form><a class="btn secondary" target="_blank" rel="noopener" href="{{google_url}}">🔎 Open Google Cross-Check ↗</a><form method="post" action="{{url_for('vehicle_market_suggestion_save',vehicle_id=vehicle.id)}}" style="display:inline"><button class="btn secondary">BAM Internal Market Suggestion</button></form></div><div class="muted">One click researches current Australian advertised listings, saves up to five comparable prices, calculates all valuation ranges and Quick-Sale Value, and updates the Buying Guide. Use the manual button below only if you edit the comparable prices yourself. Google remains a manual cross-check.</div></div>
-<form method="post"><div class="panel"><h2>📊 Comparable Market Prices</h2><div class="grid">{% for i in range(1,6) %}<div><label>Comparable {{i}} ($)</label><input type="number" step=".01" min="0" name="comparable_price_{{i}}" value="{{ vehicle['comparable_price_' ~ i] or '' }}"></div>{% endfor %}</div><div class="actions"><button class="btn good">Save Manual Comparable Changes & Recalculate</button></div></div></form>
-<div class="panel"><h2>Market Valuation</h2><div class="valuation-grid"><div class="valuation-card"><span>Market Low</span><strong>${{'{:,.0f}'.format(vehicle.market_price_low or 0)}}</strong></div><div class="valuation-card"><span>Market Mid / Quick-Sale</span><strong>${{'{:,.0f}'.format(vehicle.market_price_mid or 0)}}</strong></div><div class="valuation-card"><span>Market High</span><strong>${{'{:,.0f}'.format(vehicle.market_price_high or 0)}}</strong></div><div class="valuation-card"><span>Wholesale</span><strong>${{'{:,.0f}'.format(vehicle.wholesale_value_low or 0)}} – ${{'{:,.0f}'.format(vehicle.wholesale_value_high or 0)}}</strong></div><div class="valuation-card"><span>Trade</span><strong>${{'{:,.0f}'.format(vehicle.trade_value_low or 0)}} – ${{'{:,.0f}'.format(vehicle.trade_value_high or 0)}}</strong></div><div class="valuation-card"><span>Private</span><strong>${{'{:,.0f}'.format(vehicle.private_value_low or 0)}} – ${{'{:,.0f}'.format(vehicle.private_value_high or 0)}}</strong></div></div><p><b>Quick-Sale / Estimated Sale Value:</b> ${{'{:,.0f}'.format(vehicle.estimated_sale_price or 0)}} · <b>Total recorded cost:</b> ${{'{:,.0f}'.format(total_cost)}}</p><div class="muted">Provider: {{vehicle.valuation_provider or 'Not calculated'}} · Confidence: {{vehicle.valuation_confidence or 'Not calculated'}}<br>{{vehicle.valuation_source or ''}}</div><div class="actions"><a class="btn" href="{{url_for('vehicle_detail',vehicle_id=vehicle.id)}}">← Back to Vehicle Inventory</a></div></div>
-<div class="panel"><h2>BAM Buying Guide & Deal Score</h2><div class="valuation-grid"><div class="valuation-card"><span>Target Buy Price</span><strong>${{'{:,.0f}'.format(target_buy)}}</strong></div><div class="valuation-card"><span>Maximum Recommended Buy</span><strong>${{'{:,.0f}'.format(max_buy)}}</strong></div><div class="valuation-card"><span>Walk-Away Price</span><strong>${{'{:,.0f}'.format(walk_away)}}</strong></div><div class="valuation-card"><span>Expected Profit</span><strong>${{'{:,.0f}'.format(expected_profit)}}</strong></div><div class="valuation-card"><span>Deal Score</span><strong>{{deal_score}}</strong></div></div><div class="notice" style="margin-top:12px">{{deal_message}}</div></div>
-{% endblock %}'''
-    return render_template_string(template,vehicle=vehicle,google_url=google_url,total_cost=total_cost,target_buy=target_buy,max_buy=max_buy,walk_away=walk_away,expected_profit=expected_profit,deal_score=deal_score,deal_message=deal_message)
+    total_cost = vehicle["purchase_price_inc_gst"] + expenses + jobs + services + parts
+    estimated_profit = vehicle["estimated_sale_price"] - total_cost
+    minimum_profit = vehicle["minimum_sale_price"] - total_cost
+    return render_template(
+        "vehicle_valuation.html",
+        vehicle=vehicle,
+        expenses=expenses,
+        jobs=jobs,
+        services=services,
+        parts=parts,
+        total_cost=total_cost,
+        estimated_profit=estimated_profit,
+        minimum_profit=minimum_profit,
+    )
 
 
 @app.route("/vehicles/<int:vehicle_id>/purchase-agreement")
@@ -6949,61 +6595,6 @@ def _extract_listing_details(raw_text, url="", title="", description=""):
 
     # Extra Grays labels that are reliable on vehicle lot pages.
     if "grays.com" in (urllib.parse.urlparse(url or "").netloc or "").lower():
-        # v25.19.3 - Grays vehicle identity repair.  Some Grays car pages expose
-        # Year/VIN/rego/specifications correctly but their Make/Model/Variant are
-        # outside BAM's catalogue.  Read Grays' own labelled fields first, then
-        # fall back to the lot title so saved watch vehicles keep their identity.
-        grays_make = _first_match(source_text, [
-            r"(?:^|\s)Make\s*[:\-]?\s*([A-Za-z][A-Za-z0-9 .&'/-]{1,40}?)(?=\s+(?:Model|Variant|Series|Body\s+Type|Year)\b)",
-        ], flags=re.I | re.S)
-        grays_model = _first_match(source_text, [
-            r"(?:^|\s)Model\s*[:\-]?\s*([A-Za-z0-9][A-Za-z0-9 .&'/-]{0,60}?)(?=\s+(?:Variant|Series|Body\s+Type|Year|VIN|Registration)\b)",
-        ], flags=re.I | re.S)
-        grays_variant = _first_match(source_text, [
-            r"(?:^|\s)(?:Variant|Series)\s*[:\-]?\s*([A-Za-z0-9][A-Za-z0-9 .&'()+/-]{0,70}?)(?=\s+(?:Body\s+Type|Year|VIN|Registration|Engine|Transmission|Fuel|Drive)\b)",
-        ], flags=re.I | re.S)
-
-        def _clean_grays_identity(value, limit):
-            value = re.sub(r"\s+", " ", str(value or "")).strip(" ,.-")
-            if not value or len(value) > limit:
-                return ""
-            bad = {"make", "model", "variant", "series", "body type", "year", "vehicle"}
-            return "" if value.lower() in bad else value
-
-        grays_make = _clean_grays_identity(grays_make, 40)
-        grays_model = _clean_grays_identity(grays_model, 60)
-        grays_variant = _clean_grays_identity(grays_variant, 70)
-        if grays_make: details["make"] = grays_make.upper() if grays_make.lower() == "mini" else grays_make.title()
-        if grays_model: details["model"] = grays_model
-        if grays_variant: details["variant"] = grays_variant
-
-        # Title fallback, e.g. "2010 MINI Cooper ... Auction (...) | Grays".
-        if not details.get("make") or not details.get("model"):
-            gt = re.sub(r"\s+", " ", _strip_html(title or "")).strip()
-            gt = re.split(r"\s+(?:Auction\b|\|\s*Grays\b|Grays Australia\b)", gt, maxsplit=1, flags=re.I)[0].strip(" -|,")
-            tm = re.match(r"^(?:(?:19|20)\d{2})\s+(.+)$", gt, flags=re.I)
-            rest = tm.group(1).strip() if tm else ""
-            if rest:
-                known_makes = sorted(set(VEHICLE_MODEL_CATALOG.keys()) | {"MINI", "Jeep", "Porsche", "Fiat", "Citroen", "Peugeot", "Alfa Romeo", "Chrysler"}, key=len, reverse=True)
-                title_make = next((m for m in known_makes if re.match(rf"^{re.escape(m)}(?:\s|$)", rest, flags=re.I)), "")
-                if title_make:
-                    remainder = re.sub(rf"^{re.escape(title_make)}\s*", "", rest, count=1, flags=re.I).strip()
-                    models = list(VEHICLE_MODEL_CATALOG.get(title_make, []))
-                    if title_make == "MINI": models = ["Cooper S", "Cooper", "Clubman", "Countryman", "Paceman", "One"]
-                    title_model = next((m for m in sorted(models, key=len, reverse=True) if re.match(rf"^{re.escape(m)}(?:\s|$)", remainder, flags=re.I)), "")
-                    if not title_model:
-                        mm = re.match(r"^([A-Za-z0-9][A-Za-z0-9-]{0,30})(?:\s+|$)(.*)$", remainder)
-                        title_model = mm.group(1) if mm else remainder
-                    if title_make and not details.get("make"):
-                        details["make"] = "MINI" if title_make.upper() == "MINI" else title_make
-                    if title_model and not details.get("model"):
-                        details["model"] = title_model
-                    if title_model and not details.get("variant"):
-                        tail = re.sub(rf"^{re.escape(title_model)}\s*", "", remainder, count=1, flags=re.I).strip(" ,.-")
-                        tail = re.split(r"\s+(?:Automatic|Manual|CVT|DCT|AWD|4WD|FWD|RWD|Petrol|Diesel)\b", tail, maxsplit=1, flags=re.I)[0].strip(" ,.-")
-                        if 1 <= len(tail) <= 70:
-                            details["variant"] = tail
-
         sale_name = _first_match(source_text, [r"Part\s+of\s+Sale\s*[:\-]?\s*(.+?)(?=Warranty|Description|GST|Location|Lot\s+ID|$)"])
         if sale_name:
             details["auction_name"] = sale_name.strip(" -")[:120]
@@ -8254,105 +7845,6 @@ def _fetch_pickles_search_card(stock_id, request_headers):
     return ""
 
 
-def _extract_live_auction_bid(page_html, url=""):
-    """Extract a current public auction bid from a fetched listing page.
-
-    v25.19.2 starts with Grays. The parser checks visible labels plus common
-    embedded JSON/state keys because auction sites can render the same amount in
-    different parts of the page. It deliberately does not place bids.
-    """
-    host = (urllib.parse.urlparse(url or "").netloc or "").lower()
-    if "grays.com" not in host:
-        return {"supported": False, "status": "Live tracking currently supports Grays saved listings."}
-
-    raw = html.unescape(page_html or "").replace("\\/", "/")
-    text = _strip_html(raw)
-    sold_patterns = [
-        r"(?:sold\s+for|sold\s+price|final\s+bid\s+price)\s*[:\-]?\s*\$\s*([\d,]+(?:\.\d{1,2})?)",
-    ]
-    sold = _first_match(text, sold_patterns)
-    sold_value = _number(sold)
-
-    patterns = [
-        r"Current\s+Bid(?:\s*\([^)]*\))?\s*[:\-]?\s*\$\s*([\d,]+(?:\.\d{1,2})?)",
-        r"Highest\s+Bid\s*[:\-]?\s*\$\s*([\d,]+(?:\.\d{1,2})?)",
-        r'["\']currentBid["\']\s*:\s*(?:["\']?\$?\s*)?([\d,]+(?:\.\d{1,2})?)',
-        r'["\']current_bid["\']\s*:\s*(?:["\']?\$?\s*)?([\d,]+(?:\.\d{1,2})?)',
-        r'["\']highestBid["\']\s*:\s*(?:["\']?\$?\s*)?([\d,]+(?:\.\d{1,2})?)',
-        r'currentBid(?:Amount|Value)?\\?["\']?\s*[:=]\s*\\?["\']?\$?\s*([\d,]+(?:\.\d{1,2})?)',
-    ]
-    candidates = []
-    for blob in (text, raw):
-        for pattern in patterns:
-            for match in re.finditer(pattern, blob, flags=re.I):
-                value = _number(match.group(1))
-                if value is not None and 0 <= value < 100_000_000:
-                    candidates.append(value)
-    # Prefer the largest repeated/live amount when multiple stale state values
-    # exist in the HTML. This is appropriate for an ascending auction bid.
-    current = max(candidates) if candidates else None
-
-    bid_count = None
-    count_text = _first_match(text, [
-        r"(?:Bid\s+Count|Number\s+of\s+Bids|Bids)\s*[:\-]?\s*(\d{1,6})\b",
-        r"(\d{1,6})\s+Bids?\b",
-    ])
-    if count_text:
-        try: bid_count = int(count_text)
-        except ValueError: pass
-
-    if sold_value is not None and current is None:
-        return {"supported": True, "current_bid": None, "sold_price": sold_value, "bid_count": bid_count, "status": "Auction finished"}
-    if current is None:
-        return {"supported": True, "current_bid": None, "sold_price": sold_value, "bid_count": bid_count, "status": "Current bid not exposed on the public page"}
-    return {"supported": True, "current_bid": round(current, 2), "sold_price": sold_value, "bid_count": bid_count, "status": "LIVE"}
-
-
-def _fetch_live_auction_bid(url):
-    parsed = _validate_public_http_url(url)
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0 Safari/537.36",
-        "Accept-Language": "en-AU,en;q=0.9",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Cache-Control": "no-cache, no-store",
-        "Pragma": "no-cache",
-    }
-    req = urllib.request.Request(url, headers=headers)
-    with urllib.request.urlopen(req, timeout=15) as response:
-        ctype = (response.headers.get("Content-Type") or "").lower()
-        if "html" not in ctype:
-            raise ValueError("Auction listing did not return a normal web page.")
-        charset = response.headers.get_content_charset() or "utf-8"
-        raw = response.read(4_000_000).decode(charset, errors="ignore")
-    return _extract_live_auction_bid(raw, parsed.geturl())
-
-
-def _refresh_saved_live_bid(conn, item):
-    url = (item["listing_url"] or item["auction_url"] or "").strip()
-    checked = datetime.now().isoformat(timespec="seconds")
-    if not url:
-        conn.execute("UPDATE auction_vehicles SET live_bid_checked_at=?,live_bid_status=? WHERE id=?", (checked, "No auction listing URL saved", item["id"]))
-        return {"ok": False, "id": item["id"], "error": "No auction listing URL saved."}
-    try:
-        result = _fetch_live_auction_bid(url)
-        if not result.get("supported"):
-            status = result.get("status") or "Auction site not supported"
-            conn.execute("UPDATE auction_vehicles SET live_bid_checked_at=?,live_bid_status=? WHERE id=?", (checked, status, item["id"]))
-            return {"ok": False, "id": item["id"], "error": status}
-        values = [checked, result.get("status") or "Checked", result.get("bid_count"), item["id"]]
-        if result.get("current_bid") is not None:
-            conn.execute("UPDATE auction_vehicles SET current_bid=?,live_bid_checked_at=?,live_bid_status=?,live_bid_count=?,updated_at=? WHERE id=?", (result["current_bid"], checked, result.get("status") or "LIVE", result.get("bid_count"), checked, item["id"]))
-        elif result.get("sold_price") is not None:
-            conn.execute("UPDATE auction_vehicles SET sold_price=?,status='Sold',live_bid_checked_at=?,live_bid_status=?,live_bid_count=?,updated_at=? WHERE id=?", (result["sold_price"], checked, result.get("status") or "Auction finished", result.get("bid_count"), checked, item["id"]))
-        else:
-            conn.execute("UPDATE auction_vehicles SET live_bid_checked_at=?,live_bid_status=?,live_bid_count=? WHERE id=?", tuple(values))
-        return {"ok": result.get("current_bid") is not None or result.get("sold_price") is not None, "id": item["id"], **result, "checked_at": checked}
-    except Exception as exc:
-        status = f"Live check failed: {str(exc)[:160]}"
-        conn.execute("UPDATE auction_vehicles SET live_bid_checked_at=?,live_bid_status=? WHERE id=?", (checked, status, item["id"]))
-        return {"ok": False, "id": item["id"], "error": status, "checked_at": checked}
-
-
 def _fetch_listing_page(url):
     parsed = _validate_public_http_url(url)
     source = _detect_listing_source(url)
@@ -8724,11 +8216,6 @@ def _auction_payload():
         "target_profit": _auction_num("target_profit"), "rego_ppsr_cost": _auction_num("rego_ppsr_cost"),
         "boat_engine_cost": _auction_num("boat_engine_cost"), "boat_hull_cost": _auction_num("boat_hull_cost"),
         "boat_trailer_cost": _auction_num("boat_trailer_cost"),
-        "comparable_price_1": _auction_num("comparable_price_1"),
-        "comparable_price_2": _auction_num("comparable_price_2"),
-        "comparable_price_3": _auction_num("comparable_price_3"),
-        "comparable_price_4": _auction_num("comparable_price_4"),
-        "comparable_price_5": _auction_num("comparable_price_5"),
     }
 
 
@@ -8765,39 +8252,15 @@ def _auction_market_value(conn, item):
 
 AUCTION_PAGE = r"""
 <!doctype html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>BAM Buying Watch</title>
-<style>body{font-family:Arial;background:#0f172a;color:#e5e7eb;margin:0}.wrap{max-width:1450px;margin:auto;padding:24px}.top{display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap}.brand{font-size:30px;font-weight:800}.sub,.muted{color:#94a3b8}.btn{display:inline-block;padding:10px 14px;border-radius:9px;background:#2563eb;color:white;text-decoration:none;border:0;font-weight:700;cursor:pointer}.secondary{background:#334155}.panel,.card{background:#111827;border:1px solid #334155;border-radius:14px}.panel{padding:16px;margin-top:16px}.filters{display:grid;grid-template-columns:2fr repeat(5,1fr) auto;gap:10px}.filters input,.filters select{padding:10px;border-radius:8px;border:1px solid #475569;background:#0b1220;color:white}.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:14px;margin-top:16px}.card{overflow:hidden}.thumb{height:190px;background:#020617;display:flex;align-items:center;justify-content:center;color:#64748b}.thumb img{width:100%;height:100%;object-fit:cover}.cardbody{padding:14px}.title{font-size:20px;font-weight:800}.pill{display:inline-block;background:#1e293b;border:1px solid #475569;border-radius:999px;padding:4px 8px;margin:3px 2px;font-size:12px}.price{font-size:18px;font-weight:800;margin-top:8px}.livebid{margin-top:8px;padding:9px 10px;border-radius:9px;background:#052e16;border:1px solid #16a34a}.livebid strong{color:#4ade80;font-size:20px}.live-meta{font-size:11px;color:#94a3b8;margin-top:3px}.actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}.flash{background:#1e3a8a;padding:10px;border-radius:8px;margin:10px 0}@media(max-width:900px){.filters{grid-template-columns:1fr 1fr}}@media(max-width:550px){.filters{grid-template-columns:1fr}}</style>
-</head><body><div class='wrap'><div class='top'><div><div class='brand'>🔎 BAM Buying Watch</div><div class='sub'>Cars • Boats • Caravans • Trailers • Motorcycles • Other</div></div><div><a class='btn secondary' href='{{url_for("dashboard")}}'>← BAM Dashboard</a> <button type='button' class='btn secondary' id='refresh_live_bids'>🔴 Refresh Live Bids</button> <a class='btn' href='{{url_for("auction_add")}}'>+ Add Watch Vehicle</a></div></div>
+<style>body{font-family:Arial;background:#0f172a;color:#e5e7eb;margin:0}.wrap{max-width:1450px;margin:auto;padding:24px}.top{display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap}.brand{font-size:30px;font-weight:800}.sub,.muted{color:#94a3b8}.btn{display:inline-block;padding:10px 14px;border-radius:9px;background:#2563eb;color:white;text-decoration:none;border:0;font-weight:700;cursor:pointer}.secondary{background:#334155}.panel,.card{background:#111827;border:1px solid #334155;border-radius:14px}.panel{padding:16px;margin-top:16px}.filters{display:grid;grid-template-columns:2fr repeat(5,1fr) auto;gap:10px}.filters input,.filters select{padding:10px;border-radius:8px;border:1px solid #475569;background:#0b1220;color:white}.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:14px;margin-top:16px}.card{overflow:hidden}.thumb{height:190px;background:#020617;display:flex;align-items:center;justify-content:center;color:#64748b}.thumb img{width:100%;height:100%;object-fit:cover}.cardbody{padding:14px}.title{font-size:20px;font-weight:800}.pill{display:inline-block;background:#1e293b;border:1px solid #475569;border-radius:999px;padding:4px 8px;margin:3px 2px;font-size:12px}.price{font-size:18px;font-weight:800;margin-top:8px}.actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}.flash{background:#1e3a8a;padding:10px;border-radius:8px;margin:10px 0}@media(max-width:900px){.filters{grid-template-columns:1fr 1fr}}@media(max-width:550px){.filters{grid-template-columns:1fr}}</style>
+</head><body><div class='wrap'><div class='top'><div><div class='brand'>🔎 BAM Buying Watch</div><div class='sub'>Cars • Boats • Caravans • Trailers • Motorcycles • Other</div></div><div><a class='btn secondary' href='{{url_for("dashboard")}}'>← BAM Dashboard</a> <a class='btn' href='{{url_for("auction_add")}}'>+ Add Watch Vehicle</a></div></div>
 {% with messages=get_flashed_messages(with_categories=true) %}{% for cat,msg in messages %}<div class='flash'>{{msg}}</div>{% endfor %}{% endwith %}
 <div class='panel'><form class='filters' method='get'><input name='q' value='{{q}}' placeholder='Search make, model, source, seller, auction, location...'><select name='asset_type'><option value=''>All types</option>{% for x in types %}<option {{'selected' if asset_type==x else ''}}>{{x}}</option>{% endfor %}</select><select name='source'><option value=''>All sources</option>{% for x in sources %}<option {{'selected' if source_filter==x else ''}}>{{x}}</option>{% endfor %}</select><select name='status'><option value=''>All status</option>{% for x in statuses %}<option {{'selected' if status==x else ''}}>{{x}}</option>{% endfor %}</select><input name='make' value='{{make}}' placeholder='Make'><input name='model' value='{{model}}' placeholder='Model'><button class='btn'>Search</button></form></div>
-<div class='cards'>{% for v in rows %}<div class='card'><div class='thumb'>{% if v.thumbnail %}<img src='{{url_for("uploaded_file",filename=v.thumbnail)}}'>{% else %}No photo yet{% endif %}</div><div class='cardbody'><div class='title'>{{v.year or ''}} {{v.make}} {{v.model}}</div><div class='muted'>{{v.variant or ''}} • {{v.listing_source or 'Auction'}}{% if (v.listing_source or 'Auction')=='Auction' %} • {{v.auction_name or 'Auction not set'}} • Lot {{v.lot_number or '-'}}{% else %} • {{v.seller_location or 'Location not set'}}{% endif %}</div><div><span class='pill'>{{v.asset_type}}</span><span class='pill'>{{v.status}}</span>{% if v.odometer_km %}<span class='pill'>{{'{:,}'.format(v.odometer_km)}} km</span>{% endif %}{% if v.transmission %}<span class='pill'>{{v.transmission}}</span>{% endif %}{% if v.drive_type %}<span class='pill'>{{v.drive_type}}</span>{% endif %}</div><div class='price'>{% if (v.listing_source or 'Auction')=='Auction' %}Current ${{'{:,.0f}'.format(v.current_bid or 0)}} · Sold ${{'{:,.0f}'.format(v.sold_price or 0)}}{% else %}Asking ${{'{:,.0f}'.format(v.asking_price or 0)}} · Negotiated ${{'{:,.0f}'.format(v.negotiated_price or 0)}}{% endif %}</div>{% if (v.listing_source or 'Auction')=='Auction' and (v.status in ['Watching','Bidding']) %}<div class='livebid' data-live-id='{{v.id}}'><strong>🔴 LIVE BID ${{'{:,.0f}'.format(v.current_bid or 0)}}</strong><div class='live-meta'>{{v.live_bid_status or 'Ready to track'}}{% if v.live_bid_count is not none %} · {{v.live_bid_count}} bids{% endif %} · Last checked {{v.live_bid_checked_at or 'not yet'}}</div></div>{% endif %}<div class='muted'>Finishes: {{v.auction_finish or 'Not set'}} · {{v.colour or 'Colour not set'}} · {{v.condition_grade or 'Unknown'}}</div><div class='actions'><a class='btn' href='{{url_for("auction_detail",auction_id=v.id)}}'>Open</a><a class='btn secondary' href='{{url_for("auction_watch",make=v.make,model=v.model)}}'>Same Model History</a></div></div></div>{% else %}<div class='panel'>No Buying Watch vehicles match these filters yet.</div>{% endfor %}</div></div><script>
-(function(){
-  const btn=document.getElementById('refresh_live_bids');
-  async function refreshLive(silent=false){
-    if(!btn) return;
-    const original=btn.textContent; btn.disabled=true; if(!silent) btn.textContent='⏳ Checking Grays...';
-    try{
-      const r=await fetch('{{url_for("auction_live_bids_refresh")}}',{method:'POST',headers:{'X-Requested-With':'fetch'}});
-      const d=await r.json();
-      if(!r.ok) throw new Error(d.error||'Live bid refresh failed');
-      (d.results||[]).forEach(x=>{
-        const box=document.querySelector('[data-live-id="'+x.id+'"]'); if(!box) return;
-        if(x.current_bid!==undefined && x.current_bid!==null){
-          const strong=box.querySelector('strong'); if(strong) strong.textContent='🔴 LIVE BID $'+Number(x.current_bid).toLocaleString('en-AU',{maximumFractionDigits:0});
-        }
-        const meta=box.querySelector('.live-meta'); if(meta){ meta.textContent=(x.status||x.error||'Checked')+(x.bid_count!==undefined&&x.bid_count!==null?' · '+x.bid_count+' bids':'')+' · Last checked '+(x.checked_at||'now'); }
-      });
-      if(!silent && d.checked===0) alert('No saved Grays items in Watching/Bidding status have a listing URL to track.');
-    }catch(e){ if(!silent) alert('BAM Live Bid Tracker: '+e.message); }
-    finally{ btn.disabled=false; btn.textContent=original; }
-  }
-  if(btn) btn.addEventListener('click',()=>refreshLive(false));
-  if(document.querySelector('[data-live-id]')){ setTimeout(()=>refreshLive(true),2500); setInterval(()=>refreshLive(true),30000); }
-})();
-</script></body></html>
+<div class='cards'>{% for v in rows %}<div class='card'><div class='thumb'>{% if v.thumbnail %}<img src='{{url_for("uploaded_file",filename=v.thumbnail)}}'>{% else %}No photo yet{% endif %}</div><div class='cardbody'><div class='title'>{{v.year or ''}} {{v.make}} {{v.model}}</div><div class='muted'>{{v.variant or ''}} • {{v.listing_source or 'Auction'}}{% if (v.listing_source or 'Auction')=='Auction' %} • {{v.auction_name or 'Auction not set'}} • Lot {{v.lot_number or '-'}}{% else %} • {{v.seller_location or 'Location not set'}}{% endif %}</div><div><span class='pill'>{{v.asset_type}}</span><span class='pill'>{{v.status}}</span>{% if v.odometer_km %}<span class='pill'>{{'{:,}'.format(v.odometer_km)}} km</span>{% endif %}{% if v.transmission %}<span class='pill'>{{v.transmission}}</span>{% endif %}{% if v.drive_type %}<span class='pill'>{{v.drive_type}}</span>{% endif %}</div><div class='price'>{% if (v.listing_source or 'Auction')=='Auction' %}Current ${{'{:,.0f}'.format(v.current_bid or 0)}} · Sold ${{'{:,.0f}'.format(v.sold_price or 0)}}{% else %}Asking ${{'{:,.0f}'.format(v.asking_price or 0)}} · Negotiated ${{'{:,.0f}'.format(v.negotiated_price or 0)}}{% endif %}</div><div class='muted'>Finishes: {{v.auction_finish or 'Not set'}} · {{v.colour or 'Colour not set'}} · {{v.condition_grade or 'Unknown'}}</div><div class='actions'><a class='btn' href='{{url_for("auction_detail",auction_id=v.id)}}'>Open</a><a class='btn secondary' href='{{url_for("auction_watch",make=v.make,model=v.model)}}'>Same Model History</a></div></div></div>{% else %}<div class='panel'>No Buying Watch vehicles match these filters yet.</div>{% endfor %}</div></div></body></html>
 """
 
 AUCTION_FORM = r"""
-<!doctype html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>Buying Watch Vehicle</title><style>body{font-family:Arial;background:#0f172a;color:#e5e7eb;margin:0}.wrap{max-width:1150px;margin:auto;padding:24px}.panel{background:#111827;border:1px solid #334155;border-radius:14px;padding:18px;margin-top:14px}.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}.full{grid-column:1/-1}label{display:block;font-size:12px;color:#94a3b8;margin-bottom:4px}input,select,textarea{width:100%;box-sizing:border-box;padding:10px;border-radius:8px;border:1px solid #475569;background:#0b1220;color:#fff}textarea{min-height:100px}.btn{padding:10px 14px;border:0;border-radius:9px;background:#2563eb;color:white;text-decoration:none;font-weight:700;cursor:pointer}.secondary{background:#334155}.danger{background:#b91c1c}.good{background:#15803d}.top,.actions{display:flex;gap:8px;justify-content:space-between;align-items:center;flex-wrap:wrap}.actions{justify-content:flex-start;margin-top:14px}.photos{display:grid;grid-template-columns:repeat(5,1fr);gap:10px}.photos img{width:100%;height:120px;object-fit:cover;border-radius:8px}.photos img{cursor:zoom-in}.bam-lightbox{display:none;position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.94);align-items:center;justify-content:center;padding:30px}.bam-lightbox.open{display:flex}.bam-lightbox img{max-width:94vw;max-height:90vh;width:auto;height:auto;object-fit:contain;border-radius:8px;box-shadow:0 10px 45px rgba(0,0,0,.55)}.bam-lightbox-close,.bam-lightbox-prev,.bam-lightbox-next{position:fixed;border:0;background:rgba(15,23,42,.78);color:#fff;cursor:pointer;border-radius:10px;font-size:34px;line-height:1;padding:10px 14px}.bam-lightbox-close{top:16px;right:18px}.bam-lightbox-prev{left:18px;top:50%;transform:translateY(-50%)}.bam-lightbox-next{right:18px;top:50%;transform:translateY(-50%)}.notice{background:#1e3a8a;padding:10px;border-radius:8px;margin:10px 0}.value{font-size:24px;font-weight:800}.asset-field.hidden,.auction-field.hidden,.market-field.hidden,.gumtree-description-field.hidden{display:none}.valuation-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:10px}.valuation-card{background:#0b1220;border:1px solid #334155;border-radius:10px;padding:12px}.valuation-card span{display:block;color:#94a3b8;font-size:12px;margin-bottom:6px}.valuation-card strong{font-size:18px}.buycalc{border:2px solid #2563eb}.deal-score{font-size:25px;font-weight:900}.deal-good{color:#4ade80}.deal-caution{color:#fbbf24}.deal-stop{color:#f87171}.calc-note{color:#94a3b8;font-size:12px;margin-top:8px}.bam-fullscreen-trigger,#condition_grade{cursor:zoom-in}.bam-notes-modal{display:none;position:fixed;inset:0;z-index:100000;background:#0f172a;padding:18px;box-sizing:border-box;overflow:auto}.bam-notes-modal.open{display:flex;flex-direction:column}.bam-notes-shell{width:min(1200px,100%);height:calc(100vh - 36px);margin:auto;display:flex;flex-direction:column;gap:12px}.bam-notes-head{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}.bam-notes-head h2{margin:0}.bam-notes-condition{display:grid;grid-template-columns:minmax(180px,320px) 1fr;gap:12px;align-items:end}.bam-notes-modal textarea{flex:1;min-height:55vh;font-size:20px;line-height:1.5;padding:18px;resize:none}.bam-notes-actions{display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap}@media(max-width:600px){.bam-notes-modal{padding:10px}.bam-notes-shell{height:calc(100vh - 20px)}.bam-notes-condition{grid-template-columns:1fr}.bam-notes-modal textarea{font-size:18px;padding:14px}}@media(max-width:900px){.valuation-grid{grid-template-columns:repeat(2,1fr)}}@media(max-width:800px){.grid{grid-template-columns:1fr 1fr}.photos{grid-template-columns:repeat(2,1fr)}}@media(max-width:520px){.grid{grid-template-columns:1fr}}</style></head><body><div class='wrap'><div class='top'><h1>{{'Edit' if item else 'Add'}} Watch Vehicle</h1><a class='btn secondary' href='{{url_for("auction_watch")}}'>← Buying Watch</a></div>{% with messages=get_flashed_messages(with_categories=true) %}{% for cat,msg in messages %}<div class='notice'>{{msg}}</div>{% endfor %}{% endwith %}<div class='panel'><h2>🔗 Import Listing Details</h2><div class='grid'>
+<!doctype html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>Buying Watch Vehicle</title><style>body{font-family:Arial;background:#0f172a;color:#e5e7eb;margin:0}.wrap{max-width:1150px;margin:auto;padding:24px}.panel{background:#111827;border:1px solid #334155;border-radius:14px;padding:18px;margin-top:14px}.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}.full{grid-column:1/-1}label{display:block;font-size:12px;color:#94a3b8;margin-bottom:4px}input,select,textarea{width:100%;box-sizing:border-box;padding:10px;border-radius:8px;border:1px solid #475569;background:#0b1220;color:#fff}textarea{min-height:100px}.btn{padding:10px 14px;border:0;border-radius:9px;background:#2563eb;color:white;text-decoration:none;font-weight:700;cursor:pointer}.secondary{background:#334155}.danger{background:#b91c1c}.good{background:#15803d}.top,.actions{display:flex;gap:8px;justify-content:space-between;align-items:center;flex-wrap:wrap}.actions{justify-content:flex-start;margin-top:14px}.photos{display:grid;grid-template-columns:repeat(5,1fr);gap:10px}.photos img{width:100%;height:120px;object-fit:cover;border-radius:8px}.photos img{cursor:zoom-in}.bam-lightbox{display:none;position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.94);align-items:center;justify-content:center;padding:30px}.bam-lightbox.open{display:flex}.bam-lightbox img{max-width:94vw;max-height:90vh;width:auto;height:auto;object-fit:contain;border-radius:8px;box-shadow:0 10px 45px rgba(0,0,0,.55)}.bam-lightbox-close,.bam-lightbox-prev,.bam-lightbox-next{position:fixed;border:0;background:rgba(15,23,42,.78);color:#fff;cursor:pointer;border-radius:10px;font-size:34px;line-height:1;padding:10px 14px}.bam-lightbox-close{top:16px;right:18px}.bam-lightbox-prev{left:18px;top:50%;transform:translateY(-50%)}.bam-lightbox-next{right:18px;top:50%;transform:translateY(-50%)}.notice{background:#1e3a8a;padding:10px;border-radius:8px;margin:10px 0}.value{font-size:24px;font-weight:800}.asset-field.hidden,.auction-field.hidden,.market-field.hidden,.gumtree-description-field.hidden{display:none}.valuation-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:10px}.valuation-card{background:#0b1220;border:1px solid #334155;border-radius:10px;padding:12px}.valuation-card span{display:block;color:#94a3b8;font-size:12px;margin-bottom:6px}.valuation-card strong{font-size:18px}.buycalc{border:2px solid #2563eb}.deal-score{font-size:25px;font-weight:900}.deal-good{color:#4ade80}.deal-caution{color:#fbbf24}.deal-stop{color:#f87171}.calc-note{color:#94a3b8;font-size:12px;margin-top:8px}@media(max-width:900px){.valuation-grid{grid-template-columns:repeat(2,1fr)}}@media(max-width:800px){.grid{grid-template-columns:1fr 1fr}.photos{grid-template-columns:repeat(2,1fr)}}@media(max-width:520px){.grid{grid-template-columns:1fr}}</style></head><body><div class='wrap'><div class='top'><h1>{{'Edit' if item else 'Add'}} Watch Vehicle</h1><a class='btn secondary' href='{{url_for("auction_watch")}}'>← Buying Watch</a></div>{% with messages=get_flashed_messages(with_categories=true) %}{% for cat,msg in messages %}<div class='notice'>{{msg}}</div>{% endfor %}{% endwith %}<div class='panel'><h2>🔗 Import Listing Details</h2><div class='grid'>
 <div class='full'><label>Facebook Marketplace / Auction / Carsales / Gumtree Link</label><div style='display:flex;gap:8px'><input id='import_url' placeholder='Paste the listing link here'><button type='button' class='btn good' id='import_link_btn' style='width:auto;white-space:nowrap'>Import from Link</button></div></div>
 <div class='full'><label>Facebook / Gumtree Listing Text <span class='muted'>(not the link)</span></label><textarea id='import_text' placeholder='Open the ad and copy the actual listing text here — title, price, kilometres, location, vehicle details and description. Keep the link in the box above.'></textarea><div class='muted' style='margin-top:6px'>Facebook and Gumtree can block automatic link reading. BAM will keep the link above and use this pasted text to fill the vehicle.</div><button type='button' class='btn secondary' id='import_text_btn' style='margin-top:8px'>Import Listing Text</button></div>
 <div class='full'><div id='import_status' class='notice' style='display:none'></div></div>
@@ -8813,7 +8276,7 @@ AUCTION_FORM = r"""
 <div class='asset-field motorcycle'><label>Engine Size (cc)</label><input type='number' id='engine_cc' name='engine_cc' placeholder='e.g. 650' value='{{item.engine_cc or "" if item else ""}}'></div>
 <div class='asset-field car motorcycle'><label>Cylinders</label><input name='engine_cylinders' list='cylinder_options' value='{{item.engine_cylinders or "" if item else ""}}'><datalist id='cylinder_options'><option value='1'><option value='2'><option value='3'><option value='4'><option value='5'><option value='6'><option value='8'><option value='10'><option value='12'></datalist></div>
 <div class='asset-field car'><label>Interior</label><select name='interior'><option></option>{% for x in ['Cloth','Leather','Vinyl','Other'] %}<option {{'selected' if item and item.interior==x else ''}}>{{x}}</option>{% endfor %}</select></div><div class='asset-field car motorcycle'><label>Transmission</label><select id='transmission' name='transmission'><option></option>{% for x in transmissions %}<option {{'selected' if item and item.transmission==x else ''}}>{{x}}</option>{% endfor %}</select></div><div class='asset-field car'><label>Drive</label><select id='drive_type' name='drive_type'><option></option>{% for x in drives %}<option {{'selected' if item and item.drive_type==x else ''}}>{{x}}</option>{% endfor %}</select></div>
-<div class='asset-field car boat motorcycle'><label>Fuel Type</label><select id='fuel_type' name='fuel_type'><option></option>{% for x in fuels %}<option {{'selected' if item and item.fuel_type==x else ''}}>{{x}}</option>{% endfor %}</select></div><div><label>Condition <span class='muted'>(click to open full screen)</span></label><select id='condition_grade' name='condition_grade'>{% for x in conditions %}<option {{'selected' if (item and item.condition_grade==x) or (not item and x=='Unknown') else ''}}>{{x}}</option>{% endfor %}</select></div><div class='asset-field car' style='padding-top:24px'><label><input type='checkbox' name='tow_bar' style='width:auto' {{'checked' if item and item.tow_bar else ''}}> Tow bar fitted</label></div>
+<div class='asset-field car boat motorcycle'><label>Fuel Type</label><select id='fuel_type' name='fuel_type'><option></option>{% for x in fuels %}<option {{'selected' if item and item.fuel_type==x else ''}}>{{x}}</option>{% endfor %}</select></div><div><label>Condition</label><select name='condition_grade'>{% for x in conditions %}<option {{'selected' if (item and item.condition_grade==x) or (not item and x=='Unknown') else ''}}>{{x}}</option>{% endfor %}</select></div><div class='asset-field car' style='padding-top:24px'><label><input type='checkbox' name='tow_bar' style='width:auto' {{'checked' if item and item.tow_bar else ''}}> Tow bar fitted</label></div>
 <div class='asset-field caravan trailer boat'><label>Length (metres)</label><input type='number' step='0.01' name='length_m' value='{{item.length_m or "" if item else ""}}'></div>
 <div class='asset-field caravan'><label>Berths</label><input type='number' name='berths' value='{{item.berths or "" if item else ""}}'></div>
 <div class='asset-field caravan trailer'><label>Axles</label><input type='number' name='axles' value='{{item.axles or "" if item else ""}}'></div>
@@ -8832,13 +8295,13 @@ AUCTION_FORM = r"""
 <div class='asset-field boat'><label>Capacity (people)</label><input type='number' name='capacity_people' value='{{item.capacity_people or "" if item else ""}}'></div>
 <div class='asset-field boat'><label>Trailer Registration</label><input name='trailer_registration' value='{{item.trailer_registration or "" if item else ""}}'></div>
 <div class='asset-field boat' style='padding-top:24px'><label><input type='checkbox' name='trailer_included' style='width:auto' {{'checked' if item and item.trailer_included else ''}}> Trailer included</label></div>
-<div class='asset-field boat full'><label>Boat Features</label><textarea name='boat_features' rows='16' style='min-height:260px' placeholder='Sounder, GPS, canopy, electric anchor, safety gear...'>{{item.boat_features or "" if item else ""}}</textarea></div>
+<div class='asset-field boat full'><label>Boat Features</label><textarea name='boat_features' placeholder='Sounder, GPS, canopy, electric anchor, safety gear...'>{{item.boat_features or "" if item else ""}}</textarea></div>
 <div class='asset-field trailer full'><label>Trailer Features</label><textarea name='trailer_features' placeholder='Brakes, dimensions, ramps, winch, cage, tipping...'>{{item.trailer_features or "" if item else ""}}</textarea></div>
-<div class='market-field'><label>Asking Price</label><input type='number' step='.01' id='asking_price' name='asking_price' value='{{item.asking_price or 0 if item else 0}}'></div><div class='market-field'><label>Negotiated Price</label><input type='number' step='.01' name='negotiated_price' value='{{item.negotiated_price or 0 if item else 0}}'></div><div class='auction-field'><label>Reserve Status</label><select id='reserve_status' name='reserve_status'><option {{'selected' if not item or not item.reserve_status or item.reserve_status=='Unknown' else ''}}>Unknown</option><option {{'selected' if item and item.reserve_status=='No Reserve' else ''}}>No Reserve</option><option {{'selected' if item and item.reserve_status=='Reserve' else ''}}>Reserve</option></select></div><div class='auction-field'><label>Current Bid {% if item and item.live_bid_status=='LIVE' %}<span style='color:#4ade80'>● LIVE</span>{% endif %}</label><input type='number' step='.01' id='current_bid' name='current_bid' value='{{item.current_bid or 0 if item else 0}}'>{% if item %}<div class='muted' style='margin-top:5px'>{{item.live_bid_status or 'Live tracking not checked yet'}}{% if item.live_bid_count is not none %} · {{item.live_bid_count}} bids{% endif %}<br>Last live check: {{item.live_bid_checked_at or 'Not yet checked'}}</div><button type='button' class='btn secondary' id='detail_live_bid_btn' style='margin-top:7px'>🔴 Refresh Live Bid</button>{% endif %}</div><div class='auction-field'><label>My Maximum Bid</label><input type='number' step='.01' name='max_bid' value='{{item.max_bid or 0 if item else 0}}'></div><div class='auction-field'><label>Sold Price</label><input type='number' step='.01' name='sold_price' value='{{item.sold_price or 0 if item else 0}}'></div><div class='auction-field'><label>Auction Fees</label><input type='number' step='.01' name='auction_fees' value='{{item.auction_fees or 0 if item else 0}}'></div><div><label>Transport Cost</label><input type='number' step='.01' name='transport_cost' value='{{item.transport_cost or 0 if item else 0}}'></div><div><label>Other Costs</label><input type='number' step='.01' name='other_costs' value='{{item.other_costs or 0 if item else 0}}'></div><div><label>Quick-Sale Value</label><input type='number' step='.01' name='quick_sale_value' value='{{item.quick_sale_value or 0 if item else 0}}'></div><div><label>Repairs / Reconditioning</label><input type='number' step='.01' name='repair_allowance' value='{{item.repair_allowance or 0 if item else 0}}'></div><div><label>Registration / PPSR / Transfer</label><input type='number' step='.01' name='rego_ppsr_cost' value='{{item.rego_ppsr_cost or 0 if item else 0}}'></div><div><label>Target Profit</label><input type='number' step='.01' name='target_profit' value='{{item.target_profit or 0 if item else 0}}'></div><div class='asset-field boat'><label>Boat Engine Service / Repairs</label><input type='number' step='.01' name='boat_engine_cost' value='{{item.boat_engine_cost or 0 if item else 0}}'></div><div class='asset-field boat'><label>Hull Repairs</label><input type='number' step='.01' name='boat_hull_cost' value='{{item.boat_hull_cost or 0 if item else 0}}'></div><div class='asset-field boat'><label>Trailer / Trailer Rego</label><input type='number' step='.01' name='boat_trailer_cost' value='{{item.boat_trailer_cost or 0 if item else 0}}'></div>
-<div class='full' id='pre_save_valuation'><div class='panel' style='margin:8px 0 0'><h2>📊 Enter Market Valuation Before Saving</h2><div class='muted'>Use BAM Automatic Market Valuation to research similar Australian Cars, Boats, Caravans or Trailers and fill up to five advertised prices automatically. You can still edit them manually. BAM calculates the market ranges, puts Market Mid into Quick-Sale Value and updates the buying guide before you save.</div><div class='grid' style='margin-top:12px'><div><label>Comparable 1 ($)</label><input class='pre-comp' type='number' step='.01' min='0' name='comparable_price_1' value='{{item.comparable_price_1 or "" if item else ""}}'></div><div><label>Comparable 2 ($)</label><input class='pre-comp' type='number' step='.01' min='0' name='comparable_price_2' value='{{item.comparable_price_2 or "" if item else ""}}'></div><div><label>Comparable 3 ($)</label><input class='pre-comp' type='number' step='.01' min='0' name='comparable_price_3' value='{{item.comparable_price_3 or "" if item else ""}}'></div><div><label>Comparable 4 ($)</label><input class='pre-comp' type='number' step='.01' min='0' name='comparable_price_4' value='{{item.comparable_price_4 or "" if item else ""}}'></div><div><label>Comparable 5 ($)</label><input class='pre-comp' type='number' step='.01' min='0' name='comparable_price_5' value='{{item.comparable_price_5 or "" if item else ""}}'></div></div><div class='valuation-grid' style='margin-top:12px'><div class='valuation-card'><span>Market Low</span><strong id='pre_market_low'>$0</strong></div><div class='valuation-card'><span>Market Mid / Quick-Sale</span><strong id='pre_market_mid'>$0</strong></div><div class='valuation-card'><span>Market High</span><strong id='pre_market_high'>$0</strong></div><div class='valuation-card'><span>Wholesale Range</span><strong id='pre_wholesale'>$0 – $0</strong></div><div class='valuation-card'><span>Trade Range</span><strong id='pre_trade'>$0 – $0</strong></div><div class='valuation-card'><span>Private Range</span><strong id='pre_private'>$0 – $0</strong></div></div><div class='actions'><button type='button' class='btn good' id='pre_calc_valuation_btn'>Calculate Market Valuation & Buying Guide</button></div><div class='valuation-grid' style='margin-top:12px'><div class='valuation-card'><span>Target Buy Price</span><strong id='pre_target_buy'>$0</strong></div><div class='valuation-card'><span>Maximum Recommended Bid</span><strong id='pre_max_bid'>$0</strong></div><div class='valuation-card'><span>Walk-Away Price</span><strong id='pre_walkaway'>$0</strong></div><div class='valuation-card'><span>Expected Profit</span><strong id='pre_expected_profit'>$0</strong></div><div class='valuation-card'><span>Deal Score</span><strong id='pre_deal_score'>-</strong></div></div><div id='pre_deal_message' class='notice' style='margin-top:12px'>Enter comparable prices and BAM will calculate the buying guide.</div></div></div><div class='full'><label>Listing Description <span class='muted'>(Facebook, Gumtree, auction or other listing)</span></label><textarea id='listing_description' placeholder='Paste or add the full listing description here. BAM will copy it into Condition / Inspection Notes below.'></textarea><div class='muted' style='margin-top:6px'>Use this for Cars, Boats, Caravans and Trailers. The description is kept in Condition / Inspection Notes so the original seller or auction information stays with the watch item.</div></div>
-<div class='full'><label>Condition / Inspection Notes <span class='muted'>(click to open full screen)</span></label><textarea id='condition_notes' name='condition_notes' class='bam-fullscreen-trigger' title='Click to open full-screen Condition / Inspection Notes'>{{item.condition_notes or "" if item else ""}}</textarea><div class='muted' style='margin-top:6px'>Click the Condition box or Inspection Notes to open the large full-screen reader/editor.</div></div><div class='full'><label>Add Listing Photos (maximum 10 total)</label><input id='listing_photo_files' type='file' name='photos' accept='image/*' multiple><div class='actions' style='margin-top:8px'><button type='button' class='btn secondary' id='paste_photo_btn'>📋 Paste Copied Photo</button></div><div class='muted' style='margin-top:6px'>Facebook / Gumtree: right-click a listing photo and choose Copy image, then click Paste Copied Photo. Repeat for more photos, or use Choose Files to select several at once.</div><div id='local_photo_preview' class='photos' style='margin-top:10px'></div><div id='imported_photo_preview' class='photos' style='margin-top:10px'></div></div></div><div class='actions'><button class='btn'>Save Watch Vehicle</button>{% if item %}<a class='btn secondary' href='{{url_for("auction_value",auction_id=item.id)}}'>Get Valuation</a>{% endif %}</div></form></div>
-{% if not item %}<div class='panel'><h2>🇦🇺 BAM Market Valuation</h2><div class='muted'>BAM Automatic Market Valuation researches the Australian market and fills the comparable prices and buying guide before you save. Google is kept as a manual cross-check.</div><div class='actions'><button type='button' class='btn good' id='bam_auto_valuation_btn'>✨ BAM Automatic Market Valuation</button><button type='button' class='btn secondary' id='google_market_valuation_btn'>🔎 Open Google Cross-Check ↗</button></div></div>{% endif %}
-{% if item %}<div class='panel buycalc'><h2>💰 BAM Auction Buy Calculator & Deal Score</h2><div class='valuation-grid'><div class='valuation-card'><span>Quick-Sale Value</span><strong id='calc_quick'>$0</strong></div><div class='valuation-card'><span>Total Costs</span><strong id='calc_costs'>$0</strong></div><div class='valuation-card'><span>🎯 Target Buy Price</span><strong id='calc_target'>$0</strong></div><div class='valuation-card'><span>🟠 Maximum Recommended Bid</span><strong id='calc_max'>$0</strong></div><div class='valuation-card'><span>🔴 Walk-Away Price</span><strong id='calc_walkaway'>$0</strong></div><div class='valuation-card'><span>Expected Profit at Current Price</span><strong id='calc_profit'>$0</strong></div><div class='valuation-card'><span>Deal Score</span><strong id='calc_score' class='deal-score'>—</strong></div></div><div id='calc_message' class='notice' style='margin-top:12px'>Enter a Quick-Sale Value and BAM will calculate the deal.</div><div class='calc-note'>Target Buy uses the low end of BAM wholesale value. Maximum Recommended Bid uses the high end of BAM wholesale value. Walk-Away is the absolute ceiling from Quick-Sale Value less all costs and target profit. Boats also include engine, hull and trailer allowances.</div><div class='actions'><button type='button' class='btn good' id='calculate_bid_btn'>Calculate My Maximum Bid</button><button type='button' class='btn secondary' id='use_market_quick_btn'>Use BAM Market Mid</button></div></div><div class='panel'><h2>🇦🇺 BAM Valuation Hub</h2><div class='valuation-grid'><div class='valuation-card'><span>Private Sale</span><strong>${{'{:,.0f}'.format(item.private_value_low or 0)}} – ${{'{:,.0f}'.format(item.private_value_high or 0)}}</strong></div><div class='valuation-card'><span>Wholesale</span><strong>${{'{:,.0f}'.format(item.wholesale_value_low or 0)}} – ${{'{:,.0f}'.format(item.wholesale_value_high or 0)}}</strong></div><div class='valuation-card'><span>Trade-In</span><strong>${{'{:,.0f}'.format(item.trade_value_low or 0)}} – ${{'{:,.0f}'.format(item.trade_value_high or 0)}}</strong></div><div class='valuation-card'><span>Dealer Retail</span><strong>${{'{:,.0f}'.format(item.dealer_value_low or 0)}} – ${{'{:,.0f}'.format(item.dealer_value_high or 0)}}</strong></div><div class='valuation-card'><span>Suggested Buy / Max Bid</span><strong>${{'{:,.0f}'.format(item.suggested_buy_price or 0)}}</strong></div></div><div style='margin-top:12px'><b>Provider:</b> {{item.valuation_provider or 'BAM internal history'}} &nbsp; <b>Confidence:</b> {{item.valuation_confidence or 'Not calculated'}}</div><div class='muted' style='margin-top:6px'>{{item.valuation_source or 'Click Get Valuation for BAM internal pricing, or use the Carsales buttons for a live Australian market check.'}}</div><div class='actions'><form method='post' action='{{url_for("auction_automatic_valuation",auction_id=item.id)}}' style='display:inline'><button class='btn good'>✨ BAM Automatic Market Valuation</button></form><button type='button' class='btn secondary' id='google_market_valuation_btn'>🔎 Open Google Cross-Check ↗</button><a class='btn good' target='_blank' rel='noopener' href='{{carsales_valuation_url}}'>Carsales Free Valuation ↗</a><a class='btn secondary' target='_blank' rel='noopener' href='{{carsales_search_url}}'>Carsales Comparable Search ↗</a></div><div class='muted' style='margin-top:8px'>Google Market Valuation uses the details currently entered above and builds an Australian comparison search tailored to Cars, Boats, Caravans and Trailers before you set BAM valuation figures.</div><form method='post' action='{{url_for("auction_comparable_value",auction_id=item.id)}}' style='margin-top:16px'><h3 style='margin-bottom:8px'>📊 Comparable Market Prices</h3><div class='muted' style='margin-bottom:10px'>Enter up to five advertised prices you find for similar cars, boats, caravans or trailers. BAM will calculate indicative private, wholesale, trade-in and dealer-retail ranges from those real comparables.</div><div class='grid'><div><label>Comparable 1 ($)</label><input type='number' step='.01' min='0' name='comparable_price_1' value='{{item.comparable_price_1 or ""}}'></div><div><label>Comparable 2 ($)</label><input type='number' step='.01' min='0' name='comparable_price_2' value='{{item.comparable_price_2 or ""}}'></div><div><label>Comparable 3 ($)</label><input type='number' step='.01' min='0' name='comparable_price_3' value='{{item.comparable_price_3 or ""}}'></div><div><label>Comparable 4 ($)</label><input type='number' step='.01' min='0' name='comparable_price_4' value='{{item.comparable_price_4 or ""}}'></div><div><label>Comparable 5 ($)</label><input type='number' step='.01' min='0' name='comparable_price_5' value='{{item.comparable_price_5 or ""}}'></div></div><div class='actions'><button class='btn good'>Calculate Market Valuation</button></div></form></div><div class='panel'><h2>Photos ({{photos|length}} / 10)</h2><div class='photos'>{% for p in photos %}<div><img src='{{url_for("uploaded_file",filename=p.filename)}}'><form method='post' action='{{url_for("auction_delete_photo",auction_id=item.id,photo_id=p.id)}}'><button class='btn danger' style='margin-top:5px'>Delete</button></form></div>{% else %}<div>No photos yet.</div>{% endfor %}</div></div><div class='panel'><h2>Bought / won this vehicle?</h2>{% if item.won_vehicle_id %}<div class='notice'>Already transferred to BAM Vehicle Stock.</div><a class='btn' href='{{url_for("vehicle_detail",vehicle_id=item.won_vehicle_id)}}'>Open Vehicle Stock Record</a>{% else %}<form method='post' action='{{url_for("auction_transfer",auction_id=item.id)}}'><div class='grid'><div><label>Purchased By / Ownership</label><select name='sale_ownership'><option>BAM Joint</option><option>Barry</option><option>Matt</option></select></div><div><label>Purchase Date</label><input type='date' name='purchase_date' value='{{today}}'></div></div><div class='actions'><button class='btn good'>✓ Add to BAM Vehicle Stock</button></div></form>{% endif %}</div><div class='panel'><form method='post' action='{{url_for("auction_delete",auction_id=item.id)}}' onsubmit='return confirm("Delete this auction vehicle?")'><button class='btn danger'>Delete Watch Vehicle</button></form></div>{% endif %}</div><div id='bam_notes_modal' class='bam-notes-modal' aria-hidden='true'><div class='bam-notes-shell'><div class='bam-notes-head'><h2>📝 Condition / Inspection Notes</h2><button type='button' class='btn secondary' id='bam_notes_close'>✕ Close</button></div><div class='bam-notes-condition'><div><label>Condition</label><select id='bam_notes_condition'></select></div><div class='muted'>Large full-screen view — easy to read and edit on laptop or phone.</div></div><textarea id='bam_notes_editor' placeholder='Condition / inspection notes...'></textarea><div class='bam-notes-actions'><button type='button' class='btn secondary' id='bam_notes_cancel'>Cancel</button><button type='button' class='btn good' id='bam_notes_save'>✓ Save & Close</button></div></div></div><div id='bam_lightbox' class='bam-lightbox' aria-hidden='true'><button type='button' class='bam-lightbox-close' aria-label='Close'>×</button><button type='button' class='bam-lightbox-prev' aria-label='Previous photo'>‹</button><img id='bam_lightbox_image' alt='Large photo'><button type='button' class='bam-lightbox-next' aria-label='Next photo'>›</button></div><script>
+<div class='market-field'><label>Asking Price</label><input type='number' step='.01' id='asking_price' name='asking_price' value='{{item.asking_price or 0 if item else 0}}'></div><div class='market-field'><label>Negotiated Price</label><input type='number' step='.01' name='negotiated_price' value='{{item.negotiated_price or 0 if item else 0}}'></div><div class='auction-field'><label>Reserve Status</label><select id='reserve_status' name='reserve_status'><option {{'selected' if not item or not item.reserve_status or item.reserve_status=='Unknown' else ''}}>Unknown</option><option {{'selected' if item and item.reserve_status=='No Reserve' else ''}}>No Reserve</option><option {{'selected' if item and item.reserve_status=='Reserve' else ''}}>Reserve</option></select></div><div class='auction-field'><label>Current Bid</label><input type='number' step='.01' id='current_bid' name='current_bid' value='{{item.current_bid or 0 if item else 0}}'></div><div class='auction-field'><label>My Maximum Bid</label><input type='number' step='.01' name='max_bid' value='{{item.max_bid or 0 if item else 0}}'></div><div class='auction-field'><label>Sold Price</label><input type='number' step='.01' name='sold_price' value='{{item.sold_price or 0 if item else 0}}'></div><div class='auction-field'><label>Auction Fees</label><input type='number' step='.01' name='auction_fees' value='{{item.auction_fees or 0 if item else 0}}'></div><div><label>Transport Cost</label><input type='number' step='.01' name='transport_cost' value='{{item.transport_cost or 0 if item else 0}}'></div><div><label>Other Costs</label><input type='number' step='.01' name='other_costs' value='{{item.other_costs or 0 if item else 0}}'></div><div><label>Quick-Sale Value</label><input type='number' step='.01' name='quick_sale_value' value='{{item.quick_sale_value or 0 if item else 0}}'></div><div><label>Repairs / Reconditioning</label><input type='number' step='.01' name='repair_allowance' value='{{item.repair_allowance or 0 if item else 0}}'></div><div><label>Registration / PPSR / Transfer</label><input type='number' step='.01' name='rego_ppsr_cost' value='{{item.rego_ppsr_cost or 0 if item else 0}}'></div><div><label>Target Profit</label><input type='number' step='.01' name='target_profit' value='{{item.target_profit or 0 if item else 0}}'></div><div class='asset-field boat'><label>Boat Engine Service / Repairs</label><input type='number' step='.01' name='boat_engine_cost' value='{{item.boat_engine_cost or 0 if item else 0}}'></div><div class='asset-field boat'><label>Hull Repairs</label><input type='number' step='.01' name='boat_hull_cost' value='{{item.boat_hull_cost or 0 if item else 0}}'></div><div class='asset-field boat'><label>Trailer / Trailer Rego</label><input type='number' step='.01' name='boat_trailer_cost' value='{{item.boat_trailer_cost or 0 if item else 0}}'></div>
+<div class='full'><label>Listing Description <span class='muted'>(Facebook, Gumtree, auction or other listing)</span></label><textarea id='listing_description' placeholder='Paste or add the full listing description here. BAM will copy it into Condition / Inspection Notes below.'></textarea><div class='muted' style='margin-top:6px'>Use this for Cars, Boats, Caravans and Trailers. The description is kept in Condition / Inspection Notes so the original seller or auction information stays with the watch item.</div></div>
+<div class='full'><label>Condition / Inspection Notes</label><textarea id='condition_notes' name='condition_notes'>{{item.condition_notes or "" if item else ""}}</textarea></div><div class='full'><label>Add Listing Photos (maximum 10 total)</label><input id='listing_photo_files' type='file' name='photos' accept='image/*' multiple><div class='actions' style='margin-top:8px'><button type='button' class='btn secondary' id='paste_photo_btn'>📋 Paste Copied Photo</button></div><div class='muted' style='margin-top:6px'>Facebook / Gumtree: right-click a listing photo and choose Copy image, then click Paste Copied Photo. Repeat for more photos, or use Choose Files to select several at once.</div><div id='local_photo_preview' class='photos' style='margin-top:10px'></div><div id='imported_photo_preview' class='photos' style='margin-top:10px'></div></div></div><div class='actions'><button class='btn'>Save Watch Vehicle</button>{% if item %}<a class='btn secondary' href='{{url_for("auction_value",auction_id=item.id)}}'>Get Valuation</a>{% endif %}</div></form></div>
+{% if not item %}<div class='panel'><h2>🇦🇺 BAM Market Valuation</h2><div class='muted'>Use the details entered above to search the Australian market before saving. For Boats, BAM includes year, make, model, length, engine make, horsepower and engine hours. After you save the watch item, the full BAM Valuation Hub unlocks with comparable prices, Quick-Sale Value, wholesale, trade, private and dealer ranges, Target Buy, Maximum Bid, Walk-Away Price, expected profit and Deal Score.</div><div class='actions'><button type='button' class='btn good' id='google_market_valuation_btn'>🔎 Google Market Valuation ↗</button></div></div>{% endif %}
+{% if item %}<div class='panel buycalc'><h2>💰 BAM Auction Buy Calculator & Deal Score</h2><div class='valuation-grid'><div class='valuation-card'><span>Quick-Sale Value</span><strong id='calc_quick'>$0</strong></div><div class='valuation-card'><span>Total Costs</span><strong id='calc_costs'>$0</strong></div><div class='valuation-card'><span>🎯 Target Buy Price</span><strong id='calc_target'>$0</strong></div><div class='valuation-card'><span>🟠 Maximum Recommended Bid</span><strong id='calc_max'>$0</strong></div><div class='valuation-card'><span>🔴 Walk-Away Price</span><strong id='calc_walkaway'>$0</strong></div><div class='valuation-card'><span>Expected Profit at Current Price</span><strong id='calc_profit'>$0</strong></div><div class='valuation-card'><span>Deal Score</span><strong id='calc_score' class='deal-score'>—</strong></div></div><div id='calc_message' class='notice' style='margin-top:12px'>Enter a Quick-Sale Value and BAM will calculate the deal.</div><div class='calc-note'>Target Buy uses the low end of BAM wholesale value. Maximum Recommended Bid uses the high end of BAM wholesale value. Walk-Away is the absolute ceiling from Quick-Sale Value less all costs and target profit. Boats also include engine, hull and trailer allowances.</div><div class='actions'><button type='button' class='btn good' id='calculate_bid_btn'>Calculate My Maximum Bid</button><button type='button' class='btn secondary' id='use_market_quick_btn'>Use BAM Market Mid</button></div></div><div class='panel'><h2>🇦🇺 BAM Valuation Hub</h2><div class='valuation-grid'><div class='valuation-card'><span>Private Sale</span><strong>${{'{:,.0f}'.format(item.private_value_low or 0)}} – ${{'{:,.0f}'.format(item.private_value_high or 0)}}</strong></div><div class='valuation-card'><span>Wholesale</span><strong>${{'{:,.0f}'.format(item.wholesale_value_low or 0)}} – ${{'{:,.0f}'.format(item.wholesale_value_high or 0)}}</strong></div><div class='valuation-card'><span>Trade-In</span><strong>${{'{:,.0f}'.format(item.trade_value_low or 0)}} – ${{'{:,.0f}'.format(item.trade_value_high or 0)}}</strong></div><div class='valuation-card'><span>Dealer Retail</span><strong>${{'{:,.0f}'.format(item.dealer_value_low or 0)}} – ${{'{:,.0f}'.format(item.dealer_value_high or 0)}}</strong></div><div class='valuation-card'><span>Suggested Buy / Max Bid</span><strong>${{'{:,.0f}'.format(item.suggested_buy_price or 0)}}</strong></div></div><div style='margin-top:12px'><b>Provider:</b> {{item.valuation_provider or 'BAM internal history'}} &nbsp; <b>Confidence:</b> {{item.valuation_confidence or 'Not calculated'}}</div><div class='muted' style='margin-top:6px'>{{item.valuation_source or 'Click Get Valuation for BAM internal pricing, or use the Carsales buttons for a live Australian market check.'}}</div><div class='actions'><button type='button' class='btn good' id='google_market_valuation_btn'>🔎 Google Market Valuation ↗</button><a class='btn good' target='_blank' rel='noopener' href='{{carsales_valuation_url}}'>Carsales Free Valuation ↗</a><a class='btn secondary' target='_blank' rel='noopener' href='{{carsales_search_url}}'>Carsales Comparable Search ↗</a></div><div class='muted' style='margin-top:8px'>Google Market Valuation uses the details currently entered above and builds an Australian comparison search tailored to Cars, Boats, Caravans and Trailers before you set BAM valuation figures.</div><form method='post' action='{{url_for("auction_comparable_value",auction_id=item.id)}}' style='margin-top:16px'><h3 style='margin-bottom:8px'>📊 Comparable Market Prices</h3><div class='muted' style='margin-bottom:10px'>Enter up to five advertised prices you find for similar cars, boats, caravans or trailers. BAM will calculate indicative private, wholesale, trade-in and dealer-retail ranges from those real comparables.</div><div class='grid'><div><label>Comparable 1 ($)</label><input type='number' step='.01' min='0' name='comparable_price_1' value='{{item.comparable_price_1 or ""}}'></div><div><label>Comparable 2 ($)</label><input type='number' step='.01' min='0' name='comparable_price_2' value='{{item.comparable_price_2 or ""}}'></div><div><label>Comparable 3 ($)</label><input type='number' step='.01' min='0' name='comparable_price_3' value='{{item.comparable_price_3 or ""}}'></div><div><label>Comparable 4 ($)</label><input type='number' step='.01' min='0' name='comparable_price_4' value='{{item.comparable_price_4 or ""}}'></div><div><label>Comparable 5 ($)</label><input type='number' step='.01' min='0' name='comparable_price_5' value='{{item.comparable_price_5 or ""}}'></div></div><div class='actions'><button class='btn good'>Calculate Market Valuation</button></div></form></div><div class='panel'><h2>Photos ({{photos|length}} / 10)</h2><div class='photos'>{% for p in photos %}<div><img src='{{url_for("uploaded_file",filename=p.filename)}}'><form method='post' action='{{url_for("auction_delete_photo",auction_id=item.id,photo_id=p.id)}}'><button class='btn danger' style='margin-top:5px'>Delete</button></form></div>{% else %}<div>No photos yet.</div>{% endfor %}</div></div><div class='panel'><h2>Bought / won this vehicle?</h2>{% if item.won_vehicle_id %}<div class='notice'>Already transferred to BAM Vehicle Stock.</div><a class='btn' href='{{url_for("vehicle_detail",vehicle_id=item.won_vehicle_id)}}'>Open Vehicle Stock Record</a>{% else %}<form method='post' action='{{url_for("auction_transfer",auction_id=item.id)}}'><div class='grid'><div><label>Purchased By / Ownership</label><select name='sale_ownership'><option>BAM Joint</option><option>Barry</option><option>Matt</option></select></div><div><label>Purchase Date</label><input type='date' name='purchase_date' value='{{today}}'></div></div><div class='actions'><button class='btn good'>✓ Add to BAM Vehicle Stock</button></div></form>{% endif %}</div><div class='panel'><form method='post' action='{{url_for("auction_delete",auction_id=item.id)}}' onsubmit='return confirm("Delete this auction vehicle?")'><button class='btn danger'>Delete Watch Vehicle</button></form></div>{% endif %}</div><div id='bam_lightbox' class='bam-lightbox' aria-hidden='true'><button type='button' class='bam-lightbox-close' aria-label='Close'>×</button><button type='button' class='bam-lightbox-prev' aria-label='Previous photo'>‹</button><img id='bam_lightbox_image' alt='Large photo'><button type='button' class='bam-lightbox-next' aria-label='Next photo'>›</button></div><script>
 const BAM_MODELS = {{ model_catalog_json|safe }};
 const BAM_VARIANTS = {{ variant_catalog_json|safe }};
 const BAM_ASSET_MODELS = {{ asset_model_catalog_json|safe }};
@@ -8850,36 +8313,6 @@ const makeList = document.getElementById('make_options');
 const modelList = document.getElementById('model_options');
 const variantList = document.getElementById('variant_options');
 const googleMarketBtn = document.getElementById('google_market_valuation_btn');
-const bamAutoValuationBtn = document.getElementById('bam_auto_valuation_btn');
-if(bamAutoValuationBtn){
-  bamAutoValuationBtn.addEventListener('click',async()=>{
-    const original=bamAutoValuationBtn.textContent;
-    bamAutoValuationBtn.disabled=true; bamAutoValuationBtn.textContent='⏳ Researching Australian market...';
-    try{
-      const details={}; document.querySelectorAll('[name]').forEach(el=>{ if(el.name && el.type!=='file' && el.type!=='password') details[el.name]=el.value; });
-      const r=await fetch('{{url_for("auction_automatic_valuation_preview")}}',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(details)});
-      const data=await r.json(); if(!r.ok || !data.ok) throw new Error(data.error||'Valuation failed');
-      const comps=document.querySelectorAll('.pre-comp'); (data.prices||[]).slice(0,5).forEach((v,i)=>{if(comps[i]) comps[i].value=v;});
-      const quick=document.querySelector('[name="quick_sale_value"]'); if(quick) quick.value=data.market_mid||0;
-      const calc=document.getElementById('pre_calc_valuation_btn'); if(calc) calc.click();
-      alert('BAM found '+(data.prices||[]).length+' current Australian comparable listing(s). The valuation and buying guide have been filled in. Save the watch item to store them.');
-    }catch(err){ alert('BAM Automatic Market Valuation: '+err.message); }
-    finally{ bamAutoValuationBtn.disabled=false; bamAutoValuationBtn.textContent=original; }
-  });
-}
-const detailLiveBidBtn = document.getElementById('detail_live_bid_btn');
-if(detailLiveBidBtn){
-  detailLiveBidBtn.addEventListener('click',async()=>{
-    const original=detailLiveBidBtn.textContent; detailLiveBidBtn.disabled=true; detailLiveBidBtn.textContent='⏳ Checking live bid...';
-    try{
-      const r=await fetch('{{url_for("auction_live_bid_refresh",auction_id=item.id) if item else "#"}}',{method:'POST',headers:{'X-Requested-With':'fetch'}});
-      const d=await r.json(); if(!r.ok) throw new Error(d.error||'Live bid refresh failed');
-      if(d.current_bid!==undefined && d.current_bid!==null){ const el=document.getElementById('current_bid'); if(el){el.value=d.current_bid; el.dispatchEvent(new Event('input'));} }
-      alert((d.current_bid!==undefined&&d.current_bid!==null?'Live bid updated to $'+Number(d.current_bid).toLocaleString('en-AU'):(d.status||'Checked'))+'\nLast checked: '+(d.checked_at||'now'));
-    }catch(e){ alert('BAM Live Bid Tracker: '+e.message); }
-    finally{ detailLiveBidBtn.disabled=false; detailLiveBidBtn.textContent=original; }
-  });
-}
 const openAuctionUrlBtn = document.getElementById('open_auction_url_btn');
 if(openAuctionUrlBtn){
   openAuctionUrlBtn.addEventListener('click',()=>{
@@ -8895,8 +8328,6 @@ if(googleMarketBtn){
     const value=(name)=>{const el=document.querySelector(`[name="${name}"]`); return el ? (el.value||'').trim() : '';};
     const asset=value('asset_type') || 'Car';
     const parts=[value('year'),value('make'),value('model'),value('variant')];
-    const listingIdentity=value('auction_name') || value('caravan_features') || value('trailer_features') || value('boat_features');
-    if(!value('make') && !value('model') && listingIdentity) parts.push(listingIdentity.substring(0,180));
     if(asset==='Boat'){
       parts.push(value('boat_type'),value('hull_material'),value('engine_make'),value('engine_model'));
       if(value('horsepower')) parts.push(value('horsepower')+'hp');
@@ -8918,7 +8349,7 @@ if(googleMarketBtn){
       parts.push(asset.toLowerCase(),'for sale Australia','Carsales Gumtree Facebook Marketplace dealer private');
     }
     const query=parts.filter(Boolean).join(' ');
-    if(!value('make') && !value('model') && !listingIdentity){alert('Enter the make/model or import the listing details first.');return;}
+    if(!value('make') || !value('model')){alert('Enter the make and model first.');return;}
     window.open('https://www.google.com/search?q='+encodeURIComponent(query),'_blank','noopener');
   });
 }
@@ -9092,28 +8523,6 @@ if(listingDescription && conditionNotes){
   listingDescription.addEventListener('paste',()=>setTimeout(()=>{ conditionNotes.value=listingDescription.value; },0));
 }
 
-const preCalcBtn=document.getElementById('pre_calc_valuation_btn');
-function money(v){return '$'+Math.round(v||0).toLocaleString('en-AU');}
-function calculatePreSaveValuation(){
-  const prices=[...document.querySelectorAll('.pre-comp')].map(x=>Number(x.value||0)).filter(x=>x>0).sort((a,b)=>a-b);
-  if(!prices.length){alert('Enter at least one comparable advertised price first.');return;}
-  const mid=prices.length%2 ? prices[(prices.length-1)/2] : (prices[prices.length/2-1]+prices[prices.length/2])/2;
-  const low=prices[0], high=prices[prices.length-1];
-  const set=(id,text)=>{const e=document.getElementById(id);if(e)e.textContent=text;};
-  set('pre_market_low',money(low)); set('pre_market_mid',money(mid)); set('pre_market_high',money(high));
-  set('pre_wholesale',money(low*.62)+' – '+money(mid*.72));
-  set('pre_trade',money(low*.68)+' – '+money(mid*.78));
-  set('pre_private',money(low*.92)+' – '+money(high*.97));
-  const quick=document.querySelector('[name="quick_sale_value"]'); if(quick){quick.value=mid.toFixed(2);quick.dispatchEvent(new Event('input',{bubbles:true}));}
-  const n=(name)=>{const e=document.querySelector(`[name="${name}"]`);const v=parseFloat(e&&e.value);return Number.isFinite(v)?v:0;};
-  const asset=((document.querySelector('[name="asset_type"]')||{}).value||'Car').toLowerCase();
-  let costs=n('auction_fees')+n('transport_cost')+n('repair_allowance')+n('rego_ppsr_cost')+n('other_costs'); if(asset==='boat') costs+=n('boat_engine_cost')+n('boat_hull_cost')+n('boat_trailer_cost');
-  const tp=n('target_profit'), targetBuy=Math.max(0,low*.62-costs-tp), maxBid=Math.max(0,mid*.72-costs-tp), walk=Math.max(0,mid-costs-tp);
-  const src=((document.querySelector('[name="listing_source"]')||{}).value||'Auction'); const current=src==='Auction'?n('current_bid'):(n('negotiated_price')||n('asking_price')); const profit=mid-current-costs;
-  let score='READY',msg='Target '+money(targetBuy)+' | Maximum '+money(maxBid)+' | Walk away above '+money(walk)+'.'; if(current>0){if(current<=targetBuy){score='STRONG BUY';msg='Current price is at or below BAM Target Buy.';}else if(current<=maxBid){score='GOOD BUY';msg='Current price is within BAM recommended buying range.';}else if(current<=walk){score='CAUTION';msg='Above BAM recommended bid. Walk-Away is '+money(walk)+'.';}else{score='DO NOT BID';msg='Current price is above BAM Walk-Away Price.';}}
-  set('pre_target_buy',money(targetBuy));set('pre_max_bid',money(maxBid));set('pre_walkaway',money(walk));set('pre_expected_profit',(profit<0?'-':'')+money(Math.abs(profit)));set('pre_deal_score',score);set('pre_deal_message',msg);
-}
-if(preCalcBtn) preCalcBtn.addEventListener('click',calculatePreSaveValuation);
 const importTextBtn=document.getElementById('import_text_btn');
 if(importTextBtn){
   importTextBtn.addEventListener('click',()=>{
@@ -9186,45 +8595,6 @@ if(pastePhotoBtn){
   });
 }
 
-
-// v25.18.9 - full-screen Condition / Inspection Notes reader/editor.
-(function(){
-  const modal=document.getElementById('bam_notes_modal');
-  const notes=document.getElementById('condition_notes');
-  const condition=document.getElementById('condition_grade');
-  const editor=document.getElementById('bam_notes_editor');
-  const modalCondition=document.getElementById('bam_notes_condition');
-  if(!modal || !notes || !condition || !editor || !modalCondition) return;
-  let oldOverflow='';
-  function openEditor(e){
-    if(e) e.preventDefault();
-    editor.value=notes.value || '';
-    modalCondition.innerHTML=condition.innerHTML;
-    modalCondition.value=condition.value;
-    oldOverflow=document.body.style.overflow;
-    document.body.style.overflow='hidden';
-    modal.classList.add('open');
-    modal.setAttribute('aria-hidden','false');
-    setTimeout(()=>editor.focus(),50);
-  }
-  function closeEditor(save){
-    if(save){
-      notes.value=editor.value;
-      notes.dispatchEvent(new Event('input',{bubbles:true}));
-      condition.value=modalCondition.value;
-      condition.dispatchEvent(new Event('change',{bubbles:true}));
-    }
-    modal.classList.remove('open');
-    modal.setAttribute('aria-hidden','true');
-    document.body.style.overflow=oldOverflow;
-  }
-  notes.addEventListener('click',openEditor);
-  condition.addEventListener('mousedown',openEditor);
-  document.getElementById('bam_notes_save').addEventListener('click',()=>closeEditor(true));
-  document.getElementById('bam_notes_cancel').addEventListener('click',()=>closeEditor(false));
-  document.getElementById('bam_notes_close').addEventListener('click',()=>closeEditor(false));
-  document.addEventListener('keydown',e=>{if(e.key==='Escape' && modal.classList.contains('open')) closeEditor(false);});
-})();
 
 // v25.13.2 - large photo viewer for Buying Watch, imported and pasted photos.
 (function(){
@@ -9332,46 +8702,6 @@ def auction_watch():
 
 
 
-@app.post("/auction-watch/live-bids/refresh")
-@login_required
-def auction_live_bids_refresh():
-    conn = db()
-    try:
-        rows = conn.execute("""SELECT * FROM auction_vehicles
-            WHERE status IN ('Watching','Bidding')
-              AND COALESCE(listing_url,auction_url,'')<>''
-            ORDER BY COALESCE(auction_finish,'9999-12-31T23:59'),id DESC LIMIT 20""").fetchall()
-        # v25.19.2 starts with Grays only; leave other saved auction sites untouched.
-        rows = [r for r in rows if "grays.com" in (urllib.parse.urlparse((r["listing_url"] or r["auction_url"] or "")).netloc or "").lower()]
-        results = [_refresh_saved_live_bid(conn, row) for row in rows]
-        conn.commit()
-        return jsonify(ok=True, checked=len(results), results=results)
-    except Exception as exc:
-        conn.rollback()
-        return jsonify(ok=False, error=str(exc)), 500
-    finally:
-        conn.close()
-
-
-@app.post("/auction-watch/<int:auction_id>/live-bid/refresh")
-@login_required
-def auction_live_bid_refresh(auction_id):
-    conn = db()
-    try:
-        item = conn.execute("SELECT * FROM auction_vehicles WHERE id=?", (auction_id,)).fetchone()
-        if not item:
-            return jsonify(ok=False, error="Auction vehicle not found."), 404
-        result = _refresh_saved_live_bid(conn, item)
-        conn.commit()
-        status_code = 200 if result.get("supported", True) else 400
-        return jsonify(result), status_code
-    except Exception as exc:
-        conn.rollback()
-        return jsonify(ok=False, error=str(exc)), 500
-    finally:
-        conn.close()
-
-
 @app.post("/auction-watch/import-listing")
 @login_required
 def auction_import_listing():
@@ -9411,16 +8741,6 @@ def auction_import_listing():
     except Exception as exc:
         return jsonify(ok=False, error=f"Import error: {exc}"), 400
 
-
-@app.post("/auction-watch/automatic-valuation-preview")
-@login_required
-def auction_automatic_valuation_preview():
-    try:
-        details=request.get_json(silent=True) or {}
-        result=bam_live_market_valuation(details)
-        return jsonify(ok=True, **result)
-    except Exception as exc:
-        return jsonify(ok=False,error=str(exc)),400
 
 @app.route("/auction-watch/add",methods=["GET","POST"])
 @login_required
@@ -9498,24 +8818,6 @@ def auction_value(auction_id):
     flash("Valuation Hub updated. These figures use BAM history until your licensed live Australian valuation API is connected.","success")
     return redirect(url_for("auction_detail",auction_id=auction_id))
 
-
-@app.post("/auction-watch/<int:auction_id>/automatic-valuation")
-@login_required
-def auction_automatic_valuation(auction_id):
-    conn=db(); item=conn.execute("SELECT * FROM auction_vehicles WHERE id=?",(auction_id,)).fetchone()
-    if not item: conn.close(); return "Auction vehicle not found",404
-    try:
-        result=bam_live_market_valuation(dict(item)); prices=(result["prices"]+[0,0,0,0,0])[:5]
-        costs=sum(float(item[k] or 0) for k in ("auction_fees","transport_cost","repair_allowance","rego_ppsr_cost","other_costs"))
-        if str(item["asset_type"] or "").lower()=="boat": costs += sum(float(item[k] or 0) for k in ("boat_engine_cost","boat_hull_cost","boat_trailer_cost"))
-        suggested=max(0,result["wholesale_high"]-costs-float(item["target_profit"] or 0))
-        source=result["summary"] + " Asking prices are market evidence, not confirmed sale prices."
-        conn.execute("""UPDATE auction_vehicles SET comparable_price_1=?,comparable_price_2=?,comparable_price_3=?,comparable_price_4=?,comparable_price_5=?,market_low=?,market_mid=?,market_high=?,private_value_low=?,private_value_high=?,wholesale_value_low=?,wholesale_value_high=?,trade_value_low=?,trade_value_high=?,dealer_value_low=?,dealer_value_high=?,suggested_buy_price=?,quick_sale_value=?,valuation_provider=?,valuation_confidence=?,valuation_source=?,valuation_checked_at=? WHERE id=?""",(*prices,result["market_low"],result["market_mid"],result["market_high"],result["private_low"],result["private_high"],result["wholesale_low"],result["wholesale_high"],result["trade_low"],result["trade_high"],result["dealer_low"],result["dealer_high"],round(suggested,2),result["market_mid"],"BAM AI live Australian market search",result["confidence"],source,datetime.now().isoformat(timespec="seconds"),auction_id))
-        conn.commit(); flash(f"BAM Automatic Market Valuation saved from {len(result['prices'])} current Australian comparable listing(s).","success")
-    except Exception as exc:
-        flash(f"Automatic market valuation could not complete: {exc}","error")
-    finally: conn.close()
-    return redirect(url_for("auction_detail",auction_id=auction_id))
 
 @app.post("/auction-watch/<int:auction_id>/comparable-value")
 @login_required
@@ -9612,207 +8914,6 @@ def readiness_check():
 
 # Gunicorn imports this module rather than executing it as __main__.
 init_db()
-
-# Version 25.20.1 - Business Expenses, Vehicle Storage & Financial Integration
-BUSINESS_EXPENSE_CATEGORIES = ["Vehicle Storage","Yard / Factory Rent","Water","Electricity","Gas","Strata / Body Corporate","Insurance","Business Registration / Licensing","Tax / Accounting","Building / Maintenance","Council Rates","Phone / Internet","Security","Cleaning","Tools / Equipment","Bank Fees","Advertising","Other"]
-EXPENSE_FREQUENCIES = ["One-off","Weekly","Fortnightly","Monthly","Quarterly","Yearly"]
-STORAGE_PERIODS = ["Daily","Weekly","Fortnightly","Monthly"]
-
-def storage_accrued_amount(row, as_of=None):
-    try: start=datetime.strptime(str(row["start_date"]),"%Y-%m-%d").date()
-    except (TypeError,ValueError): return 0.0
-    try: end=datetime.strptime(str(row["end_date"]),"%Y-%m-%d").date() if row["end_date"] else (as_of or date.today())
-    except ValueError: end=as_of or date.today()
-    if end < start: return 0.0
-    days=(end-start).days+1
-    divisor={"Daily":1,"Weekly":7,"Fortnightly":14,"Monthly":30.4375}.get(str(row["rate_period"] or "Weekly"),7)
-    import math
-    return round(float(row["rate"] or 0)*max(1,math.ceil(days/divisor)),2)
-
-@app.route("/business-expenses")
-@login_required
-def business_expenses():
-    conn=db(); expenses=conn.execute("SELECT * FROM business_expenses ORDER BY expense_date DESC,id DESC").fetchall()
-    raw_storage=conn.execute("SELECT vs.*,v.stock_no,v.year,v.make,v.model FROM vehicle_storage vs JOIN vehicles v ON v.id=vs.vehicle_id ORDER BY CASE WHEN COALESCE(vs.end_date,'')='' THEN 0 ELSE 1 END,vs.start_date DESC,vs.id DESC").fetchall()
-    vehicles=conn.execute("SELECT id,stock_no,year,make,model FROM vehicles ORDER BY stock_no DESC").fetchall()
-    today=date.today(); month=today.strftime('%Y-%m'); fy_start=date(today.year if today.month>=7 else today.year-1,7,1).isoformat()
-    month_total=sum(float(r['amount_inc_gst'] or 0) for r in expenses if str(r['expense_date'] or '').startswith(month)); fy_total=sum(float(r['amount_inc_gst'] or 0) for r in expenses if str(r['expense_date'] or '')>=fy_start); gst_total=sum(float(r['gst_amount'] or 0) for r in expenses if str(r['expense_date'] or '')>=fy_start)
-    storage=[]; active_storage_total=0.0
-    for r in raw_storage:
-        d=dict(r); d['accrued']=storage_accrued_amount(r); storage.append(d)
-        if not r['end_date']: active_storage_total+=d['accrued']
-    conn.close()
-    template='''{% extends "base.html" %}{% block content %}
-<style>.bo-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px}.bo-card,.bo-panel{background:#fff;border:1px solid #dbe3ea;border-radius:14px;padding:16px;margin-bottom:16px}.bo-card b{font-size:1.45rem}.bo-form{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px}.bo-form input,.bo-form select,.bo-form textarea{width:100%;box-sizing:border-box;padding:10px;border:1px solid #cbd5e1;border-radius:8px}.bo-table{width:100%;border-collapse:collapse}.bo-table th,.bo-table td{padding:9px;border-bottom:1px solid #e2e8f0;text-align:left}.bo-btn{background:#0f766e;color:white;border:0;border-radius:8px;padding:10px 14px;font-weight:800;cursor:pointer}.muted{color:#64748b;font-size:.9rem}@media(max-width:700px){.bo-panel{overflow:auto}.bo-table{font-size:.82rem}}</style>
-<h1>Business Expenses &amp; Storage</h1><p class="muted">BAM overheads, recurring costs and vehicle storage in one place. Storage automatically flows into each vehicle’s Total Invested, partner contribution and profit/loss.</p>
-<div class="bo-grid"><div class="bo-card">This Month<br><b>${{ '%.2f'|format(month_total) }}</b></div><div class="bo-card">Financial Year<br><b>${{ '%.2f'|format(fy_total) }}</b></div><div class="bo-card">GST Recorded FY<br><b>${{ '%.2f'|format(gst_total) }}</b></div><div class="bo-card">Active Storage Accrued<br><b>${{ '%.2f'|format(active_storage_total) }}</b></div></div>
-<div class="bo-panel"><h2>Add Business Expense / Overhead</h2><form method="post" action="{{url_for('business_expense_add')}}" class="bo-form"><input type="date" name="expense_date" value="{{today}}" required><select name="category">{% for x in categories %}<option>{{x}}</option>{% endfor %}</select><input name="description" placeholder="Description" required><input name="supplier" placeholder="Supplier / payee"><input type="number" step="0.01" min="0" name="amount_inc_gst" placeholder="Amount inc GST" required><input type="number" step="0.01" min="0" name="gst_amount" placeholder="GST amount"><select name="paid_by"><option>BAM</option><option>Barry</option><option>Matt</option><option>Shared</option></select><select name="frequency">{% for x in frequencies %}<option>{{x}}</option>{% endfor %}</select><input type="date" name="due_date"><input type="date" name="paid_date"><select name="status"><option>Paid</option><option>Due</option><option>Scheduled</option></select><textarea name="notes" placeholder="Notes"></textarea><button class="bo-btn">Save Business Expense</button></form></div>
-<div class="bo-panel"><h2>Vehicle Storage</h2><p class="muted">Choose Daily, Weekly, Fortnightly or Monthly. BAM automatically accrues storage until you stop it. Barry or Matt payments are assigned to that partner; BAM or Shared costs are split 50/50.</p><form method="post" action="{{url_for('vehicle_storage_add')}}" class="bo-form"><select name="vehicle_id" required><option value="">Select BAM vehicle</option>{% for v in vehicles %}<option value="{{v.id}}">{{v.stock_no}} — {{v.year or ''}} {{v.make}} {{v.model}}</option>{% endfor %}</select><input name="provider" placeholder="Storage provider"><input name="location" placeholder="Storage location"><input type="date" name="start_date" value="{{today}}" required><input type="number" step="0.01" min="0" name="rate" placeholder="Storage rate $" required><select name="rate_period">{% for x in storage_periods %}<option>{{x}}</option>{% endfor %}</select><select name="paid_by"><option>BAM</option><option>Barry</option><option>Matt</option><option>Shared</option></select><select name="gst_included"><option value="1">GST included</option><option value="0">No GST</option></select><textarea name="notes" placeholder="Storage notes"></textarea><button class="bo-btn">Start Storage</button></form></div>
-<div class="bo-panel"><h2>Current &amp; Previous Storage</h2><table class="bo-table"><tr><th>Vehicle</th><th>Provider / Location</th><th>Dates</th><th>Rate</th><th>Accrued</th><th></th></tr>{% for r in storage %}<tr><td><a href="{{url_for('vehicle_detail',vehicle_id=r.vehicle_id)}}">{{r.stock_no}}</a><br>{{r.year or ''}} {{r.make}} {{r.model}}</td><td>{{r.provider or '—'}}<br>{{r.location or ''}}</td><td>{{r.start_date}} → {{r.end_date or 'ACTIVE'}}</td><td>${{ '%.2f'|format(r.rate or 0) }} / {{r.rate_period}}</td><td><b>${{ '%.2f'|format(r.accrued) }}</b></td><td>{% if not r.end_date %}<form method="post" action="{{url_for('vehicle_storage_stop',storage_id=r.id)}}"><button class="bo-btn">Stop Today</button></form>{% endif %}</td></tr>{% else %}<tr><td colspan="6">No storage recorded yet.</td></tr>{% endfor %}</table></div>
-<div class="bo-panel"><h2>Business Expense History</h2><table class="bo-table"><tr><th>Date</th><th>Category</th><th>Description</th><th>Supplier</th><th>Frequency</th><th>Paid By</th><th>Amount</th><th>GST</th><th>Status</th></tr>{% for r in expenses %}<tr><td>{{r.expense_date}}</td><td>{{r.category}}</td><td>{{r.description}}</td><td>{{r.supplier or '—'}}</td><td>{{r.frequency}}</td><td>{{r.paid_by}}</td><td>${{ '%.2f'|format(r.amount_inc_gst or 0) }}</td><td>${{ '%.2f'|format(r.gst_amount or 0) }}</td><td>{{r.status}}</td></tr>{% else %}<tr><td colspan="9">No business expenses recorded yet.</td></tr>{% endfor %}</table></div>
-{% endblock %}'''
-    return render_template_string(template,expenses=expenses,storage=storage,vehicles=vehicles,categories=BUSINESS_EXPENSE_CATEGORIES,frequencies=EXPENSE_FREQUENCIES,storage_periods=STORAGE_PERIODS,today=today.isoformat(),month_total=month_total,fy_total=fy_total,gst_total=gst_total,active_storage_total=active_storage_total)
-
-@app.route("/business-expenses/add",methods=["POST"])
-@login_required
-def business_expense_add():
-    conn=db()
-    try:
-        conn.execute("INSERT INTO business_expenses(expense_date,category,description,supplier,amount_inc_gst,gst_amount,paid_by,frequency,due_date,paid_date,status,notes) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",(request.form.get('expense_date'),request.form.get('category'),request.form.get('description','').strip(),request.form.get('supplier','').strip() or None,float(request.form.get('amount_inc_gst') or 0),float(request.form.get('gst_amount') or 0),request.form.get('paid_by') or 'BAM',request.form.get('frequency') or 'One-off',request.form.get('due_date') or None,request.form.get('paid_date') or None,request.form.get('status') or 'Paid',request.form.get('notes','').strip() or None)); conn.commit(); flash('Business expense saved.','success')
-    except (ValueError,sqlite3.Error) as exc: conn.rollback(); flash(str(exc),'error')
-    finally: conn.close()
-    return redirect(url_for('business_expenses'))
-
-@app.route("/business-expenses/storage/add",methods=["POST"])
-@login_required
-def vehicle_storage_add():
-    conn=db()
-    try:
-        conn.execute("INSERT INTO vehicle_storage(vehicle_id,provider,location,start_date,rate,rate_period,gst_included,paid_by,notes) VALUES(?,?,?,?,?,?,?,?,?)",(int(request.form.get('vehicle_id')),request.form.get('provider','').strip() or None,request.form.get('location','').strip() or None,request.form.get('start_date'),float(request.form.get('rate') or 0),request.form.get('rate_period') or 'Weekly',1 if request.form.get('gst_included')=='1' else 0,request.form.get('paid_by') or 'BAM',request.form.get('notes','').strip() or None)); conn.commit(); flash('Vehicle storage started.','success')
-    except (ValueError,sqlite3.Error) as exc: conn.rollback(); flash(str(exc),'error')
-    finally: conn.close()
-    return redirect(url_for('business_expenses'))
-
-@app.route("/business-expenses/storage/<int:storage_id>/stop",methods=["POST"])
-@login_required
-def vehicle_storage_stop(storage_id):
-    conn=db(); conn.execute("UPDATE vehicle_storage SET end_date=? WHERE id=? AND COALESCE(end_date,'')=''",(date.today().isoformat(),storage_id)); conn.commit(); conn.close(); flash('Storage stopped and total frozen.','success'); return redirect(url_for('business_expenses'))
-
-
-def next_consignment_number(conn=None):
-    own = conn is None; conn = conn or db(); highest = 0
-    for row in conn.execute("SELECT consignment_no FROM consignments").fetchall():
-        m = re.search(r"(\d+)$", row["consignment_no"] or "")
-        if m: highest=max(highest,int(m.group(1)))
-    if own: conn.close()
-    return f"CONSIGN-{highest+1:05d}"
-
-@app.route('/consignments')
-@login_required
-def consignments():
-    conn=db(); rows=conn.execute('SELECT * FROM consignments ORDER BY id DESC').fetchall(); conn.close()
-    return render_template_string('''{% extends "base.html" %}{% block content %}<style>.cg{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px}.p{background:#fff;border:1px solid #dbe3ea;border-radius:14px;padding:16px;margin-bottom:16px}.t{width:100%;border-collapse:collapse}.t th,.t td{padding:10px;border-bottom:1px solid #e2e8f0;text-align:left}.b{background:#0f766e;color:#fff;padding:10px 14px;border-radius:8px;text-decoration:none;font-weight:800}.muted{color:#64748b}</style><div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap"><div><h1>BAM Consignment Management</h1><p class="muted">Customer-owned Cars • Caravans • Trailers • Boats • Motorbikes • Other</p></div><a class="b" href="{{url_for('consignment_new')}}">+ New Consignment</a></div><div class="p"><table class="t"><tr><th>No.</th><th>Vehicle / Asset</th><th>Owner</th><th>Status</th><th>Asking</th><th>Agreement</th><th></th></tr>{% for c in rows %}<tr><td><b>{{c.consignment_no}}</b></td><td>{{c.year or ''}} {{c.make}} {{c.model}} {{c.variant or ''}}<br><span class="muted">{{c.asset_type}} • {{c.registration or 'No rego'}}</span></td><td>{{c.owner_name}}</td><td>{{c.status}}</td><td>${{'%.2f'|format(c.asking_price or 0)}}</td><td>{{'✓ Signed' if c.agreement_signed else 'Pending'}}</td><td><a class="b" href="{{url_for('consignment_detail',consignment_id=c.id)}}">Open</a></td></tr>{% else %}<tr><td colspan="7">No consignment vehicles yet.</td></tr>{% endfor %}</table></div>{% endblock %}''',rows=rows)
-
-@app.route('/consignments/new',methods=['GET','POST'])
-@login_required
-def consignment_new():
-    if request.method=='POST':
-        conn=db()
-        try:
-            no=next_consignment_number(conn)
-            cur=conn.execute('''INSERT INTO consignments(consignment_no,status,asset_type,owner_name,owner_phone,owner_email,owner_address,start_date,expiry_date,agreement_signed,commission_rate,owner_required_return,asking_price,minimum_sale_price,year,make,model,variant,vin,registration,rego_expiry,odometer_km,colour,roadworthy_status,market_low,market_mid,market_high,notes) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',(no,request.form.get('status') or 'Draft',request.form.get('asset_type') or 'Car',request.form.get('owner_name'),request.form.get('owner_phone'),request.form.get('owner_email'),request.form.get('owner_address'),request.form.get('start_date'),request.form.get('expiry_date'),1 if request.form.get('agreement_signed') else 0,float(request.form.get('commission_rate') or 0),float(request.form.get('owner_required_return') or 0),float(request.form.get('asking_price') or 0),float(request.form.get('minimum_sale_price') or 0),int(request.form.get('year')) if request.form.get('year') else None,request.form.get('make'),request.form.get('model'),request.form.get('variant'),request.form.get('vin'),request.form.get('registration'),request.form.get('rego_expiry'),int(request.form.get('odometer_km')) if request.form.get('odometer_km') else None,request.form.get('colour'),request.form.get('roadworthy_status') or 'Not Checked',float(request.form.get('market_low') or 0),float(request.form.get('market_mid') or 0),float(request.form.get('market_high') or 0),request.form.get('notes'))); conn.commit(); return redirect(url_for('consignment_detail',consignment_id=cur.lastrowid))
-        except Exception as exc: conn.rollback(); flash(str(exc),'error')
-        finally: conn.close()
-    return render_template_string('''{% extends "base.html" %}{% block content %}<style>.p{background:#fff;border:1px solid #dbe3ea;border-radius:14px;padding:18px;margin-bottom:16px}.f{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:10px}.f input,.f select,.f textarea{width:100%;box-sizing:border-box;padding:10px;border:1px solid #cbd5e1;border-radius:8px}.f label{font-weight:700}.b{background:#0f766e;color:#fff;border:0;border-radius:8px;padding:11px 16px;font-weight:800}</style><h1>New Consignment</h1><form method="post"><div class="p"><h2>Owner & Agreement</h2><div class="f"><label>Owner Name<input name="owner_name" required></label><label>Phone<input name="owner_phone"></label><label>Email<input name="owner_email"></label><label>Address<input name="owner_address"></label><label>Start<input type="date" name="start_date"></label><label>Expiry<input type="date" name="expiry_date"></label><label>Status<select name="status"><option>Draft</option><option>Active</option></select></label><label>Agreement Signed<select name="agreement_signed"><option value="">No</option><option value="1">Yes</option></select></label></div></div><div class="p"><h2>Vehicle / Asset</h2><div class="f"><label>Type<select name="asset_type"><option>Car</option><option>Caravan</option><option>Trailer</option><option>Boat</option><option>Motorbike</option><option>Other</option></select></label><label>Year<input type="number" name="year"></label><label>Make<input name="make" required></label><label>Model<input name="model" required></label><label>Variant<input name="variant"></label><label>VIN / HIN<input name="vin"></label><label>Registration<input name="registration"></label><label>Rego Expiry<input type="date" name="rego_expiry"></label><label>Kilometres / Hours<input type="number" name="odometer_km"></label><label>Colour<input name="colour"></label><label>Roadworthy<input name="roadworthy_status" value="Not Checked"></label></div></div><div class="p"><h2>Financial Snapshot</h2><div class="f"><label>Owner Required $<input type="number" step=".01" name="owner_required_return"></label><label>Asking Price $<input type="number" step=".01" name="asking_price"></label><label>Minimum Sale $<input type="number" step=".01" name="minimum_sale_price"></label><label>BAM Commission %<input type="number" step=".01" name="commission_rate"></label><label>Market Low $<input type="number" step=".01" name="market_low"></label><label>Market Mid $<input type="number" step=".01" name="market_mid"></label><label>Market High $<input type="number" step=".01" name="market_high"></label><label>Notes<textarea name="notes"></textarea></label></div></div><button class="b">Create Consignment</button></form>{% endblock %}''')
-
-@app.route('/consignments/<int:consignment_id>')
-@login_required
-def consignment_detail(consignment_id):
-    conn=db(); c=conn.execute('SELECT * FROM consignments WHERE id=?',(consignment_id,)).fetchone()
-    if not c: conn.close(); return 'Consignment not found',404
-    ex=conn.execute('SELECT * FROM consignment_expenses WHERE consignment_id=? ORDER BY id DESC',(consignment_id,)).fetchall(); jobs=conn.execute('SELECT * FROM consignment_job_cards WHERE consignment_id=? ORDER BY id DESC',(consignment_id,)).fetchall(); docs=conn.execute('SELECT * FROM consignment_documents WHERE consignment_id=? ORDER BY id DESC',(consignment_id,)).fetchall(); photos=conn.execute('SELECT * FROM consignment_photos WHERE consignment_id=? ORDER BY id DESC',(consignment_id,)).fetchall(); conn.close()
-    expense=sum(float(x['amount_inc_gst'] or 0) for x in ex); recovery=sum(float(x['amount_inc_gst'] or 0) for x in ex if x['recover_from_owner']); workshop=sum(float(x['labour_cost'] or 0)+float(x['parts_cost'] or 0) for x in jobs); basis=float(c['sale_price'] or 0) or float(c['asking_price'] or 0); commission=basis*float(c['commission_rate'] or 0)/100; owner_net=max(0,basis-commission-recovery); bam_net=commission-max(0,expense-recovery)
-    return render_template_string('''{% extends "base.html" %}{% block content %}<style>.g{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px}.p,.k{background:#fff;border:1px solid #dbe3ea;border-radius:14px;padding:16px;margin-bottom:16px}.k b{font-size:1.35rem}.f{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px}.f input,.f select{padding:9px;border:1px solid #cbd5e1;border-radius:8px}.t{width:100%;border-collapse:collapse}.t td,.t th{padding:8px;border-bottom:1px solid #e2e8f0;text-align:left}.b{background:#0f766e;color:#fff;border:0;border-radius:8px;padding:10px 14px;font-weight:800}.danger{background:#b91c1c}.muted{color:#64748b}</style><h1>{{c.consignment_no}} — {{c.year or ''}} {{c.make}} {{c.model}}</h1><p class="muted">Owner: {{c.owner_name}} • {{c.status}} • {{'Agreement signed' if c.agreement_signed else 'Agreement pending'}}</p><div class="g"><div class="k">Asking<br><b>${{'%.2f'|format(c.asking_price or 0)}}</b></div><div class="k">BAM Commission<br><b>${{'%.2f'|format(commission)}}</b></div><div class="k">Owner Net<br><b>${{'%.2f'|format(owner_net)}}</b></div><div class="k">Expenses<br><b>${{'%.2f'|format(expense)}}</b></div><div class="k">Workshop<br><b>${{'%.2f'|format(workshop)}}</b></div><div class="k">BAM Net<br><b>${{'%.2f'|format(bam_net)}}</b></div></div><div class="p"><h2>Vehicle Record</h2><p><b>{{c.asset_type}}</b> • VIN/HIN {{c.vin or '—'}} • Rego {{c.registration or '—'}} • Expiry {{c.rego_expiry or '—'}} • {{c.odometer_km or 0}} km/hours • {{c.colour or '—'}} • Roadworthy: {{c.roadworthy_status}}</p><p>Owner required: ${{'%.2f'|format(c.owner_required_return or 0)}} • Minimum: ${{'%.2f'|format(c.minimum_sale_price or 0)}} • Market: ${{'%.0f'|format(c.market_low or 0)}} / ${{'%.0f'|format(c.market_mid or 0)}} / ${{'%.0f'|format(c.market_high or 0)}}</p></div><div class="p"><h2>Workshop / Job Cards</h2><form class="f" method="post" action="{{url_for('consignment_job_add',consignment_id=c.id)}}"><input type="date" name="job_date"><input name="description" placeholder="Work description" required><input type="number" step=".01" name="labour_cost" placeholder="Labour $"><input type="number" step=".01" name="parts_cost" placeholder="Parts $"><select name="status"><option>Open</option><option>In Progress</option><option>Completed</option></select><button class="b">Add Job</button></form><table class="t"><tr><th>Date</th><th>Work</th><th>Labour</th><th>Parts</th><th>Status</th></tr>{% for j in jobs %}<tr><td>{{j.job_date or ''}}</td><td>{{j.description}}</td><td>${{'%.2f'|format(j.labour_cost or 0)}}</td><td>${{'%.2f'|format(j.parts_cost or 0)}}</td><td>{{j.status}}</td></tr>{% endfor %}</table></div><div class="p"><h2>Expenses</h2><form class="f" method="post" action="{{url_for('consignment_expense_add',consignment_id=c.id)}}"><input type="date" name="expense_date"><select name="category"><option>Workshop</option><option>Parts</option><option>Service</option><option>Roadworthy</option><option>Registration</option><option>Advertising</option><option>Other</option></select><input name="description" placeholder="Description" required><input type="number" step=".01" name="amount_inc_gst" placeholder="Amount $"><select name="paid_by"><option>BAM</option><option>Owner</option><option>Barry</option><option>Matt</option></select><label><input type="checkbox" name="recover_from_owner"> Recover from owner</label><button class="b">Add Expense</button></form><table class="t"><tr><th>Date</th><th>Category</th><th>Description</th><th>Paid By</th><th>Amount</th></tr>{% for e in ex %}<tr><td>{{e.expense_date or ''}}</td><td>{{e.category}}</td><td>{{e.description}}</td><td>{{e.paid_by}}</td><td>${{'%.2f'|format(e.amount_inc_gst or 0)}}</td></tr>{% endfor %}</table></div><div class="p"><h2>Vehicle Photo Manager</h2><p class="muted">Keep all consignment photos with this vehicle. Add exterior, interior, odometer, VIN/chassis, damage and sale-listing photos.</p><form method="post" enctype="multipart/form-data" action="{{url_for('consignment_photo_add',consignment_id=c.id)}}"><select name="photo_category"><option>Front</option><option>Rear</option><option>Left Side</option><option>Right Side</option><option>Interior</option><option>Odometer</option><option>VIN / Chassis</option><option>Damage</option><option>Pre-existing Damage</option><option>Documents</option><option>Advertising</option><option selected>Other</option></select> <input type="file" name="photos" accept="image/png,image/jpeg,image/webp" multiple required> <input name="caption" placeholder="Caption / condition note (optional)"> <button class="b">Upload Photos</button></form><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px;margin-top:14px">{% for p in photos %}<div style="border:1px solid #dbe3ea;border-radius:12px;padding:8px;background:#f8fafc"><a href="{{url_for('uploaded_file',filename=p.filename)}}" target="_blank"><img src="{{url_for('uploaded_file',filename=p.filename)}}" style="width:100%;height:140px;object-fit:cover;border-radius:8px"></a><div style="padding:6px 2px"><span style="display:inline-block;background:#e2e8f0;border-radius:999px;padding:3px 8px;font-size:.78rem;font-weight:800">{{p.photo_category or 'Other'}}</span><br><b>{{p.caption or 'Vehicle photo'}}</b></div><form method="post" action="{{url_for('consignment_photo_delete',consignment_id=c.id,photo_id=p.id)}}" onsubmit="return confirm('Delete this photo?')"><button class="b danger" style="padding:7px 10px">Delete</button></form></div>{% else %}<div class="muted">No vehicle photos yet.</div>{% endfor %}</div></div><div class="p"><h2>PPSR / Vehicle History</h2><p class="muted">Run the official Australian PPSR vehicle search, then record the certificate/reference and result against this consignment.</p><div class="f"><a class="b" href="https://www.ppsr.gov.au/searching/do-used-car-or-vehicle-search" target="_blank" rel="noopener">Run PPSR Check ↗</a><div><b>VIN / HIN:</b><br>{{c.vin or 'Enter VIN/HIN in the vehicle record first'}}</div><div><b>Current PPSR reference:</b><br>{{c.ppsr_reference or 'Not recorded'}}</div><div><b>Search date:</b><br>{{c.ppsr_search_date or 'Not recorded'}}</div><div><b>Result:</b><br>{{c.ppsr_result or 'Not Checked'}}</div></div><p class="muted" style="margin-top:10px">After completing the search, save the PPSR details below and upload the certificate in Consignment Agreement & Documents.</p></div><div class="p"><h2>Owner Intake, Declarations & Handover</h2><p class="muted">Record the owner declarations here first. These answers automatically flow into the printable consignment agreement.</p><form method="post" action="{{url_for('consignment_declarations_save',consignment_id=c.id)}}"><div class="f"><label><input type="checkbox" name="owner_authority_confirmed" value="1" {% if c.owner_authority_confirmed %}checked{% endif %}> Owner confirms authority to consign and sell</label><label>Finance / security interest<select name="finance_status"><option {% if c.finance_status=='Not declared' %}selected{% endif %}>Not declared</option><option {% if c.finance_status=='No' %}selected{% endif %}>No</option><option {% if c.finance_status=='Yes' %}selected{% endif %}>Yes</option></select></label><input name="finance_details" value="{{c.finance_details or ''}}" placeholder="Finance/security details"><input name="ppsr_reference" value="{{c.ppsr_reference or ''}}" placeholder="PPSR reference / certificate"><label>PPSR search date<input type="date" name="ppsr_search_date" value="{{c.ppsr_search_date or ''}}"></label><label>PPSR result<select name="ppsr_result"><option {% if (c.ppsr_result or 'Not Checked')=='Not Checked' %}selected{% endif %}>Not Checked</option><option {% if c.ppsr_result=='Clear / No security interest recorded' %}selected{% endif %}>Clear / No security interest recorded</option><option {% if c.ppsr_result=='Security interest recorded' %}selected{% endif %}>Security interest recorded</option><option {% if c.ppsr_result=='Written-off record' %}selected{% endif %}>Written-off record</option><option {% if c.ppsr_result=='Stolen record' %}selected{% endif %}>Stolen record</option><option {% if c.ppsr_result=='Review Required' %}selected{% endif %}>Review Required</option></select></label><label>Damage / written-off history<select name="damage_status"><option {% if c.damage_status=='Not declared' %}selected{% endif %}>Not declared</option><option {% if c.damage_status=='No' %}selected{% endif %}>No</option><option {% if c.damage_status=='Yes' %}selected{% endif %}>Yes</option></select></label><input name="damage_details" value="{{c.damage_details or ''}}" placeholder="Accident, flood, structural or damage details"><label><input type="checkbox" name="faults_disclosed" value="1" {% if c.faults_disclosed %}checked{% endif %}> Mechanical/electrical faults reviewed</label><input name="fault_details" value="{{c.fault_details or ''}}" placeholder="Known faults / material defects"><label><input type="checkbox" name="odometer_confirmed" value="1" {% if c.odometer_confirmed %}checked{% endif %}> Odometer / hours confirmed by owner</label><label>Keys / remotes supplied<input type="number" min="0" name="keys_supplied" value="{{c.keys_supplied or 0}}"></label><label><input type="checkbox" name="registration_papers_supplied" value="1" {% if c.registration_papers_supplied %}checked{% endif %}> Registration papers supplied</label><label><input type="checkbox" name="service_records_supplied" value="1" {% if c.service_records_supplied %}checked{% endif %}> Service records supplied</label><input name="other_documents_supplied" value="{{c.other_documents_supplied or ''}}" placeholder="Other documents / items handed over"><label><input type="checkbox" name="advertising_authority" value="1" {% if c.advertising_authority %}checked{% endif %}> Owner authorises BAM to photograph and advertise</label><label><input type="checkbox" name="photo_retention_authority" value="1" {% if c.photo_retention_authority %}checked{% endif %}> Owner authorises condition photos to be retained</label><label>Condition inspection date<input type="date" name="condition_inspection_date" value="{{c.condition_inspection_date or ''}}"></label><input name="preexisting_damage_notes" value="{{c.preexisting_damage_notes or ''}}" placeholder="Pre-existing damage / condition notes"><label><input type="checkbox" name="damage_photos_reviewed" value="1" {% if c.damage_photos_reviewed %}checked{% endif %}> Owner has reviewed BAM condition / damage photos</label><label><input type="checkbox" name="owner_damage_accepted" value="1" {% if c.owner_damage_accepted %}checked{% endif %}> Owner accepts the recorded pre-existing damage and condition</label><input name="damage_acceptance_name" value="{{c.damage_acceptance_name or c.owner_name or ''}}" placeholder="Owner name for damage acceptance"><label>Damage acceptance date<input type="date" name="damage_acceptance_date" value="{{c.damage_acceptance_date or ''}}"></label><input name="declaration_name" value="{{c.declaration_name or c.owner_name or ''}}" placeholder="Owner declaration name"><input type="date" name="declaration_date" value="{{c.declaration_date or ''}}"></div><p><button class="b">Save Declarations & Handover</button></p></form></div><div class="p"><h2>Consignment Agreement & Documents</h2><p><a class="b" href="{{url_for('consignment_agreement',consignment_id=c.id)}}" target="_blank">Generate / Print Consignment Agreement</a></p><p class="muted">Review and print/sign the agreement. After signing, scan or photograph it and upload the signed copy below.</p><form method="post" enctype="multipart/form-data" action="{{url_for('consignment_document_add',consignment_id=c.id)}}"><select name="document_type"><option>Signed Consignment Agreement</option><option>PPSR Certificate</option><option>Pre-existing Damage Acceptance</option><option>Owner ID</option><option>Registration</option><option>Roadworthy</option><option>Service Record</option><option>Sales Paperwork</option><option>Other</option></select> <input type="file" name="document" required> <button class="b">Upload Document</button></form><p>{% for d in docs %}<a href="{{url_for('uploaded_file',filename=d.filename)}}" target="_blank">{{d.document_type}}</a>{% if not loop.last %} • {% endif %}{% else %}<span class="muted">No documents uploaded yet.</span>{% endfor %}</p></div><div class="p"><h2>Complete Sale</h2><form class="f" method="post" action="{{url_for('consignment_sale',consignment_id=c.id)}}"><input type="date" name="sale_date"><input type="number" step=".01" name="sale_price" placeholder="Sale price"><input name="buyer_name" placeholder="Buyer name"><button class="b">Mark Sold</button></form></div><div class="p"><form method="post" action="{{url_for('consignment_delete',consignment_id=c.id)}}" onsubmit="return confirm('Delete this consignment permanently?')"><button class="b danger">Delete Consignment</button></form></div>{% endblock %}''',c=c,ex=ex,jobs=jobs,docs=docs,photos=photos,expense=expense,workshop=workshop,commission=commission,owner_net=owner_net,bam_net=bam_net)
-
-@app.route('/consignments/<int:consignment_id>/expense',methods=['POST'])
-@login_required
-def consignment_expense_add(consignment_id):
-    conn=db(); conn.execute('INSERT INTO consignment_expenses(consignment_id,expense_date,category,description,amount_inc_gst,paid_by,recover_from_owner) VALUES(?,?,?,?,?,?,?)',(consignment_id,request.form.get('expense_date'),request.form.get('category'),request.form.get('description'),float(request.form.get('amount_inc_gst') or 0),request.form.get('paid_by') or 'BAM',1 if request.form.get('recover_from_owner') else 0)); conn.commit(); conn.close(); return redirect(url_for('consignment_detail',consignment_id=consignment_id))
-
-@app.route('/consignments/<int:consignment_id>/job',methods=['POST'])
-@login_required
-def consignment_job_add(consignment_id):
-    conn=db(); conn.execute('INSERT INTO consignment_job_cards(consignment_id,job_date,description,labour_cost,parts_cost,status) VALUES(?,?,?,?,?,?)',(consignment_id,request.form.get('job_date'),request.form.get('description'),float(request.form.get('labour_cost') or 0),float(request.form.get('parts_cost') or 0),request.form.get('status') or 'Open')); conn.commit(); conn.close(); return redirect(url_for('consignment_detail',consignment_id=consignment_id))
-
-@app.route('/consignments/<int:consignment_id>/declarations',methods=['POST'])
-@login_required
-def consignment_declarations_save(consignment_id):
-    conn=db()
-    try:
-        conn.execute("""UPDATE consignments SET owner_authority_confirmed=?,finance_status=?,finance_details=?,ppsr_reference=?,ppsr_search_date=?,ppsr_result=?,damage_status=?,damage_details=?,faults_disclosed=?,fault_details=?,odometer_confirmed=?,keys_supplied=?,registration_papers_supplied=?,service_records_supplied=?,other_documents_supplied=?,advertising_authority=?,photo_retention_authority=?,condition_inspection_date=?,preexisting_damage_notes=?,damage_photos_reviewed=?,owner_damage_accepted=?,damage_acceptance_name=?,damage_acceptance_date=?,declaration_name=?,declaration_date=? WHERE id=?""",(1 if request.form.get('owner_authority_confirmed') else 0,request.form.get('finance_status') or 'Not declared',(request.form.get('finance_details') or '').strip(),(request.form.get('ppsr_reference') or '').strip(),request.form.get('ppsr_search_date') or None,request.form.get('ppsr_result') or 'Not Checked',request.form.get('damage_status') or 'Not declared',(request.form.get('damage_details') or '').strip(),1 if request.form.get('faults_disclosed') else 0,(request.form.get('fault_details') or '').strip(),1 if request.form.get('odometer_confirmed') else 0,int(request.form.get('keys_supplied') or 0),1 if request.form.get('registration_papers_supplied') else 0,1 if request.form.get('service_records_supplied') else 0,(request.form.get('other_documents_supplied') or '').strip(),1 if request.form.get('advertising_authority') else 0,1 if request.form.get('photo_retention_authority') else 0,request.form.get('condition_inspection_date') or None,(request.form.get('preexisting_damage_notes') or '').strip(),1 if request.form.get('damage_photos_reviewed') else 0,1 if request.form.get('owner_damage_accepted') else 0,(request.form.get('damage_acceptance_name') or '').strip(),request.form.get('damage_acceptance_date') or None,(request.form.get('declaration_name') or '').strip(),request.form.get('declaration_date') or None,consignment_id))
-        conn.commit(); flash('Consignment declarations and handover saved.','success')
-    finally: conn.close()
-    return redirect(url_for('consignment_detail',consignment_id=consignment_id))
-
-@app.route('/consignments/<int:consignment_id>/photos',methods=['POST'])
-@login_required
-def consignment_photo_add(consignment_id):
-    conn=db()
-    try:
-        if not conn.execute('SELECT id FROM consignments WHERE id=?',(consignment_id,)).fetchone(): return 'Consignment not found',404
-        caption=(request.form.get('caption') or '').strip(); category=(request.form.get('photo_category') or 'Other').strip(); added=0
-        for upload in request.files.getlist('photos')[:20]:
-            fn=save_upload(upload)
-            if fn:
-                conn.execute('INSERT INTO consignment_photos(consignment_id,filename,caption,photo_category) VALUES(?,?,?,?)',(consignment_id,fn,caption,category)); added+=1
-        conn.commit()
-        if added: flash(f'{added} consignment photo(s) uploaded.','success')
-    finally: conn.close()
-    return redirect(url_for('consignment_detail',consignment_id=consignment_id))
-
-@app.route('/consignments/<int:consignment_id>/photos/<int:photo_id>/delete',methods=['POST'])
-@login_required
-def consignment_photo_delete(consignment_id,photo_id):
-    conn=db()
-    try:
-        conn.execute('DELETE FROM consignment_photos WHERE id=? AND consignment_id=?',(photo_id,consignment_id)); conn.commit()
-    finally: conn.close()
-    return redirect(url_for('consignment_detail',consignment_id=consignment_id))
-
-@app.route('/consignments/<int:consignment_id>/agreement')
-@login_required
-def consignment_agreement(consignment_id):
-    conn=db(); c=conn.execute('SELECT * FROM consignments WHERE id=?',(consignment_id,)).fetchone(); conn.close()
-    if not c: return 'Consignment not found',404
-    commission_amount=float(c['asking_price'] or 0)*float(c['commission_rate'] or 0)/100
-    missing=[]
-    checks=[('Owner phone',c['owner_phone']),('Owner address',c['owner_address']),('Agreement start date',c['start_date']),('Agreement expiry date',c['expiry_date']),('VIN / HIN',c['vin']),('Registration',c['registration']),('Odometer / hours',c['odometer_km']),('Asking price',float(c['asking_price'] or 0)>0),('Minimum sale price',float(c['minimum_sale_price'] or 0)>0),('BAM commission',float(c['commission_rate'] or 0)>0)]
-    for label,value in checks:
-        if not value: missing.append(label)
-    template="""<!doctype html><html><head><meta charset='utf-8'><title>{{c.consignment_no}} Consignment Agreement</title><style>body{font-family:Arial,sans-serif;color:#172033;max-width:900px;margin:30px auto;padding:0 24px;line-height:1.42}h1{margin-bottom:4px}.muted{color:#64748b}.warn{background:#fff7ed;border:2px solid #f59e0b;border-radius:10px;padding:12px;margin:14px 0}.box{border:1px solid #cbd5e1;border-radius:10px;padding:14px;margin:14px 0}.grid{display:grid;grid-template-columns:1fr 1fr;gap:8px 24px}.sig{margin-top:55px;display:grid;grid-template-columns:1fr 1fr;gap:40px}.line{border-top:1px solid #111;padding-top:6px}.print{background:#0f766e;color:#fff;border:0;border-radius:8px;padding:10px 16px;font-weight:700}.check{margin:6px 0}.small{font-size:.9rem}@media print{.print{display:none}body{margin:0;max-width:none}.warn{break-inside:avoid}.box{break-inside:avoid}}</style></head><body><button class='print' onclick='window.print()'>Print / Save as PDF</button><h1>BAM Motor Group — Consignment Agreement</h1><div class='muted'>Agreement {{c.consignment_no}} • Generated {{today}}</div>{% if missing %}<div class='warn'><b>Complete before signing:</b> {{missing|join(', ')}}. Return to the consignment record and enter these details before using this as the signed agreement.</div>{% endif %}<div class='box'><h2>Owner / Consignor</h2><div class='grid'><div><b>Name:</b> {{c.owner_name}}</div><div><b>Phone:</b> {{c.owner_phone or '—'}}</div><div><b>Email:</b> {{c.owner_email or '—'}}</div><div><b>Address:</b> {{c.owner_address or '—'}}</div></div></div><div class='box'><h2>Vehicle / Asset</h2><div class='grid'><div><b>Type:</b> {{c.asset_type}}</div><div><b>Vehicle:</b> {{c.year or ''}} {{c.make}} {{c.model}} {{c.variant or ''}}</div><div><b>VIN / HIN:</b> {{c.vin or '—'}}</div><div><b>Registration:</b> {{c.registration or '—'}}</div><div><b>Rego expiry:</b> {{c.rego_expiry or '—'}}</div><div><b>Kilometres / Hours:</b> {{c.odometer_km or '—'}}</div><div><b>Colour:</b> {{c.colour or '—'}}</div><div><b>Roadworthy:</b> {{c.roadworthy_status or '—'}}</div></div></div><div class='box'><h2>Sale Authority & Financial Terms</h2><div class='grid'><div><b>Agreement start:</b> {{c.start_date or '—'}}</div><div><b>Agreement expiry:</b> {{c.expiry_date or '—'}}</div><div><b>Asking price:</b> ${{'%.2f'|format(c.asking_price or 0)}}</div><div><b>Minimum sale price:</b> ${{'%.2f'|format(c.minimum_sale_price or 0)}}</div><div><b>Owner required return:</b> ${{'%.2f'|format(c.owner_required_return or 0)}}</div><div><b>BAM commission:</b> {{'%.2f'|format(c.commission_rate or 0)}}% (about ${{'%.2f'|format(commission_amount)}} at asking price)</div></div></div><div class='box'><h2>Owner Declarations & Handover Checklist</h2><div class='check'>{{'☑' if c.owner_authority_confirmed else '☐'}} I am entitled to consign and authorise the sale of this vehicle/asset.</div><div class='check'><b>Finance/security interest:</b> {{c.finance_status or 'Not declared'}}{% if c.finance_details %} — {{c.finance_details}}{% endif %}</div><div class='check'><b>PPSR:</b> {{c.ppsr_result or 'Not Checked'}}{% if c.ppsr_reference %} &nbsp; <b>Reference:</b> {{c.ppsr_reference}}{% endif %}{% if c.ppsr_search_date %} &nbsp; <b>Search date:</b> {{c.ppsr_search_date}}{% endif %}</div><div class='check'><b>Written-off/accident/flood/structural/material damage:</b> {{c.damage_status or 'Not declared'}}{% if c.damage_details %} — {{c.damage_details}}{% endif %}</div><div class='check'>{{'☑' if c.faults_disclosed else '☐'}} Known mechanical/electrical faults and material defects reviewed.{% if c.fault_details %} <b>Details:</b> {{c.fault_details}}{% endif %}</div><div class='check'>{{'☑' if c.odometer_confirmed else '☐'}} Odometer/hour reading shown above is accurate to the best of my knowledge.</div><div class='check'><b>Keys/remotes supplied:</b> {{c.keys_supplied or 0}} &nbsp;&nbsp; {{'☑' if c.registration_papers_supplied else '☐'}} Registration papers &nbsp; {{'☑' if c.service_records_supplied else '☐'}} Service records{% if c.other_documents_supplied %} &nbsp; <b>Other:</b> {{c.other_documents_supplied}}{% endif %}</div><div class='check'>{{'☑' if c.advertising_authority else '☐'}} BAM may photograph and advertise the vehicle/asset and communicate with prospective purchasers.</div><div class='check'>{{'☑' if c.photo_retention_authority else '☐'}} Condition photographs may be retained with the consignment record.</div><div class='check'><b>Pre-existing damage / condition acceptance:</b> {{'ACCEPTED' if c.owner_damage_accepted else 'NOT YET ACCEPTED'}}{% if c.condition_inspection_date %} — Inspection {{c.condition_inspection_date}}{% endif %}</div><div class='check'>{{'☑' if c.damage_photos_reviewed else '☐'}} Owner reviewed the BAM condition/damage photographs.{% if c.preexisting_damage_notes %} <b>Recorded condition:</b> {{c.preexisting_damage_notes}}{% endif %}</div>{% if c.damage_acceptance_name or c.damage_acceptance_date %}<div class='check'><b>Damage acceptance recorded by:</b> {{c.damage_acceptance_name or c.owner_name}}{% if c.damage_acceptance_date %} on {{c.damage_acceptance_date}}{% endif %}</div>{% endif %}{% if c.declaration_name or c.declaration_date %}<div class='check'><b>Declaration recorded by owner:</b> {{c.declaration_name or c.owner_name}}{% if c.declaration_date %} on {{c.declaration_date}}{% endif %}</div>{% endif %}</div><div class='box'><h2>Pre-Existing Damage & Condition Acknowledgement</h2><p>I have reviewed the vehicle/asset condition and the photographs recorded by BAM Motor Group at handover. I acknowledge that the damage, defects and condition recorded above were present when the vehicle/asset was delivered for consignment.</p><div class='sig' style='margin-top:45px'><div class='line'>Owner / Consignor signature & date</div><div class='line'>BAM Motor Group representative & date</div></div></div><div class='box'><h2>Agreement</h2><p>The owner appoints BAM Motor Group to advertise and facilitate the sale of the vehicle/asset described above during the agreement period, subject to the recorded minimum sale price and agreed commission.</p><p>The owner declares that they are entitled to consign the vehicle/asset and will disclose any finance, security interest, ownership dispute, material defect, written-off history or other matter that may affect lawful sale or accurate advertising.</p><p>BAM may photograph and advertise the vehicle/asset and communicate with prospective purchasers. Workshop, parts, registration, roadworthy, transport, advertising or other costs deducted from owner proceeds must be recorded in the consignment file and agreed with the owner.</p><p>Sale proceeds are to be reconciled after cleared buyer funds are received, with agreed commission and authorised recoverable costs deducted before the owner balance is paid. Any variation to the minimum sale price, commission, expenses or authority should be recorded in writing.</p><p>Either party should record any termination or withdrawal of the consignment in writing. Any agreed costs already incurred remain subject to the recorded expense arrangements.</p><p class='small'><b>Important:</b> This BAM-generated form is an operational record. It should be reviewed against the legal and dealer requirements that apply to the business, location and transaction before being adopted as BAM's final legal form.</p></div><div class='sig'><div class='line'>Owner / Consignor signature & date</div><div class='line'>BAM Motor Group representative & date</div></div><div class='sig'><div class='line'>Owner printed name</div><div class='line'>BAM representative printed name</div></div><div class='box small'><b>Copy supplied:</b> ☐ Owner received a copy of this signed agreement &nbsp;&nbsp; Date: ____________ &nbsp;&nbsp; Method: ☐ Printed ☐ Email ☐ Other</div></body></html>"""
-    return render_template_string(template,c=c,commission_amount=commission_amount,today=date.today().isoformat(),missing=missing)
-
-@app.route('/consignments/<int:consignment_id>/documents',methods=['POST'])
-@login_required
-def consignment_document_add(consignment_id):
-    conn=db()
-    try:
-        fn=save_upload(request.files.get('document'))
-        if fn: conn.execute('INSERT INTO consignment_documents(consignment_id,document_type,filename,description) VALUES(?,?,?,?)',(consignment_id,request.form.get('document_type') or 'Other',fn,request.form.get('description'))); conn.commit()
-    finally: conn.close()
-    return redirect(url_for('consignment_detail',consignment_id=consignment_id))
-
-@app.route('/consignments/<int:consignment_id>/sale',methods=['POST'])
-@login_required
-def consignment_sale(consignment_id):
-    conn=db(); conn.execute("UPDATE consignments SET sale_date=?,sale_price=?,buyer_name=?,status='Sold' WHERE id=?",(request.form.get('sale_date'),float(request.form.get('sale_price') or 0),request.form.get('buyer_name'),consignment_id)); conn.commit(); conn.close(); return redirect(url_for('consignment_detail',consignment_id=consignment_id))
-
-@app.route('/consignments/<int:consignment_id>/delete',methods=['POST'])
-@login_required
-def consignment_delete(consignment_id):
-    conn=db(); conn.execute('DELETE FROM consignments WHERE id=?',(consignment_id,)); conn.commit(); conn.close(); return redirect(url_for('consignments'))
-
-@app.after_request
-def bam_consignment_nav(response):
-    if response.status_code==200 and 'text/html' in response.headers.get('Content-Type','') and not response.direct_passthrough:
-        try:
-            text=response.get_data(as_text=True)
-            if 'bam-consignment-nav' not in text and '</body>' in text.lower():
-                script='''<script id="bam-consignment-nav">(function(){function a(){if(document.getElementById('bam-consignment-link'))return;var x=Array.from(document.querySelectorAll('a')).find(function(e){return (e.textContent||'').indexOf('Vehicle Inventory')>=0;});if(!x)return;var n=document.createElement('a');n.id='bam-consignment-link';n.href='/consignments';n.textContent='Consignment Management';n.className=x.className;n.style.cssText=x.style.cssText;n.style.display='block';x.insertAdjacentElement('afterend',n)}if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',a);else a()})();</script>'''
-                pos=text.lower().rfind('</body>'); response.set_data(text[:pos]+script+text[pos:]); response.headers['Content-Length']=str(len(response.get_data()))
-        except Exception: pass
-    return response
-
-@app.after_request
-def bam_business_expenses_nav(response):
-    if response.status_code==200 and 'text/html' in response.headers.get('Content-Type','') and not response.direct_passthrough:
-        try:
-            text=response.get_data(as_text=True)
-            if 'bam-business-expenses-nav' not in text and '</body>' in text.lower():
-                script='''<script id="bam-business-expenses-nav">(function(){function add(){if(document.getElementById('bam-business-expenses-link'))return;var links=Array.from(document.querySelectorAll('a'));var anchor=links.find(function(a){return (a.textContent||'').indexOf('Executive Dashboard')>=0;})||links.find(function(a){return (a.textContent||'').indexOf('Vehicle Inventory')>=0;});if(!anchor)return;var a=document.createElement('a');a.id='bam-business-expenses-link';a.href='/business-expenses';a.textContent='Business Expenses & Storage';a.className=anchor.className;a.style.cssText=anchor.style.cssText;a.style.display='block';anchor.insertAdjacentElement('afterend',a);}if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',add);else add();})();</script>'''
-                pos=text.lower().rfind('</body>'); text=text[:pos]+script+text[pos:]; response.set_data(text); response.headers['Content-Length']=str(len(response.get_data()))
-        except Exception: pass
-    return response
 
 if __name__ == "__main__":
     app.run(

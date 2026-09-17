@@ -11,6 +11,7 @@
     <a class="button secondary" href="{{ url_for('dealer_intelligence', vehicle_id=vehicle.id) }}">🧠 Dealer Intelligence</a>
     <a class="button secondary" href="{{ url_for('vin_intelligence', vehicle_id=vehicle.id) }}">🔎 VIN Intelligence</a>
     <a class="button secondary" href="{{ url_for('workshop_intelligence', vehicle_id=vehicle.id) }}">🛠 Workshop Intelligence</a>
+    <a class="button secondary" href="https://motorregistry.com.au/" target="_blank" rel="noopener">🔎 REVS / Vehicle History Check</a>
     <span class="status">{{ vehicle.status }}</span>
     <a class="button" href="{{ url_for('vehicle_edit', vehicle_id=vehicle.id) }}">Edit Asset</a>
     {% if (vehicle.vehicle_purpose or 'Retail Sale') == 'Parts Vehicle' or vehicle.status == 'BER' %}<a class="button" href="{{ url_for('vehicle_dismantling', vehicle_id=vehicle.id) }}">🔧 Dismantling</a>{% endif %}
@@ -21,7 +22,7 @@
 </div>
 
 <nav class="asset-workspace-nav" aria-label="Asset workspace">
-  <a href="#overview">Overview</a><a href="#ppsr-history">PPSR / Vehicle History</a><a href="{{ url_for('vehicle_timeline', vehicle_id=vehicle.id) }}">Timeline</a><a href="#photos">Photos</a><a href="#documents">Documents</a>
+  <a href="#overview">Overview</a><a href="{{ url_for('vehicle_timeline', vehicle_id=vehicle.id) }}">Timeline</a><a href="#photos">Photos</a><a href="#documents">Documents</a>
   <a href="#expenses">Expenses</a><a href="#workshop">Workshop</a><a href="#parts">Parts</a>{% if (vehicle.vehicle_purpose or 'Retail Sale') == 'Parts Vehicle' or vehicle.status == 'BER' %}<a href="#dismantling">Dismantling</a>{% endif %}
   <a href="#reminders">Reminders</a><a href="#sale">Sale & Profit</a>
 </nav>
@@ -73,40 +74,6 @@
     <div class="metric-row total"><span>Total Revenue</span><strong>{{ total_revenue|money }}</strong></div>
     <div class="metric-row total {% if profit >= 0 %}profit-positive{% else %}profit-negative{% endif %}"><span>Net Profit / Loss</span><strong>{{ profit|money }}</strong></div>
   </div>
-</section>
-
-<section id="ppsr-history" class="panel">
-  <div class="section-head">
-    <div>
-      <h2>PPSR / Vehicle History</h2>
-      <p>Run the official Australian PPSR vehicle search, then record the certificate/reference and result against this vehicle.</p>
-    </div>
-  </div>
-
-  <div class="detail-cards">
-    <div>
-      <small>PPSR Search</small>
-      <strong><a class="button" href="https://www.ppsr.gov.au/searching/do-used-car-or-vehicle-search" target="_blank" rel="noopener">Run PPSR Check ↗</a></strong>
-    </div>
-    <div><small>VIN / HIN</small><strong>{{ vehicle.vin or vehicle.hin or 'Enter VIN/HIN in the vehicle record first' }}</strong></div>
-    <div><small>Current PPSR Reference</small><strong>{{ vehicle.ppsr_number or 'Not recorded' }}</strong></div>
-    <div><small>Search Date</small><strong>{{ vehicle.ppsr_search_date or 'Not recorded' }}</strong></div>
-    <div><small>Result</small><strong>{{ vehicle.ppsr_result or 'Not Checked' }}</strong></div>
-  </div>
-
-  <form method="post" action="{{ url_for('vehicle_ppsr_history_save', vehicle_id=vehicle.id) }}" class="stack compact-form" style="margin-top:16px">
-    <input name="ppsr_number" value="{{ vehicle.ppsr_number or '' }}" placeholder="PPSR reference / certificate">
-    <label>PPSR search date<input type="date" name="ppsr_search_date" value="{{ vehicle.ppsr_search_date or '' }}"></label>
-    <label>PPSR result
-      <select name="ppsr_result">
-        {% for result in ['Not Checked','Clear / No security interest recorded','Security interest recorded','Written-off record','Stolen record','Review Required'] %}
-        <option {% if (vehicle.ppsr_result or 'Not Checked') == result %}selected{% endif %}>{{ result }}</option>
-        {% endfor %}
-      </select>
-    </label>
-    <button>Save PPSR / Vehicle History</button>
-  </form>
-  <p style="margin-top:10px">After completing the search, save the PPSR details here and upload the certificate in the Document Centre below.</p>
 </section>
 
 {% if (vehicle.vehicle_purpose or 'Retail Sale') == 'Parts Vehicle' or vehicle.status == 'BER' %}
@@ -161,7 +128,7 @@
 <section id="documents" class="panel">
   <div class="section-head"><div><h2>Document Centre</h2><p>Keep purchase, registration, PPSR, service and warranty files with this asset.</p></div></div>
   <form method="post" enctype="multipart/form-data" action="{{ url_for('vehicle_document_add', vehicle_id=vehicle.id) }}" class="document-upload-grid">
-    <select name="document_type"><option>Purchase Invoice</option><option>Registration</option><option>PPSR Certificate</option><option>Roadworthy</option><option>Service History</option><option>Warranty</option><option>Insurance</option><option>Manual</option><option>Other</option></select>
+    <select name="document_type"><option>Purchase Invoice</option><option>Registration</option><option>PPSR</option><option>Roadworthy</option><option>Service History</option><option>Warranty</option><option>Insurance</option><option>Manual</option><option>Other</option></select>
     <input name="description" placeholder="Description">
     <input type="file" name="document" accept=".pdf,.png,.jpg,.jpeg,.webp" required>
     <button>Upload Document</button>
