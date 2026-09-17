@@ -63,7 +63,7 @@ app.config.update(
     PERMANENT_SESSION_LIFETIME=timedelta(hours=int(os.environ.get("BAM_SESSION_HOURS", "12"))),
 )
 
-APP_VERSION = "25.21.5"
+APP_VERSION = "25.21.6"
 APP_NAME = "BAM Dealer Enterprise Cloud"
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "").strip()
 OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-5.6-luna").strip() or "gpt-5.6-luna"
@@ -2198,6 +2198,59 @@ def vehicle_generate_ai_ad(vehicle_id):
 
 
 
+def extract_ppsr_certificate_details(file_path, original_name=""):
+    """Best-effort PPSR PDF extraction; never invents a certificate result."""
+    text = ""
+    path = Path(file_path)
+    if path.suffix.lower() == ".pdf":
+        reader_cls = None
+        try:
+            from pypdf import PdfReader as reader_cls
+        except ImportError:
+            try:
+                from PyPDF2 import PdfReader as reader_cls
+            except ImportError:
+                reader_cls = None
+        if reader_cls:
+            try:
+                reader = reader_cls(str(path))
+                text = "\n".join((page.extract_text() or "") for page in reader.pages[:8])
+            except Exception:
+                text = ""
+    combined = (text + "\n" + (original_name or "")).strip()
+    reference = search_date = result = None
+    for pat in [r"(?:PPSR\s*)?(?:search|certificate)\s*(?:number|no\.?|reference|ref\.?)\s*[:#-]?\s*([A-Z0-9-]{8,30})", r"PPSR[-_ ]Search[-_ ]Certificate[-_ ](\d{10,25})"]:
+        m = re.search(pat, combined, re.I)
+        if m:
+            reference = m.group(1).strip(" -_"); break
+    m = re.search(r"(?:search\s*)?(?:date(?:/time)?|conducted)\s*[:#-]?\s*(\d{1,2}[/-]\d{1,2}[/-]\d{4})", combined, re.I)
+    if m:
+        try: search_date = datetime.strptime(m.group(1).replace('-', '/'), '%d/%m/%Y').date().isoformat()
+        except ValueError: pass
+    if not search_date:
+        m = re.search(r"\b(20\d{2})[-/](\d{1,2})[-/](\d{1,2})\b", combined)
+        if m:
+            try: search_date = date(int(m.group(1)),int(m.group(2)),int(m.group(3))).isoformat()
+            except ValueError: pass
+    if not search_date:
+        m = re.match(r"(20\d{2})(\d{2})(\d{2})", original_name or "")
+        if m:
+            try: search_date = date(int(m.group(1)),int(m.group(2)),int(m.group(3))).isoformat()
+            except ValueError: pass
+    low = re.sub(r"\s+", " ", text.lower())
+    if low:
+        no_security = any(x in low for x in ["no security interest", "no registration found", "no registrations found"])
+        security = any(x in low for x in ["security interest registered", "security interest(s) registered"])
+        stolen = "stolen" in low and not any(x in low for x in ["not stolen", "no stolen"])
+        written = ("written-off" in low or "written off" in low) and not any(x in low for x in ["not written-off", "not written off", "no written-off", "no written off"])
+        if stolen: result = "Stolen record"
+        elif written: result = "Written-off record"
+        elif security and not no_security: result = "Security interest recorded"
+        elif no_security: result = "Clear / No security interest recorded"
+        else: result = "Review Required"
+    return {"reference":reference,"search_date":search_date,"result":result,"text_extracted":bool(text)}
+
+
 @app.route("/vehicles/<int:vehicle_id>/ppsr-history", methods=["POST"])
 @login_required
 def vehicle_ppsr_history_save(vehicle_id):
@@ -2505,29 +2558,20 @@ def vehicle_detail(vehicle_id):
 @app.route("/vehicles/<int:vehicle_id>/documents", methods=["POST"])
 @login_required
 def vehicle_document_add(vehicle_id):
-    upload = request.files.get("document")
+    upload=request.files.get("document"); original_name=secure_filename(upload.filename or "") if upload else ""
     try:
-        filename = save_upload(upload)
-        if not filename:
-            raise ValueError("Choose a document to upload.")
-        conn = db()
-        conn.execute(
-            """INSERT INTO vehicle_documents(vehicle_id,document_type,filename,description)
-               VALUES(?,?,?,?)""",
-            (
-                vehicle_id,
-                request.form.get("document_type") or "Other",
-                filename,
-                request.form.get("description"),
-            ),
-        )
-        conn.commit()
-        conn.close()
-        log_action("Document uploaded", "vehicle", vehicle_id, request.form.get("document_type") or "Other")
-        flash("Document uploaded.", "success")
-    except ValueError as exc:
-        flash(str(exc), "error")
-    return redirect(url_for("vehicle_detail", vehicle_id=vehicle_id) + "#documents")
+        filename=save_upload(upload)
+        if not filename: raise ValueError("Choose a document to upload.")
+        document_type=request.form.get("document_type") or "Other"; conn=db()
+        conn.execute("INSERT INTO vehicle_documents(vehicle_id,document_type,filename,description) VALUES(?,?,?,?)",(vehicle_id,document_type,filename,request.form.get("description")))
+        auto_message=""
+        if document_type.strip().lower()=="ppsr certificate":
+            d=extract_ppsr_certificate_details(UPLOAD_DIR/filename,original_name); current=conn.execute("SELECT ppsr_number,ppsr_search_date,ppsr_result FROM vehicles WHERE id=?",(vehicle_id,)).fetchone()
+            ref=d["reference"] or (current["ppsr_number"] if current else None); sd=d["search_date"] or (current["ppsr_search_date"] if current else None) or date.today().isoformat(); result=d["result"] or (current["ppsr_result"] if current and current["ppsr_result"] not in (None,"","Not Checked") else None) or "Review Required"
+            conn.execute("UPDATE vehicles SET ppsr_number=?,ppsr_search_date=?,ppsr_result=? WHERE id=?",(ref,sd,result,vehicle_id)); auto_message=f" PPSR details auto-saved: {ref or 'reference needs review'} • {sd} • {result}."
+        conn.commit(); conn.close(); log_action("Document uploaded","vehicle",vehicle_id,document_type); flash("Document uploaded."+auto_message,"success")
+    except ValueError as exc: flash(str(exc),"error")
+    return redirect(url_for("vehicle_detail",vehicle_id=vehicle_id)+"#documents")
 
 @app.route("/vehicles/<int:vehicle_id>/documents/<int:document_id>/delete", methods=["POST"])
 @login_required
@@ -9775,10 +9819,18 @@ def consignment_agreement(consignment_id):
 @app.route('/consignments/<int:consignment_id>/documents',methods=['POST'])
 @login_required
 def consignment_document_add(consignment_id):
-    conn=db()
+    upload=request.files.get('document'); original_name=secure_filename(upload.filename or '') if upload else ''; conn=db()
     try:
-        fn=save_upload(request.files.get('document'))
-        if fn: conn.execute('INSERT INTO consignment_documents(consignment_id,document_type,filename,description) VALUES(?,?,?,?)',(consignment_id,request.form.get('document_type') or 'Other',fn,request.form.get('description'))); conn.commit()
+        fn=save_upload(upload)
+        if not fn: raise ValueError('Choose a document to upload.')
+        document_type=request.form.get('document_type') or 'Other'; conn.execute('INSERT INTO consignment_documents(consignment_id,document_type,filename,description) VALUES(?,?,?,?)',(consignment_id,document_type,fn,request.form.get('description')))
+        auto_message=''
+        if document_type.strip().lower()=='ppsr certificate':
+            d=extract_ppsr_certificate_details(UPLOAD_DIR/fn,original_name); current=conn.execute('SELECT ppsr_reference,ppsr_search_date,ppsr_result FROM consignments WHERE id=?',(consignment_id,)).fetchone()
+            ref=d['reference'] or (current['ppsr_reference'] if current else None); sd=d['search_date'] or (current['ppsr_search_date'] if current else None) or date.today().isoformat(); result=d['result'] or (current['ppsr_result'] if current and current['ppsr_result'] not in (None,'','Not Checked') else None) or 'Review Required'
+            conn.execute('UPDATE consignments SET ppsr_reference=?,ppsr_search_date=?,ppsr_result=? WHERE id=?',(ref,sd,result,consignment_id)); auto_message=f" PPSR details auto-saved: {ref or 'reference needs review'} • {sd} • {result}."
+        conn.commit(); flash('Document uploaded.'+auto_message,'success')
+    except ValueError as exc: conn.rollback(); flash(str(exc),'error')
     finally: conn.close()
     return redirect(url_for('consignment_detail',consignment_id=consignment_id))
 
@@ -9791,6 +9843,18 @@ def consignment_sale(consignment_id):
 @login_required
 def consignment_delete(consignment_id):
     conn=db(); conn.execute('DELETE FROM consignments WHERE id=?',(consignment_id,)); conn.commit(); conn.close(); return redirect(url_for('consignments'))
+
+@app.after_request
+def bam_auto_broker_branding(response):
+    # v25.21.6 - add Auto Broker to the existing BAM top banner.
+    if response.status_code==200 and 'text/html' in response.headers.get('Content-Type','') and not response.direct_passthrough:
+        try:
+            text=response.get_data(as_text=True)
+            if 'bam-auto-broker-branding' not in text and '</body>' in text.lower():
+                script="""<script id='bam-auto-broker-branding'>(function(){function brand(){Array.from(document.querySelectorAll('body *')).filter(function(e){return e.children.length===0;}).forEach(function(e){var t=(e.textContent||'').trim();if(t==='BUY • SELL • TRADE'||t==='BUY · SELL · TRADE'){e.textContent='BUY • SELL • TRADE • AUTO BROKER';}});}if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',brand);else brand();})();</script>"""
+                pos=text.lower().rfind('</body>'); text=text[:pos]+script+text[pos:]; response.set_data(text); response.headers['Content-Length']=str(len(response.get_data()))
+        except Exception: pass
+    return response
 
 @app.after_request
 def bam_consignment_nav(response):
